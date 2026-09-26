@@ -104,11 +104,13 @@ def render_stems(P, mode):
 
 
 @op()
-def analyze_structure(project: str, source: str = 'ref', stems: bool = True) -> str:
+def analyze_structure(project: str, source: str = None, stems: bool = True) -> str:
     """Macro view of a whole song: arrangement map (bands + stems, one char per bar), sections lettered by
-    similar material, repeats, loop length. source='ref' uses reference stems; 'render' uses your stem groups."""
+    similar material, repeats, loop length. source='ref' uses reference stems; 'render' uses your stem groups
+    (default: the reference if the project has one, else your render)."""
     from . import features as FE, structure as ST
     P = _load(project)
+    source = P.auto_source(source)
     g = P.source(source)[1]
     cd = os.path.join(P.root, 'cache')
     if source == 'ref':

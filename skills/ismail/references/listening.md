@@ -14,7 +14,11 @@
 | What is the voice saying? | `analyze_formants` | F1/F2 per half beat, nearest vowel |
 | Anything else | `spectrogram` (PNG) | last resort; it caught a missing low-pass that no text view showed |
 
-Tracks are analysable as `track:<name>` only after `render(stems=True)`.
+Tracks are analysable as `track:<name>` only after `render(stems=True)`. A track stem is the track after its own effects and fader, scaled by the master chain's gain, so the stems sum to the mix. That means a sidechain duck shows up in `track:<name>`; if it barely dips, the duck depth is small, not the stem pre-fx.
+
+Two readings that mislead:
+- `analyze_drums` on a full mix (`render`, `ref`) is band activity: leads and pads show up as snare and hat hits. Read your drums as `track:<drum track>`.
+- `analyze_melody` on a track with delay or vibrato splits held notes into runs of short notes. Check pitch with it and rhythm with `notes_read(view='roll')`, or read the melody before adding the delay.
 
 ## Listening Report (write one after every render you judge)
 

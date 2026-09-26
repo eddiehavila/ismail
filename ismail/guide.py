@@ -5,6 +5,9 @@ CONVENTIONS
 - Note text: '<beat> <pitch> <dur_beats> [vel]' per line or ';'-separated, beats relative to the target bar
   (0 = beat 1). Chords 'C4,E4,G4'. C4 = 60. ' #' starts a comment.
 - Audio sources for analysis: render | ref | ref:drums|bass|other|vocals | track:<name> | sound:<name> | a path.
+  Omitted source = the reference if the project has one, else your render. track:<name> needs render(stems=True)
+  and is the track after its fx and fader, scaled by the master chain's gain (tracks sum to the mix).
+- New projects get a master limiter (ceiling -0.3 dB); render reports its gain reduction. Keep it under ~6 dB.
 - Volume automation is an OFFSET (dB) on the track fader. Hz params automate in log space.
 - Every mutation snapshots the project; `undo` walks back. `batch` applies many ops atomically.
 

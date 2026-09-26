@@ -1,5 +1,6 @@
 """CLI: python -m ismail -p <project> <op> [json-args | @file.json | key=value ...]
 
+  python -m ismail guide                     read this first: workflow, conventions, which tool for which question
   python -m ismail ops                       list ops
   python -m ismail help <op>                 op signature + description
   python -m ismail -p song notes_read '{"track": "bass", "bars": [1, 4]}'
@@ -45,6 +46,10 @@ def main(argv):
             print(f"{name:<18} {(fn.__doc__ or '').strip().splitlines()[0]}")
         return 0
     if argv[0] == 'help':
+        if len(argv) < 2 or argv[1] not in OPS:
+            print(f"ERROR help needs an op name; run 'python -m ismail ops' (start with 'python -m ismail guide')",
+                  file=sys.stderr)
+            return 2
         fn = OPS[argv[1]]
         print(f"{argv[1]}{inspect.signature(fn)}\n{inspect.getdoc(fn)}")
         return 0

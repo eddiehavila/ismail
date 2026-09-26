@@ -43,7 +43,7 @@ MP3 previews need `ffmpeg` on your PATH (or set `ISMAIL_FFMPEG` to the binary).
    New-Item -ItemType Junction -Path "$env:USERPROFILE\.claude\skills\ismail" -Target "$PWD\skills\ismail"
    ```
 
-3. **Ask for music.** For example: "make a 16 bar deep house loop in F minor in songs/demo and render an mp3". The agent calls `guide` once for the conventions, then works through the tools.
+3. **Ask for music.** For example: "make a 16 bar deep house loop in F minor in songs/demo and render an mp3". The agent calls `guide` once for the conventions (it is a tool and a CLI op), then works through the tools.
 
 ## Use it with Cursor
 
@@ -62,6 +62,7 @@ Any other MCP client works the same way: run `python -m ismail.mcp_server` over 
 Every tool is also a CLI op. Arguments are `key=value` pairs (values parsed as JSON when they can be) or one JSON object.
 
 ```bash
+python -m ismail guide                                # read first: workflow and conventions
 python -m ismail ops                                  # list operations
 python -m ismail help notes_write                     # one op's arguments and docs
 python -m ismail -p songs/demo project_new bpm=124 length_bars=8

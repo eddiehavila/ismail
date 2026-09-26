@@ -45,11 +45,5 @@ for _name, _fn in OPS.items():
     mcp.tool(_wrap(_name, _fn), name=_name)
 
 
-@mcp.tool
-def guide() -> str:
-    """How to use this DAW as an agent: workflow, conventions, which tool for which question."""
-    return GUIDE
-
-
 if __name__ == '__main__':
     mcp.run(show_banner=False)

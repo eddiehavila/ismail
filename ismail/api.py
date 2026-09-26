@@ -108,7 +108,14 @@ class Project:
                               f" pick bars inside that window, or render those bars / the full song first")
         return path, A.Grid(g.bpm, g.offset - w['start_sec'], g.bpb)
 
+    def auto_source(self, src):
+        """None means: the reference if the project has one, else your latest render."""
+        if src:
+            return src
+        return 'ref' if (self.d.get('reference') or {}).get('file') else 'render'
+
     def resolve_audio(self, src):
+        src = self.auto_source(src)
         ref = self.d.get('reference') or {}
         if src == 'render':
             p = os.path.join(self.root, 'renders', 'latest.wav')
@@ -117,9 +124,14 @@ class Project:
             return p
         if src == 'ref':
             if not ref.get('file'):
-                raise OpError("project has no reference; project_set(reference='path/to.wav')")
+                raise OpError("project has no reference track. To analyse your own audio pass source='render' (the mix) "
+                              "or source='track:<name>' (after render(stems=True)); to compare against a recording, "
+                              "set one with project_set(reference='path/to.wav')")
             return ref['file']
         if src.startswith('ref:'):
+            if not ref.get('file'):
+                raise OpError(f"project has no reference track, so there is no {src!r}. For your own parts pass "
+                              f"source='track:<name>' (after render(stems=True)) or 'render' (the mix)")
             stem = src[4:]
             sd = ref.get('stems_dir')
             if not sd:
@@ -209,7 +221,8 @@ def project_new(project: str, bpm: float, length_bars: int, name: str = None, be
     os.makedirs(os.path.join(root, 'sounds'), exist_ok=True)
     d = {"version": 1, "name": name or os.path.basename(root), "bpm": bpm, "beats_per_bar": beats_per_bar,
          "sr": 44100, "offset_sec": offset_sec, "length_bars": length_bars, "tail_sec": 2.0,
-         "tracks": {}, "buses": {}, "master": {"fx": [], "volume_db": 0.0}, "sounds": {}, "reference": None}
+         "tracks": {}, "buses": {}, "master": {"fx": [{"type": "limiter", "ceiling_db": -0.3, "gain_db": 0.0}], "volume_db": 0.0},
+         "sounds": {}, "reference": None}
     if reference:
         d['reference'] = {"file": os.path.abspath(reference)}
     with open(os.path.join(root, 'project.json'), 'w', encoding='utf8') as f:
@@ -380,6 +393,13 @@ def bus_add(project: str, name: str, fx: list = None, volume_db: float = 0.0) ->
 # ------------------------------------------------------------------ instruments
 
 @op()
+def guide(project: str = None) -> str:
+    """Read this first: how to use this DAW as an agent (workflow, conventions, which tool for which question)."""
+    from .guide import GUIDE
+    return GUIDE
+
+
+@op()
 def presets_list(project: str = None) -> str:
     """List instrument presets with their type (voice presets name their voice module)."""
     return '\n'.join(f"{k:<16} {v['type']}" + (f" voice={v['voice']}" + (f" fn={v['fn']}" if v.get('fn') else '')
@@ -450,7 +470,10 @@ def instrument_help(project: str = None, type: str = 'synth') -> str:
                 'are available inline. Prefer a voice module for anything you will reuse.')
     if type in inst_mod.DRUM_DEFAULTS:
         return f"{type} params (defaults): " + json.dumps(inst_mod.DRUM_DEFAULTS[type]) + \
-            " (times in s, freqs in Hz, drive in dB)"
+            " (times in s, freqs in Hz, drive in dB). A drum synth ignores note pitch (any pitch triggers it; put" \
+            " several in a kit to map pitches). Velocity scales level gently: 127 = 0 dB, 100 = -1.4, 70 = -3.2," \
+            " 45 = -5.2, 1 = -10.5 dB, so analyze_drums reads pattern o/- hits as x or X; for audible ghost notes" \
+            " use a separate quieter kit entry or gain_db."
     raise OpError(f"unknown type {type!r}; types: synth sampler kit code " + ' '.join(inst_mod.DRUM_DEFAULTS))
 
 
@@ -562,8 +585,11 @@ def pattern_write(project: str, track: str, bar: int, lanes: dict, step: float =
     tr['notes'].sort()
     P.save()
     end_bar = bar + math.ceil(span_beats * repeat / P.bpb - 1e-9) - 1
+    odd = abs(span_beats / P.bpb - round(span_beats / P.bpb)) > 1e-6
     return f"{track}: {len(rel) * repeat} hits in bars {bar}-{end_bar} (lanes {list(lanes)})" + \
-        (f", replaced {removed} on those pitches" if removed else '') + _kit_warning(tr, rel)
+        (f", replaced {removed} on those pitches" if removed else '') + _kit_warning(tr, rel) + \
+        (f"\nWARNING pattern is {span_beats:g} beats, not a whole number of bars ({P.bpb} beats each): it spills "
+         f"into bar {end_bar} and a later write there will overwrite it" if odd else '')
 
 
 @op()
@@ -977,6 +1003,8 @@ def render(project: str, bars: list = None, tracks: list = None, stems: bool = F
     L = [f"rendered {y.shape[1] / R.sr:.1f}s" + (f" (bars {bars[0]}-{bars[1]})" if bars else '') +
          f" in {R.elapsed:.1f}s -> renders/latest.wav{' + renders/' + out + '.wav' if out and mp3 != 'only' else ''}{mp3_note}",
          f"master: {lufs:.1f} LUFS, peak {peak:.1f} dBFS" + (f", CLIPPING {clip:.2f}% of samples (lower levels or add limiter)" if clip > 0.001 else '')]
+    L.append("  per track (after its fx and fader, scaled by the master chain's gain, so tracks sum to the mix;"
+             " buses listed as bus:<name>):")
     for k, v in st.items():
         pk = 20 * np.log10(np.max(np.abs(v)) + 1e-12)
         rms = 10 * np.log10(np.mean(v ** 2) + 1e-12)
@@ -986,6 +1014,11 @@ def render(project: str, bars: list = None, tracks: list = None, stems: bool = F
     for (trk, i), gr in R.gain_reduction.items():
         if gr < -0.5:
             L.append(f"  {trk} fx {i}: max gain reduction {gr:.1f} dB")
+    mfx = [f.get('type') for f in P.d.get('master', {}).get('fx', [])]
+    if 'limiter' not in mfx:
+        L.append("  master: no limiter (fx_add target='master' fx={'type': 'limiter', 'ceiling_db': -0.3} catches peaks)")
+    elif not any(t == 'master' and gr < -0.5 for (t, _), gr in R.gain_reduction.items()):
+        L.append("  master limiter: idle (gain reduction under 0.5 dB)")
     return '\n'.join(L)
 
 
@@ -1012,28 +1045,28 @@ def _grid(P, bpm, offset_sec):
 
 
 @op()
-def analyze_grid(project: str, source: str = 'ref', bpm_hint: float = None) -> str:
+def analyze_grid(project: str, source: str = None, bpm_hint: float = None) -> str:
     """Estimate tempo and the time of bar 1 of an audio source. Use the result in project_new/project_set so bars line up."""
     P = _load(project)
     return A.beat_grid(P.resolve_audio(source), bpm_hint, P.bpb)[1]
 
 
 @op()
-def analyze_overview(project: str, source: str = 'ref') -> str:
+def analyze_overview(project: str, source: str = None) -> str:
     """Loudness, key and a section map (bars, level, dominant bands, chroma) of an audio source on the project grid."""
     P = _load(project)
     return A.overview(*P.source(source))[1]
 
 
 @op()
-def analyze_bars(project: str, source: str = 'ref', bars: list = None) -> str:
+def analyze_bars(project: str, source: str = None, bars: list = None) -> str:
     """Per-bar table (max 32 bars): level dB, 6 band energies, spectral centroid, onset count, chroma chord."""
     P = _load(project)
     return A.bar_table(*P.source(source, bars), bars)[1]
 
 
 @op()
-def analyze_chords(project: str, source: str = 'ref', bars: list = None, per_bar: int = 2) -> str:
+def analyze_chords(project: str, source: str = None, bars: list = None, per_bar: int = 2) -> str:
     """Chord + bass note per 1/per_bar of a bar (max 32 bars)."""
     P = _load(project)
     return A.chords(*P.source(source, bars), bars, per_bar)[1]
@@ -1068,13 +1101,19 @@ def analyze_pitches(project: str, source: str = 'ref:other', bars: list = None, 
 @op()
 def analyze_drums(project: str, source: str = 'ref:drums', bars: list = None, steps_per_beat: int = 4,
                   sens: float = 1.0) -> str:
-    """Drum hits as step strings per bar in 3 lanes (low/snare/hat bands), max 16 bars. Paste into pattern_write."""
+    """Drum hits as step strings per bar in 3 lanes (low/snare/hat bands), max 16 bars. Paste into pattern_write.
+    Best on an isolated drum source: 'track:<drum track>' after render(stems=True), or 'ref:drums'. On a full mix
+    ('render', 'ref') the lanes are band activity, so bass, pads and leads also register as hits."""
     P = _load(project)
-    return A.drums(*P.source(source, bars), bars, steps_per_beat, sens=sens)[1]
+    txt = A.drums(*P.source(source, bars), bars, steps_per_beat, sens=sens)[1]
+    if source in ('render', 'ref'):
+        txt = (f"NOTE {source!r} is a full mix: lanes show band activity, not just drums (other parts leak in); "
+               f"use source='track:<drum track>' for your drums\n") + txt
+    return txt
 
 
 @op()
-def analyze_envelope(project: str, source: str = 'ref', bars: list = None, steps_per_beat: int = 4,
+def analyze_envelope(project: str, source: str = None, bars: list = None, steps_per_beat: int = 4,
                      band: str = None) -> str:
     """Level per step as digits 0-9 (max 8 bars); band = sub|bass|lowmid|mid|himid|air to isolate a range.
     Reveals sidechain pumping, gating, note rhythm."""
@@ -1092,7 +1131,7 @@ def _window(g, span, t0, t1):
 
 
 @op()
-def analyze_spectrum(project: str, source: str = 'ref', span: list = None, t0: float = None, t1: float = None) -> str:
+def analyze_spectrum(project: str, source: str = None, span: list = None, t0: float = None, t1: float = None) -> str:
     """1/3-octave levels + strongest peaks (with note names) over a window."""
     P = _load(project)
     path, g = P.source(source, span=span)
@@ -1101,7 +1140,7 @@ def analyze_spectrum(project: str, source: str = 'ref', span: list = None, t0: f
 
 
 @op()
-def analyze_timbre(project: str, source: str = 'ref', span: list = None, t0: float = None, t1: float = None) -> str:
+def analyze_timbre(project: str, source: str = None, span: list = None, t0: float = None, t1: float = None) -> str:
     """Describe the sound in a window: envelope, pitch, harmonic profile -> waveform guess, brightness/filter,
     noisiness, stereo width. Use on isolated sounds (stems, sound bank, soloed tracks) for sound design."""
     P = _load(project)
@@ -1119,7 +1158,7 @@ def analyze_formants(project: str, source: str = 'ref:vocals', bars: list = None
 
 
 @op()
-def analyze_key(project: str, source: str = 'ref', bars: list = None) -> str:
+def analyze_key(project: str, source: str = None, bars: list = None) -> str:
     """Key estimate (Krumhansl) over the whole source or bars [a, b]."""
     P = _load(project)
     path, g = P.source(source, bars)
@@ -1153,7 +1192,7 @@ def align(project: str, a: str = 'render', b: str = 'ref', bars: list = None, ba
 
 
 @op()
-def spectrogram(project: str, source: str = 'ref', bars: list = None, out: str = None) -> str:
+def spectrogram(project: str, source: str = None, bars: list = None, out: str = None) -> str:
     """Write a mel spectrogram PNG with bar lines (the one non-text view). Returns the PNG path."""
     P = _load(project)
     path, g = P.source(source, bars)
