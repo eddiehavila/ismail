@@ -54,6 +54,12 @@ PRESETS = {
     "hat_open": {"type": "hat", "decay": 0.25},
     "kit_basic": {"type": "kit", "map": {"C1": {"type": "kick"}, "D1": {"type": "snare"}, "D#1": {"type": "clap"},
                                          "F#1": {"type": "hat", "decay": 0.04}, "A#1": {"type": "hat", "decay": 0.25}}},
+    # voice modules (ismail/voices, voices_list): pitched code instruments
+    "grand_piano": {"type": "code", "voice": "grand_piano", "tail": 4.0},
+    "grand_piano_halo": {"type": "code", "voice": "grand_piano", "fn": "voice_sym", "tail": 4.0},
+    "additive_piano": {"type": "code", "voice": "additive_piano", "tail": 3.0},
+    "growl": {"type": "code", "voice": "growl", "tail": 0.04},
+    "sfx": {"type": "code", "voice": "sfx", "tail": 4.5},
 }
 
 GM_DRUMS = {"kick": "C1", "snare": "D1", "clap": "D#1", "hat": "F#1", "open_hat": "A#1", "tom_low": "A1",

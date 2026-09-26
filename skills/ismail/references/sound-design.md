@@ -2,6 +2,10 @@
 
 `instrument_help(type)` and `fx_help()` list every parameter with defaults. Start from a preset (`presets_list`) and change three or four things; a full patch from scratch is rarely better.
 
+## Voices: instruments written as code
+
+`voices_list` first: a built-in voice (grand_piano, growl, sfx ...) may already be the sound you need, and `voice_help(name)` shows what its velocity does. When you engineer an instrument as code that the song will reuse, write it as a voice module in `<project>/voices/<name>.py` (a `voice(freq, t, vel, gate, sr)` function plus an `INFO` dict), not as a `code` string in the track: the project stays portable, edits re-render automatically, and the voice can later move into the library. Never paste absolute paths or `sys.path` hacks into a `code` instrument.
+
 ## Gain staging
 
 One synth voice peaks near -9 dBFS and one drum hit near -6 dBFS at full velocity, so faders at 0 dB are a sane start. Chords of 4 notes with unison add up: pads usually sit at -8 to -12 dB. Check `render` output: every track peak under 0 dBFS, master limiter gain reduction under ~6 dB. A limiter pulling 10+ dB means your faders are too hot; turn tracks down, not the limiter.

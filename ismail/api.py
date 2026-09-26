@@ -179,7 +179,22 @@ def _resolve_instrument(spec, P=None):
         inst_mod.normalize(spec)
     except inst_mod.InstrumentError as e:
         raise OpError(f"instrument invalid: {e}")
+    _check_voices(spec, P)
     return spec
+
+
+def _check_voices(spec, P):
+    """Fail at edit time, not render time, when a code instrument names a voice that does not exist."""
+    from . import voices
+    if not isinstance(spec, dict):
+        return
+    if spec.get('type') == 'code' and spec.get('voice'):
+        try:
+            voices.function(spec['voice'], spec.get('fn', 'voice'), P.root if P else None)
+        except voices.VoiceError as e:
+            raise OpError(f"instrument invalid: {e}")
+    for v in (spec.get('map') or {}).values():
+        _check_voices(v, P)
 
 
 # ------------------------------------------------------------------ project ops
@@ -366,8 +381,44 @@ def bus_add(project: str, name: str, fx: list = None, volume_db: float = 0.0) ->
 
 @op()
 def presets_list(project: str = None) -> str:
-    """List instrument presets with their type."""
-    return '\n'.join(f"{k:<16} {v['type']}" for k, v in PRESETS.items())
+    """List instrument presets with their type (voice presets name their voice module)."""
+    return '\n'.join(f"{k:<16} {v['type']}" + (f" voice={v['voice']}" + (f" fn={v['fn']}" if v.get('fn') else '')
+                                                 if v.get('voice') else '') for k, v in PRESETS.items())
+
+
+def _voice_root(project):
+    if project and os.path.isfile(os.path.join(project, 'project.json')):
+        return os.path.abspath(project)
+    return None
+
+
+@op()
+def voices_list(project: str = None) -> str:
+    """List voice modules (code instruments kept as Python files): the song's own (<project>/voices/), those on
+    $ISMAIL_VOICES, and the built-ins. Use one as {"type": "code", "voice": "<name>"} or its preset; voice_help(name)
+    shows its velocity mapping, functions and parameters."""
+    from . import voices
+    rows = voices.available(_voice_root(project))
+    if not rows:
+        return '(no voices)'
+    return '\n'.join(f"{n:<16} {o:<9} {s}" for n, o, s in rows) + \
+        "\nuse: instrument={'type': 'code', 'voice': '<name>', 'fn': 'voice', 'params': {}, 'tail': <seconds>}"
+
+
+@op()
+def voice_help(project: str = None, name: str = 'grand_piano') -> str:
+    """Everything about one voice module: where it comes from, what velocity does, its functions and parameters."""
+    from . import voices
+    try:
+        origin, path, meta, doc = voices.info(name, _voice_root(project))
+    except voices.VoiceError as e:
+        raise OpError(str(e))
+    L = [f"{name} ({origin}: {path})", meta.pop('summary', '')]
+    for k, v in meta.items():
+        L.append(f"{k}: " + (json.dumps(v, indent=1) if isinstance(v, dict) else str(v)))
+    if doc and doc.split('\n')[0] != L[1]:
+        L.append(doc)
+    return '\n'.join(L)
 
 
 @op()
@@ -392,8 +443,11 @@ def instrument_help(project: str = None, type: str = 'synth') -> str:
         return 'kit: {"type":"kit","map":{"C1":{"type":"kick",...},"D1":{"type":"sampler","sound":"snare1","one_shot":true}}}' \
                " - maps pitches to any instrument. GM-ish names: kick C1, snare D1, clap D#1, hat F#1, open hat A#1."
     if type == 'code':
-        return 'code: {"type":"code","code":"def voice(freq, t, vel, gate, sr):\\n    return np.sin(2*np.pi*freq*t)*np.exp(-t*4)",' \
-               ' "tail":0.3} - t is a time array (s) covering gate+tail, vel 0..1, return mono or (2,n). np and dsp available.'
+        return ('code: {"type":"code","voice":"<name>","fn":"voice","params":{},"tail":1.0} plays a voice module '
+                "(voices_list, voice_help; a song's own voices go in <project>/voices/<name>.py). Inline form: "
+                '{"type":"code","code":"def voice(freq, t, vel, gate, sr):\\n    return np.sin(2*np.pi*freq*t)*np.exp(-t*4)",'
+                ' "tail":0.3}. t is a time array (s) covering gate+tail, vel 0..1; return mono or (2,n); np and dsp '
+                'are available inline. Prefer a voice module for anything you will reuse.')
     if type in inst_mod.DRUM_DEFAULTS:
         return f"{type} params (defaults): " + json.dumps(inst_mod.DRUM_DEFAULTS[type]) + \
             " (times in s, freqs in Hz, drive in dB)"

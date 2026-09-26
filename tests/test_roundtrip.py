@@ -149,3 +149,37 @@ def test_render_mp3(proj):
     rd = os.path.join(proj, 'renders')
     assert 'preview.mp3' in txt and os.path.getsize(os.path.join(rd, 'preview.mp3')) > 1000
     assert not os.path.exists(os.path.join(rd, 'preview.wav'))
+
+
+@pytest.mark.parametrize('name, vel', [('grand_piano', 90), ('additive_piano', 90), ('growl', 21), ('sfx', 10)])
+def test_builtin_voices_render(name, vel):
+    from ismail import instruments, voices
+    assert name in [n for n, _, _ in voices.available()]
+    inst = instruments.normalize({"type": "code", "voice": name, "tail": 0.5})
+    y = instruments.render_instrument(inst, [(0.0, 45, 0.5, vel)], 48000)
+    assert y.shape == (2, 48000) and np.max(np.abs(y)) > 1e-3 and np.all(np.isfinite(y))
+
+
+def test_song_voice_overrides_builtin_and_invalidates_cache():
+    d = tempfile.mkdtemp(prefix='ismail_test_')
+    p = os.path.join(d, 'p')
+    try:
+        api.project_new(p, bpm=120, length_bars=1)
+        os.makedirs(os.path.join(p, 'voices'))
+        src = os.path.join(p, 'voices', 'sfx.py')
+        with open(src, 'w') as f:
+            f.write("import numpy as np\nINFO = {'summary': 'song sine'}\n"
+                    "def voice(freq, t, vel, gate, sr, level=0.5):\n    return level * np.sin(2 * np.pi * freq * t)\n")
+        assert 'song sine' in api.voices_list(p)
+        api.track_add(p, 'fx', instrument={"type": "code", "voice": "sfx", "params": {"level": 0.2}})
+        api.notes_write(p, 'fx', 1, "0 A4 1")
+        api.render(p, stems=True)
+        a = api.analyze_timbre(p, source='track:fx', span=[1, 1.25])
+        with open(src, 'a') as f:
+            f.write("# edited\n")
+        api.track_set(p, 'fx', volume_db=0.0)
+        assert 'cached' not in api.render(p, stems=True).split('fx')[1].split('\n')[0]
+        with pytest.raises(api.OpError):
+            api.track_add(p, 'bad', instrument={"type": "code", "voice": "nope"})
+    finally:
+        shutil.rmtree(d, ignore_errors=True)

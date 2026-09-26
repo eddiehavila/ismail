@@ -7,7 +7,7 @@ import time
 import numpy as np
 import soundfile as sf
 
-from . import dsp, fx as fxmod, instruments
+from . import dsp, fx as fxmod, instruments, voices
 
 LOG_PARAMS = ('cutoff', 'freq', '_hz')
 PRE_ROLL_BEATS = 8  # rendered before a partial window so tails/sidechains settle
@@ -194,7 +194,8 @@ class Renderer:
     def cache_key(self, name, tr, dep_keys):
         sounds = sorted(_sounds_used(tr))
         blob = json.dumps([tr, self.bpm, self.sr, self.offset, self.t0, self.n, self.r_b0, self.win_b1,
-                           [(s, self.sound_mtime(s)) for s in sounds], dep_keys, _CODE_VERSION],
+                           [(s, self.sound_mtime(s)) for s in sounds], dep_keys, _CODE_VERSION,
+                           voices.fingerprint(tr.get('instrument'), self.root)],
                           sort_keys=True, default=str)
         return hashlib.sha1(blob.encode()).hexdigest()[:20]
 
@@ -220,7 +221,7 @@ class Renderer:
         if inst is not None:
             notes = self.track_notes_sec(tr)
             if notes:
-                y += instruments.render_instrument(inst, notes, n, inst_auto, self.bpm, self.sr)
+                y += instruments.render_instrument(inst, notes, n, inst_auto, self.bpm, self.sr, self.root)
         for clip in tr.get('audio', []):
             snd = self.load_sound(clip['sound'])
             s0 = int(round(self.beat_to_win_sec(clip['at_beat']) * self.sr))

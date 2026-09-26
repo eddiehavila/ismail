@@ -82,8 +82,32 @@ Keep your projects under `songs/` (git-ignored) or anywhere else; a project is j
 - **Notes**: `'<beat> <pitch> <dur> [vel]'`, one per line or `;`-separated. Drum and step patterns: `pattern_write` with strings like `X...x...X...x...` (X 127, x 100, o 70, - 45, `_` ties).
 - **Instruments**: `synth` (saw, square, pulse, triangle, sine, additive, wavetable and noise oscillators, unison, FM, drive, SVF and ladder filters, envelopes, LFOs, mono glide), `sampler`, drum synths (`kick`, `snare`, `hat`, `clap`, `tom`, `noise_hit`), `kit` (pitch to instrument map) and `code` (a Python voice function for anything else). `presets_list` has starting points.
 - **Effects**: eq, filter, distortion, bitcrush, compressor (with sidechain), duck, gate, delay, reverb, chorus, flanger, phaser, tremolo/autopan, width, limiter, vocoder, formant. Tracks, buses and the master fader can be automated.
+- **Voices**: engineered instruments kept as Python modules, so a project stores a name instead of code (see below).
 - **Sound bank**: sounds made from any instrument and effect chain (`sound_make`), speech (`sound_speak`), imported files, and averaged events cut from a recording (`sound_extract`). Bank sounds work as sampler sources, wavetables, vocoder modulators and audio clips.
 - **Undo and batch**: every edit snapshots the project (`undo`); `batch` applies a list of ops atomically.
+
+## Voices: instruments as code
+
+Some instruments are easier to write than to patch: a measured grand piano, a dubstep bass whose note velocity picks the articulation, a set of sound effects. These live as voice modules, Python files that define `voice(freq, t, vel, gate, sr)` and return a mono or stereo array.
+
+| voice | what it is |
+|---|---|
+| `grand_piano` | grand piano calibrated from measured notes (partials, decay times, inharmonicity, stereo image, hammer knock, dampers); `fn: voice_sym` is an undamped sympathetic string |
+| `additive_piano` | a lighter additive piano with no data file |
+| `growl` | dubstep bass engine: velocity 1x yoi, 2x wub, 3x screech, 4x metal, 5x dive, 6x zap, 7x grind, 8x chop, 9x talk, 11x robot, 12x howl; the LFO rates follow the song tempo |
+| `sfx` | one-shots by velocity: gunshot, reload, shell casing, bone crunch, punch, rip, gong |
+
+Use one with `instrument={"type": "code", "voice": "grand_piano", "tail": 4.0}` or `"preset:grand_piano"`. `voices_list` shows what is available and `voice_help(name)` explains a voice's velocity mapping, functions and parameters.
+
+Voices are looked up in this order:
+
+1. `<project>/voices/<name>.py`: the song's own. Same name as a built-in overrides it; a song voice can also extend one (`from ismail.voices.growl import *`, then add words or articulations).
+2. Each folder in `$ISMAIL_VOICES` (a path list): your personal library, outside any repo.
+3. `ismail/voices/`: the built-ins.
+
+A voice function may take extra keyword arguments: `bpm` is passed automatically, and the track's `"params"` dict is passed as keywords (`{"type": "code", "voice": "mine", "params": {"brightness": 0.3}}`). A module-level `INFO` dict documents it for `voice_help`. Data files sit next to the module (`grand_piano.json`) and are found through `__file__`. Editing a voice file invalidates the render cache for the tracks that use it.
+
+To add a voice to the library, move it from a song's `voices/` folder into `ismail/voices/`, give it an `INFO` dict, and add a line to the test that renders every built-in.
 
 ## Hearing: audio as text
 
@@ -147,6 +171,7 @@ ismail/
   perceptual.py  CLAP similarity
   sounddesign.py one-shot rendering, sound distance, parameter fitting
   trackfit.py    in-context fitting against a reference stem
+  voices/        voice modules: grand_piano, additive_piano, growl, sfx
   api.py, api_cmp.py, api_sound.py   the operations (CLI and MCP tools)
   mcp_server.py, guide.py
 skills/ismail/   the agent skill (SKILL.md + references)

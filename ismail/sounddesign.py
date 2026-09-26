@@ -29,10 +29,10 @@ class _Ctx:
         pass
 
 
-def render_oneshot(inst, notes_sec, length_s, fx=None, bpm=120.0, sr=SR):
-    """notes_sec: [(start_s, midi, dur_s, vel)] -> stereo (2, n)."""
+def render_oneshot(inst, notes_sec, length_s, fx=None, bpm=120.0, sr=SR, root=None):
+    """notes_sec: [(start_s, midi, dur_s, vel)] -> stereo (2, n). root: project dir (for song voices)."""
     n = int(length_s * sr)
-    y = instruments.render_instrument(instruments.normalize(inst), notes_sec, n, None, bpm, sr)
+    y = instruments.render_instrument(instruments.normalize(inst), notes_sec, n, None, bpm, sr, root)
     ctx = _Ctx(bpm, sr)
     for i, f in enumerate(fx or []):
         y = fxmod.apply_fx(y, fxmod.normalize(f), ctx, i)
@@ -141,7 +141,7 @@ def _set(d, path, v):
 
 
 def fit(inst, params, target_desc, notes_sec, length_s, fx=None, bpm=120.0, iters=80, seed=0, log_keys=None,
-        progress=None, fmin=25.0, fmax=16000.0):
+        progress=None, fmin=25.0, fmax=16000.0, root=None):
     """(1+lambda) evolution strategy over params {path: [lo, hi]} minimising distance to target_desc.
     Paths address the instrument ('filter.cutoff') or the fx chain ('fx.0.depth_db'). Parameters whose range spans
     > 8x (and lo > 0) are searched in log space. Returns (best_state {'inst', 'fx'}, best_d, start_d, values)."""
@@ -169,7 +169,7 @@ def fit(inst, params, target_desc, notes_sec, length_s, fx=None, bpm=120.0, iter
             orig = _get(full, k)
             _set(cand, k, int(round(x)) if isinstance(orig, (bool, int)) and not isinstance(orig, bool) else float(x))
         try:
-            y = render_oneshot(cand['inst'], notes_sec, length_s, cand['fx'], bpm)
+            y = render_oneshot(cand['inst'], notes_sec, length_s, cand['fx'], bpm, root=root)
         except Exception:
             return 1e9, cand
         if np.max(np.abs(y)) < 1e-6:

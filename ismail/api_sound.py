@@ -81,8 +81,9 @@ def instrument_fit(project: str, target: str, instrument, params: dict, notes: s
         raise OpError(str(e))
     notes_sec = [(s * spb, p, d * spb, v) for s, p, d, v in rel]
     L = length_sec or max(tgt.shape[1] / SD.SR, max(s + d for s, _, d, _ in notes_sec) + 0.3)
-    best, d1, d0, vals = SD.fit(full, params, tdesc, notes_sec, L, fx, P.d['bpm'], iters, seed, fmin=fmin, fmax=fmax)
-    y = SD.render_oneshot(best['inst'], notes_sec, L, best['fx'], P.d['bpm'])
+    best, d1, d0, vals = SD.fit(full, params, tdesc, notes_sec, L, fx, P.d['bpm'], iters, seed, fmin=fmin, fmax=fmax,
+                                root=P.root)
+    y = SD.render_oneshot(best['inst'], notes_sec, L, best['fx'], P.d['bpm'], root=P.root)
     _, cmp_txt = SD.compare_text(SD.descriptor(y), tdesc, 'fitted', target.split(':')[-1], fmin, fmax)
     out = [f"fit: distance {d0:.2f} -> {d1:.2f} after {iters} renders",
            "fitted params: " + json.dumps({k: round(v, 4) for k, v in vals.items()})]

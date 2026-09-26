@@ -108,9 +108,10 @@ def normalize(inst):
         return {"type": "kit", "map": {str(pitch_to_midi(k)): normalize(v) for k, v in inst['map'].items()},
                 "gain_db": inst.get('gain_db', 0.0), "pan": inst.get('pan', 0.0)}
     if t == 'code':
-        if 'code' not in inst:
-            raise InstrumentError("code instrument needs 'code' defining voice(freq, t, vel, gate, sr) -> array")
-        return dict({"tail": 0.3, "gain_db": 0.0, "pan": 0.0}, **inst)
+        if not inst.get('code') and not inst.get('voice'):
+            raise InstrumentError("code instrument needs 'voice': '<name>' (a voice module, see voices_list) or 'code' "
+                                  "defining voice(freq, t, vel, gate, sr) -> array")
+        return dict({"tail": 0.3, "gain_db": 0.0, "pan": 0.0, "fn": "voice", "params": {}}, **inst)
     raise InstrumentError(f"unknown instrument type {t!r}; use one of {', '.join(INSTRUMENT_TYPES)}")
 
 
@@ -454,18 +455,30 @@ def render_sampler(p, notes, total_n, auto, sr):
 
 # ------------------------------------------------------------------ code instrument
 
-def render_code(p, notes, total_n, sr):
-    ns = {"np": np, "dsp": dsp, "sr": sr}
-    exec(p['code'], ns)
-    if 'voice' not in ns:
-        raise InstrumentError("code instrument must define voice(freq, t, vel, gate, sr)")
+def render_code(p, notes, total_n, sr, bpm=120.0, root=None):
+    from . import voices
+    if p.get('voice'):
+        try:
+            fn = voices.function(p['voice'], p.get('fn', 'voice'), root)
+        except voices.VoiceError as e:
+            raise InstrumentError(str(e))
+    else:
+        ns = {"np": np, "dsp": dsp, "sr": sr}
+        exec(p['code'], ns)
+        fn = ns.get(p.get('fn') or 'voice')
+        if fn is None:
+            raise InstrumentError("code instrument must define voice(freq, t, vel, gate, sr)")
     out = np.zeros((2, total_n))
     for st, m, d, v in notes:
         s0 = int(round(st * sr))
         n = min(int((d + p['tail']) * sr), total_n - s0)
         if n <= 0:
             continue
-        y = np.asarray(ns['voice'](midi_to_hz(m), np.arange(n) / sr, v / 127, d, sr), dtype=np.float64)
+        try:
+            y = voices.call(fn, midi_to_hz(m), np.arange(n) / sr, v / 127, d, sr, bpm, p.get('params'))
+        except voices.VoiceError as e:
+            raise InstrumentError(str(e))
+        y = np.asarray(y, dtype=np.float64)
         if y.ndim == 1:
             y = np.stack([y, y])
         out[:, s0:s0 + y.shape[1]] += y[:, :n]
@@ -474,8 +487,9 @@ def render_code(p, notes, total_n, sr):
 
 # ------------------------------------------------------------------ entry point
 
-def render_instrument(inst, notes, total_n, auto=None, bpm=120.0, sr=SR):
-    """inst: normalized instrument; notes: [(start_sec, midi, dur_sec, vel)]; -> (2, total_n)."""
+def render_instrument(inst, notes, total_n, auto=None, bpm=120.0, sr=SR, root=None):
+    """inst: normalized instrument; notes: [(start_sec, midi, dur_sec, vel)]; -> (2, total_n). root = project
+    directory (song voices in <root>/voices/)."""
     auto = auto or {}
     t = inst['type']
     if t == 'synth':
@@ -483,7 +497,7 @@ def render_instrument(inst, notes, total_n, auto=None, bpm=120.0, sr=SR):
     elif t == 'sampler':
         out = render_sampler(inst, notes, total_n, auto, sr)
     elif t == 'code':
-        out = render_code(inst, notes, total_n, sr)
+        out = render_code(inst, notes, total_n, sr, bpm, root)
     elif t == 'kit':
         out = np.zeros((2, total_n))
         by = {}
@@ -492,7 +506,7 @@ def render_instrument(inst, notes, total_n, auto=None, bpm=120.0, sr=SR):
         for key, nts in by.items():
             if key not in inst['map']:
                 continue  # unmapped pitches are silent; notes_read flags them
-            out += render_instrument(inst['map'][key], nts, total_n, None, bpm, sr)
+            out += render_instrument(inst['map'][key], nts, total_n, None, bpm, sr, root)
     elif t in DRUM_DEFAULTS:
         out = np.zeros((2, total_n))
         for st, m, d, v in notes:
