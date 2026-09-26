@@ -1,0 +1,17 @@
+# python
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+*.egg-info/
+
+# model weights and scratch
+hf_cache/
+work/
+renders/
+
+# reference audio and anything derived from it (analysis only, never redistributed)
+ref/
+
+# songs and projects (local work, not part of the tool)
+songs/

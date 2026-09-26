@@ -1,0 +1,1171 @@
+"""Agent-facing operations. Every op takes the project directory first and returns text.
+
+Conventions (repeated in every tool description so an agent never has to guess):
+  * bars are 1-indexed; bar ranges [a, b] are inclusive.
+  * note times inside a write are beats (quarter notes) relative to the target bar's beat 1, e.g. "0 E2 0.5 100".
+  * pitches are names (C4 = 60, F#2, Bb3) or MIDI numbers.
+  * audio sources for analysis: 'render' (last render), 'ref' (reference), 'ref:drums|bass|other|vocals' (reference
+    stems), 'track:<name>' (last rendered stem of a track), 'sound:<name>' (sound bank), or a file path.
+"""
+import copy
+import glob
+import json
+import math
+import os
+import shutil
+import time
+
+import numpy as np
+
+from . import analysis as A
+from . import fx as fxmod
+from . import instruments as inst_mod
+from .notation import (parse_notes, parse_steps, pitch_to_midi, midi_to_name, format_notes, piano_roll, fmt_num,
+                       NotationError)
+from .presets import PRESETS
+
+OPS = {}
+MUTATING = set()
+WINDOWS_FILE = 'windows.json'  # renders/: {file relative to renders/: window} for files written by a bars=[a, b] render
+
+
+class OpError(ValueError):
+    """Raised with a message that says what to do next."""
+
+
+def op(mutates=False):
+    def deco(fn):
+        OPS[fn.__name__] = fn
+        if mutates:
+            MUTATING.add(fn.__name__)
+        return fn
+    return deco
+
+
+# ------------------------------------------------------------------ project state
+
+class Project:
+    def __init__(self, root):
+        self.root = os.path.abspath(root)
+        self.file = os.path.join(self.root, 'project.json')
+        if not os.path.exists(self.file):
+            raise OpError(f"no project at {self.root}; create one with project_new(project='{root}', bpm=..., length_bars=...)")
+        with open(self.file, encoding='utf8') as f:
+            self.d = json.load(f)
+
+    @property
+    def bpb(self):
+        return self.d.get('beats_per_bar', 4)
+
+    def bar_to_beat(self, bar):
+        return (bar - 1) * self.bpb
+
+    def track(self, name):
+        if name not in self.d['tracks']:
+            raise OpError(f"no track {name!r}; tracks: {list(self.d['tracks']) or 'none'} (track_add to create)")
+        return self.d['tracks'][name]
+
+    def save(self, snapshot=True):
+        if snapshot and os.path.exists(self.file):
+            hd = os.path.join(self.root, 'history')
+            os.makedirs(hd, exist_ok=True)
+            shutil.copy(self.file, os.path.join(hd, f"{time.time():.3f}.json"))
+            old = sorted(glob.glob(os.path.join(hd, '*.json')))
+            for f in old[:-100]:
+                os.remove(f)
+        tmp = self.file + '.tmp'
+        with open(tmp, 'w', encoding='utf8') as f:
+            json.dump(self.d, f, indent=1)
+        os.replace(tmp, self.file)
+
+    def grid(self, bpm=None, offset_sec=None):
+        return A.Grid(bpm or self.d['bpm'], self.d.get('offset_sec', 0.0) if offset_sec is None else offset_sec, self.bpb)
+
+    def render_window(self, path):
+        """None if `path` is not a windowed render, else {'bars': [a, b], 'start_sec': song time of the file's t=0}."""
+        rd = os.path.join(self.root, 'renders')
+        try:
+            rel = os.path.relpath(os.path.abspath(path), rd).replace(os.sep, '/')
+            with open(os.path.join(rd, WINDOWS_FILE), encoding='utf8') as f:
+                return json.load(f).get(rel)
+        except (OSError, ValueError):
+            return None
+
+    def source(self, src, bars=None, span=None):
+        """(path, grid) for an analysis source. A windowed render gets a grid shifted by where its file starts, so
+        song bar numbers land on the right samples; bars [a, b] (inclusive) or span [a, b) (fractional) outside the
+        window raise."""
+        path = self.resolve_audio(src)
+        g = self.grid()
+        w = self.render_window(path)
+        if not w:
+            return path, g
+        w0, w1 = w['bars']
+        asked = ([(bars[0], bars[1] + 1, f"bars {list(bars)}")] if bars else []) +                 ([(span[0], span[1], f"span {list(span)}")] if span else [])
+        for lo, hi, shown in asked:
+            if lo < w0 or hi > w1 + 1:
+                raise OpError(f"{shown} is outside {src!r}, which holds only bars {w0}-{w1} (render(bars=[{w0}, {w1}]));"
+                              f" pick bars inside that window, or render those bars / the full song first")
+        return path, A.Grid(g.bpm, g.offset - w['start_sec'], g.bpb)
+
+    def resolve_audio(self, src):
+        ref = self.d.get('reference') or {}
+        if src == 'render':
+            p = os.path.join(self.root, 'renders', 'latest.wav')
+            if not os.path.exists(p):
+                raise OpError("nothing rendered yet; call render first")
+            return p
+        if src == 'ref':
+            if not ref.get('file'):
+                raise OpError("project has no reference; project_set(reference='path/to.wav')")
+            return ref['file']
+        if src.startswith('ref:'):
+            stem = src[4:]
+            sd = ref.get('stems_dir')
+            if not sd:
+                raise OpError("reference has no stems yet; run separate(source='ref') first")
+            p = os.path.join(sd, stem + '.wav')
+            if not os.path.exists(p):
+                raise OpError(f"no reference stem {stem!r}; have: {[os.path.basename(x)[:-4] for x in glob.glob(sd + '/*.wav')]}")
+            return p
+        if src.startswith('track:'):
+            p = os.path.join(self.root, 'renders', 'stems', src[6:] + '.wav')
+            if not os.path.exists(p):
+                raise OpError(f"no rendered stem for track {src[6:]!r}; render(stems=True) first")
+            return p
+        if src.startswith('sound:'):
+            meta = self.d.get('sounds', {}).get(src[6:])
+            if not meta:
+                raise OpError(f"no sound {src[6:]!r}; sound_list to see the bank")
+            return os.path.join(self.root, meta['file'])
+        p = src if os.path.isabs(src) else os.path.join(self.root, src)
+        if not os.path.exists(p):
+            raise OpError(f"audio source {src!r} not found. Use render | ref | ref:<stem> | track:<name> | sound:<name> | a path")
+        return p
+
+
+def _load(project):
+    return Project(project)
+
+
+def _span_bars(notes_rel, bpb):
+    end = max((s + d for s, _, d, _ in notes_rel), default=bpb)
+    return max(1, math.ceil(end / bpb - 1e-9))
+
+
+def _clear(tr, b0, b1):
+    """Remove notes starting in [b0, b1) beats."""
+    before = len(tr['notes'])
+    tr['notes'] = [n for n in tr['notes'] if not (b0 <= n[0] < b1)]
+    return before - len(tr['notes'])
+
+
+def _resolve_instrument(spec, P=None):
+    """dict | 'preset:<name>' | 'track:<name>' (a copy of that track's instrument; needs the project)."""
+    if isinstance(spec, str) and spec.startswith('track:'):
+        if P is None:
+            raise OpError("'track:<name>' instruments need a project context")
+        inst = P.track(spec[6:]).get('instrument')
+        if not inst:
+            raise OpError(f"track {spec[6:]!r} has no instrument")
+        return copy.deepcopy(inst)
+    if isinstance(spec, str):
+        if spec.startswith('preset:'):
+            spec = spec[7:]
+        if spec not in PRESETS:
+            raise OpError(f"unknown preset {spec!r}; presets: {', '.join(PRESETS)}")
+        return copy.deepcopy(PRESETS[spec])
+    try:
+        inst_mod.normalize(spec)
+    except inst_mod.InstrumentError as e:
+        raise OpError(f"instrument invalid: {e}")
+    return spec
+
+
+# ------------------------------------------------------------------ project ops
+
+@op()
+def project_new(project: str, bpm: float, length_bars: int, name: str = None, beats_per_bar: int = 4,
+                offset_sec: float = 0.0, reference: str = None) -> str:
+    """Create a new project directory. offset_sec = time of bar 1 (match a reference's grid with analyze_grid)."""
+    root = os.path.abspath(project)
+    if os.path.exists(os.path.join(root, 'project.json')):
+        raise OpError(f"project already exists at {root}; use project_info / project_set")
+    os.makedirs(os.path.join(root, 'sounds'), exist_ok=True)
+    d = {"version": 1, "name": name or os.path.basename(root), "bpm": bpm, "beats_per_bar": beats_per_bar,
+         "sr": 44100, "offset_sec": offset_sec, "length_bars": length_bars, "tail_sec": 2.0,
+         "tracks": {}, "buses": {}, "master": {"fx": [], "volume_db": 0.0}, "sounds": {}, "reference": None}
+    if reference:
+        d['reference'] = {"file": os.path.abspath(reference)}
+    with open(os.path.join(root, 'project.json'), 'w', encoding='utf8') as f:
+        json.dump(d, f, indent=1)
+    return f"created project {d['name']} at {root}: {bpm} BPM, {length_bars} bars, bar 1 at {offset_sec}s"
+
+
+@op()
+def project_info(project: str) -> str:
+    """Summary of the whole project: grid, tracks (instrument, note count, bars used, fx), buses, master, sounds."""
+    P = _load(project)
+    d = P.d
+    L = [f"{d['name']}: {d['bpm']} BPM, {d['beats_per_bar']}/4, {d['length_bars']} bars, bar 1 at {d['offset_sec']}s, "
+         f"song {(d['length_bars'] * d['beats_per_bar'] * 60 / d['bpm'] + d['offset_sec']):.1f}s"]
+    if d.get('reference'):
+        L.append(f"reference: {d['reference'].get('file')}" + (f" (stems: {d['reference']['stems_dir']})" if d['reference'].get('stems_dir') else ''))
+    L.append(f"tracks ({len(d['tracks'])}):")
+    for name, tr in d['tracks'].items():
+        ns = tr.get('notes', [])
+        inst = tr.get('instrument') or {}
+        bars_used = sorted({int(n[0] // P.bpb) + 1 for n in ns})
+        flags = ' '.join(f for f, on in (('MUTE', tr.get('mute')), ('SOLO', tr.get('solo'))) if on)
+        fxs = ', '.join(f"{i}:{f['type']}" for i, f in enumerate(tr.get('fx', [])))
+        L.append(f"  {name:<14} {inst.get('type', 'audio'):<8} {len(ns):>4} notes bars {_ranges(bars_used) or '-'}"
+                 f" | vol {tr.get('volume_db', 0):+.1f} pan {tr.get('pan', 0):+.2f} -> {tr.get('output', 'master')}"
+                 + (f" sends {tr['sends']}" if tr.get('sends') else '') + (f" | fx [{fxs}]" if fxs else '')
+                 + (f" | auto {list(tr['automation'])}" if tr.get('automation') else '')
+                 + (f" | {len(tr['audio'])} audio clips" if tr.get('audio') else '') + (f" {flags}" if flags else ''))
+    for b, bus in d.get('buses', {}).items():
+        L.append(f"bus {b}: fx [{', '.join(f['type'] for f in bus.get('fx', []))}] vol {bus.get('volume_db', 0):+.1f}")
+    L.append(f"master: fx [{', '.join(f['type'] for f in d['master'].get('fx', []))}] vol {d['master'].get('volume_db', 0):+.1f}")
+    if d.get('sounds'):
+        L.append(f"sounds: {', '.join(d['sounds'])}")
+    return '\n'.join(L)
+
+
+def _ranges(xs):
+    if not xs:
+        return ''
+    out = []
+    a = b = xs[0]
+    for x in xs[1:]:
+        if x == b + 1:
+            b = x
+        else:
+            out.append(f"{a}-{b}" if a != b else str(a))
+            a = b = x
+    out.append(f"{a}-{b}" if a != b else str(a))
+    return ','.join(out)
+
+
+@op(mutates=True)
+def project_set(project: str, bpm: float = None, length_bars: int = None, offset_sec: float = None,
+                reference: str = None, tail_sec: float = None, name: str = None, reference_stems: str = None) -> str:
+    """Change project settings. Changing bpm keeps notes on the same beats (the song gets faster/slower).
+    reference_stems = a folder of already-separated stems (drums.wav, bass.wav, ...) for the reference."""
+    P = _load(project)
+    ch = []
+    for k, v in (('bpm', bpm), ('length_bars', length_bars), ('offset_sec', offset_sec), ('tail_sec', tail_sec),
+                 ('name', name)):
+        if v is not None:
+            P.d[k] = v
+            ch.append(f"{k}={v}")
+    if reference is not None:
+        p = os.path.abspath(reference)
+        if not os.path.exists(p):
+            raise OpError(f"reference file {reference!r} not found")
+        P.d['reference'] = dict(P.d.get('reference') or {}, file=p)
+        ch.append(f"reference={p}")
+    if reference_stems is not None:
+        if not P.d.get('reference'):
+            raise OpError("set reference first")
+        P.d['reference']['stems_dir'] = os.path.abspath(reference_stems)
+        ch.append(f"reference_stems={reference_stems}")
+    P.save()
+    return "set " + (', '.join(ch) if ch else 'nothing')
+
+
+@op(mutates=True)
+def undo(project: str, steps: int = 1) -> str:
+    """Restore the project to its state `steps` mutations ago (every mutating op snapshots first)."""
+    P = _load(project)
+    hd = os.path.join(P.root, 'history')
+    snaps = sorted(glob.glob(os.path.join(hd, '*.json')))
+    if len(snaps) < steps:
+        raise OpError(f"only {len(snaps)} snapshots available")
+    target = snaps[-steps]
+    shutil.copy(target, P.file)
+    for s in snaps[-steps:]:
+        os.remove(s)
+    return f"restored snapshot from {time.ctime(float(os.path.basename(target)[:-5]))}"
+
+
+# ------------------------------------------------------------------ tracks
+
+@op(mutates=True)
+def track_add(project: str, name: str, instrument=None, volume_db: float = 0.0, pan: float = 0.0,
+              output: str = 'master') -> str:
+    """Add a track. instrument: a dict (see instrument_help) or 'preset:<name>' (see presets_list). None = audio-only track."""
+    P = _load(project)
+    if name in P.d['tracks']:
+        raise OpError(f"track {name!r} exists; use track_set / instrument_set")
+    inst = _resolve_instrument(instrument, P) if instrument is not None else None
+    P.d['tracks'][name] = {"instrument": inst, "notes": [], "fx": [], "volume_db": volume_db, "pan": pan,
+                           "mute": False, "solo": False, "output": output, "sends": {}, "automation": {}, "audio": []}
+    P.save()
+    return f"added track {name!r} ({inst['type'] if inst else 'audio'})"
+
+
+@op(mutates=True)
+def track_set(project: str, track: str, volume_db: float = None, pan: float = None, mute: bool = None,
+              solo: bool = None, output: str = None, sends: dict = None, rename: str = None) -> str:
+    """Mixer settings for a track. sends = {bus: level_db} (replaces all sends; {} removes)."""
+    P = _load(project)
+    tr = P.track(track)
+    for k, v in (('volume_db', volume_db), ('pan', pan), ('mute', mute), ('solo', solo), ('output', output),
+                 ('sends', sends)):
+        if v is not None:
+            tr[k] = v
+    if output and output != 'master' and output not in P.d['buses']:
+        raise OpError(f"no bus {output!r}; bus_add first. buses: {list(P.d['buses'])}")
+    for b in (sends or {}):
+        if b not in P.d['buses']:
+            raise OpError(f"no bus {b!r}; bus_add first. buses: {list(P.d['buses'])}")
+    if rename:
+        if rename in P.d['tracks']:
+            raise OpError(f"a track named {rename!r} already exists")
+        P.d['tracks'] = {(rename if k == track else k): v for k, v in P.d['tracks'].items()}
+        # keep every reference to the old name valid
+        sm = P.d.get('stem_map') or {}
+        if track in sm:
+            sm[rename] = sm.pop(track)
+        for tr in P.d['tracks'].values():
+            for f in tr.get('fx', []):
+                for key in ('sidechain', 'source', 'modulator'):
+                    if f.get(key) == track:
+                        f[key] = rename
+    P.save()
+    return f"updated track {track!r}"
+
+
+@op(mutates=True)
+def track_remove(project: str, track: str) -> str:
+    """Delete a track (undo restores it)."""
+    P = _load(project)
+    P.track(track)
+    del P.d['tracks'][track]
+    P.save()
+    return f"removed track {track!r}"
+
+
+@op(mutates=True)
+def bus_add(project: str, name: str, fx: list = None, volume_db: float = 0.0) -> str:
+    """Add an effect-return bus (e.g. reverb). Route with track_set(sends={name: -12}) or track_set(output=name)."""
+    P = _load(project)
+    if name in P.d['buses']:
+        raise OpError(f"bus {name!r} exists; use fx_add/fx_set with target='bus:{name}'")
+    for f in fx or []:
+        try:
+            fxmod.normalize(f)
+        except fxmod.FxError as e:
+            raise OpError(str(e))
+    P.d['buses'][name] = {"fx": list(fx or []), "volume_db": volume_db}
+    P.save()
+    return f"added bus {name!r}"
+
+
+# ------------------------------------------------------------------ instruments
+
+@op()
+def presets_list(project: str = None) -> str:
+    """List instrument presets with their type."""
+    return '\n'.join(f"{k:<16} {v['type']}" for k, v in PRESETS.items())
+
+
+@op()
+def instrument_help(project: str = None, type: str = 'synth') -> str:
+    """Full parameter reference (with defaults) for an instrument type: synth, sampler, kit, code, kick, snare, hat, clap, tom, noise_hit."""
+    if type == 'synth':
+        return ("synth params (defaults):\n" + json.dumps(inst_mod.SYNTH_DEFAULT, indent=1) +
+                "\nosc params (defaults):\n" + json.dumps(inst_mod.OSC_DEFAULT, indent=1) +
+                "\nnotes: waves " + ', '.join(inst_mod.OSC_WAVES) +
+                "; fine/detune in cents; filter.type lp12 lp24 hp12 hp24 bp notch ladder; env_amount/keytrack/vel_amount"
+                " in octaves; drive dB pre-filter; lfo = {target: pitch|cutoff|amp|pw|fm|oscs.N.pw, rate (Hz) or"
+                " rate_beats (period in beats), shape sine|triangle|saw|ramp_down|square|sh, depth (semitones for pitch,"
+                " octaves for cutoff, 0..1 for amp), delay s, retrigger}; fm_from=earlier osc index (phase mod, amount ~0.1-3);"
+                " mono+glide(s) = legato slides on overlapping notes; additive needs partials [h1,h2,...]; table needs a"
+                " single-cycle sound name. Automatable (automation_set param 'inst.X'): filter.cutoff filter.res drive"
+                " gain_db noise pitch oscs.N.level oscs.N.pw oscs.N.fm_amount")
+    if type == 'sampler':
+        return "sampler params (defaults):\n" + json.dumps(inst_mod.SAMPLER_DEFAULT, indent=1) + \
+            "\nroot = pitch at which the sound plays unshifted; one_shot plays the whole sample regardless of note length;" \
+            " start/end/loop_* in seconds; filter = {type, cutoff, res} (cutoff automatable as inst.filter.cutoff)"
+    if type == 'kit':
+        return 'kit: {"type":"kit","map":{"C1":{"type":"kick",...},"D1":{"type":"sampler","sound":"snare1","one_shot":true}}}' \
+               " - maps pitches to any instrument. GM-ish names: kick C1, snare D1, clap D#1, hat F#1, open hat A#1."
+    if type == 'code':
+        return 'code: {"type":"code","code":"def voice(freq, t, vel, gate, sr):\\n    return np.sin(2*np.pi*freq*t)*np.exp(-t*4)",' \
+               ' "tail":0.3} - t is a time array (s) covering gate+tail, vel 0..1, return mono or (2,n). np and dsp available.'
+    if type in inst_mod.DRUM_DEFAULTS:
+        return f"{type} params (defaults): " + json.dumps(inst_mod.DRUM_DEFAULTS[type]) + \
+            " (times in s, freqs in Hz, drive in dB)"
+    raise OpError(f"unknown type {type!r}; types: synth sampler kit code " + ' '.join(inst_mod.DRUM_DEFAULTS))
+
+
+@op(mutates=True)
+def instrument_set(project: str, track: str, instrument, merge: bool = True) -> str:
+    """Set a track's instrument. merge=True deep-merges the given keys into the current instrument (oscs list is
+    replaced whole); merge=False replaces it. instrument may be 'preset:<name>'."""
+    P = _load(project)
+    tr = P.track(track)
+    if isinstance(instrument, str):
+        new = _resolve_instrument(instrument, P)
+    elif merge and tr.get('instrument') and instrument.get('type', tr['instrument']['type']) == tr['instrument']['type']:
+        new = inst_mod.deep_merge(tr['instrument'], instrument)
+        if 'oscs' in instrument:
+            new['oscs'] = instrument['oscs']
+        if 'map' in instrument:
+            new['map'] = inst_mod.deep_merge(tr['instrument'].get('map', {}), instrument['map'])
+        new = _resolve_instrument(new)
+    else:
+        new = _resolve_instrument(instrument, P)
+    tr['instrument'] = new
+    P.save()
+    return f"instrument of {track!r} is now {new['type']}"
+
+
+@op()
+def instrument_show(project: str, track: str, full: bool = False) -> str:
+    """Show a track's instrument JSON (full=True includes all defaults)."""
+    P = _load(project)
+    inst = P.track(track).get('instrument')
+    if inst is None:
+        return "(audio-only track, no instrument)"
+    return json.dumps(inst_mod.normalize(inst) if full else inst, indent=1)
+
+
+# ------------------------------------------------------------------ notes
+
+@op(mutates=True)
+def notes_write(project: str, track: str, bar: int, notes: str, mode: str = 'replace', bars: int = None,
+                repeat: int = 1) -> str:
+    """Write notes starting at `bar`. notes: one per line or ';'-separated: '<beat> <pitch> <dur_beats> [vel]'
+    with beat relative to the bar's beat 1 (0, 0.5, 1/3 ...). Chords: 'C4,E4,G4'. mode='replace' first clears the
+    written span (length `bars`, default = bars the notes cover); mode='add' merges. repeat=N tiles the block N times."""
+    P = _load(project)
+    tr = P.track(track)
+    try:
+        rel = parse_notes(notes)
+    except NotationError as e:
+        raise OpError(str(e))
+    if not rel:
+        raise OpError("no notes parsed; format '<beat> <pitch> <dur> [vel]' e.g. '0 E2 0.5 110; 0.5 E3 0.5'")
+    span = bars or _span_bars(rel, P.bpb)
+    base = P.bar_to_beat(bar)
+    removed = 0
+    written = 0
+    for r in range(repeat):
+        b0 = base + r * span * P.bpb
+        if mode == 'replace':
+            removed += _clear(tr, b0, b0 + span * P.bpb)
+        for s, p, d, v in rel:
+            tr['notes'].append([round(b0 + s, 6), p, d, v])
+            written += 1
+    tr['notes'].sort()
+    P.save()
+    msg = f"{track}: wrote {written} notes in bars {bar}-{bar + span * repeat - 1}" + (f", replaced {removed}" if removed else '')
+    return msg + _kit_warning(tr, rel)
+
+
+def _kit_warning(tr, rel):
+    inst = tr.get('instrument') or {}
+    if inst.get('type') == 'kit':
+        mapped = {pitch_to_midi(k) for k in inst['map']}
+        miss = sorted({p for _, p, _, _ in rel if p not in mapped})
+        if miss:
+            return f"\nWARNING: pitches {[midi_to_name(m) for m in miss]} are not in the kit map (silent). mapped: " \
+                   f"{[midi_to_name(m) for m in sorted(mapped)]}"
+    return ''
+
+
+@op(mutates=True)
+def pattern_write(project: str, track: str, bar: int, lanes: dict, step: float = 0.25, repeat: int = 1,
+                  mode: str = 'replace', dur: float = None) -> str:
+    """Step-sequence: lanes = {pitch: 'x...x...X...x..o'} ('.' rest, X accent 127, x 100, o 70, - 45, '_' tie).
+    step = beats per character (0.25 = 16ths). Pattern length (chars*step) sets the span; repeat tiles it."""
+    P = _load(project)
+    tr = P.track(track)
+    rel = []
+    span_beats = 0
+    for pitch, pat in lanes.items():
+        try:
+            m = pitch_to_midi(pitch)
+            hits, length = parse_steps(pat, step, dur)
+        except NotationError as e:
+            raise OpError(str(e))
+        span_beats = max(span_beats, length)
+        rel += [(s, m, d, v) for s, d, v in hits]
+    span = max(1, math.ceil(span_beats / P.bpb - 1e-9))
+    base = P.bar_to_beat(bar)
+    removed = 0
+    pitches = {pitch_to_midi(p) for p in lanes}
+    for r in range(repeat):
+        b0 = base + r * span_beats
+        if mode == 'replace':
+            before = len(tr['notes'])
+            tr['notes'] = [n for n in tr['notes'] if not (b0 <= n[0] < b0 + span_beats and n[1] in pitches)]
+            removed += before - len(tr['notes'])
+        for s, p, d, v in rel:
+            tr['notes'].append([round(b0 + s, 6), p, d, v])
+    tr['notes'].sort()
+    P.save()
+    end_bar = bar + math.ceil(span_beats * repeat / P.bpb - 1e-9) - 1
+    return f"{track}: {len(rel) * repeat} hits in bars {bar}-{end_bar} (lanes {list(lanes)})" + \
+        (f", replaced {removed} on those pitches" if removed else '') + _kit_warning(tr, rel)
+
+
+@op()
+def notes_read(project: str, track: str, bars: list = None, view: str = 'list', step: float = 0.25) -> str:
+    """Read a track's notes in bars [a, b] (inclusive). view='list' (bar, offset, pitch, dur, vel), 'roll' (ASCII
+    piano roll, max 8 bars), or 'rel' (notes_write format relative to bar a - copy/edit/write back)."""
+    P = _load(project)
+    tr = P.track(track)
+    a, b = bars or [1, P.d['length_bars']]
+    b0, b1 = P.bar_to_beat(a), P.bar_to_beat(b + 1)
+    sel = [n for n in tr['notes'] if b0 <= n[0] < b1]
+    if view == 'roll':
+        if b - a + 1 > 8:
+            raise OpError("roll view is limited to 8 bars; narrow `bars`")
+        return piano_roll(sel, b0, b1 - b0, step, P.bpb)
+    if view == 'rel':
+        return '\n'.join(f"{fmt_num(s - b0)} {midi_to_name(p)} {fmt_num(d)} {v}" for s, p, d, v in sel) or '(empty)'
+    if len(sel) > 300:
+        return format_notes(sel[:300], P.bpb) + f"\n... {len(sel) - 300} more; narrow `bars`"
+    return format_notes(sel, P.bpb) or '(no notes in range)'
+
+
+@op(mutates=True)
+def notes_clear(project: str, track: str, bars: list, pitches: list = None) -> str:
+    """Delete notes starting in bars [a, b]; optionally only the given pitches."""
+    P = _load(project)
+    tr = P.track(track)
+    b0, b1 = P.bar_to_beat(bars[0]), P.bar_to_beat(bars[1] + 1)
+    ps = {pitch_to_midi(p) for p in pitches} if pitches else None
+    before = len(tr['notes'])
+    tr['notes'] = [n for n in tr['notes'] if not (b0 <= n[0] < b1 and (ps is None or n[1] in ps))]
+    P.save()
+    return f"{track}: removed {before - len(tr['notes'])} notes from bars {bars[0]}-{bars[1]}"
+
+
+@op(mutates=True)
+def notes_copy(project: str, track: str, from_bars: list, to_bar: int, times: int = 1, to_track: str = None,
+               transpose: int = 0, mode: str = 'replace') -> str:
+    """Copy notes from bars [a, b] of `track` to start at `to_bar` (of to_track, default same), tiled `times`."""
+    P = _load(project)
+    src = P.track(track)
+    dst = P.track(to_track or track)
+    a, b = from_bars
+    b0, b1 = P.bar_to_beat(a), P.bar_to_beat(b + 1)
+    block = [n for n in src['notes'] if b0 <= n[0] < b1]
+    span = b1 - b0
+    for r in range(times):
+        d0 = P.bar_to_beat(to_bar) + r * span
+        if mode == 'replace':
+            _clear(dst, d0, d0 + span)
+        for s, p, d, v in block:
+            dst['notes'].append([round(d0 + s - b0, 6), p + transpose, d, v])
+    dst['notes'].sort()
+    P.save()
+    return f"copied {len(block)} notes x{times} from {track} bars {a}-{b} to {to_track or track} bar {to_bar}" \
+           f"-{to_bar + (b - a + 1) * times - 1}"
+
+
+@op(mutates=True)
+def notes_transform(project: str, track: str, bars: list, transpose: int = 0, velocity: int = None,
+                    vel_scale: float = None, shift_beats: float = 0.0, quantize: float = None, dur_scale: float = None,
+                    dur_set: float = None, legato: bool = False, pitches: list = None) -> str:
+    """Edit notes in bars [a, b]: transpose (semitones), velocity (set) / vel_scale, shift_beats, quantize (grid in
+    beats), dur_scale / dur_set, legato (extend each note to the next onset). pitches limits to those pitches."""
+    P = _load(project)
+    tr = P.track(track)
+    b0, b1 = P.bar_to_beat(bars[0]), P.bar_to_beat(bars[1] + 1)
+    ps = {pitch_to_midi(p) for p in pitches} if pitches else None
+    sel = [n for n in tr['notes'] if b0 <= n[0] < b1 and (ps is None or n[1] in ps)]
+    for n in sel:
+        n[1] += transpose
+        if quantize:
+            n[0] = round(round(n[0] / quantize) * quantize, 6)
+        n[0] = round(n[0] + shift_beats, 6)
+        if velocity is not None:
+            n[3] = velocity
+        if vel_scale:
+            n[3] = int(np.clip(round(n[3] * vel_scale), 1, 127))
+        if dur_scale:
+            n[2] *= dur_scale
+        if dur_set:
+            n[2] = dur_set
+    if legato:
+        starts = sorted({n[0] for n in sel})
+        for n in sel:
+            nxt = [s for s in starts if s > n[0]]
+            if nxt:
+                n[2] = nxt[0] - n[0]
+    tr['notes'].sort()
+    P.save()
+    return f"{track}: transformed {len(sel)} notes in bars {bars[0]}-{bars[1]}"
+
+
+# ------------------------------------------------------------------ fx & automation
+
+def _fx_list(P, target):
+    if target == 'master':
+        return P.d['master'].setdefault('fx', [])
+    if target.startswith('bus:'):
+        b = target[4:]
+        if b not in P.d['buses']:
+            raise OpError(f"no bus {b!r}; buses: {list(P.d['buses'])}")
+        return P.d['buses'][b].setdefault('fx', [])
+    return P.track(target).setdefault('fx', [])
+
+
+@op(mutates=True)
+def fx_add(project: str, target: str, fx: dict, index: int = None) -> str:
+    """Add an effect to target ('<track>', 'bus:<name>' or 'master'). fx = {'type': ..., params}; see fx_help.
+    index = position in chain (default end)."""
+    P = _load(project)
+    lst = _fx_list(P, target)
+    try:
+        fxmod.normalize(fx)
+    except fxmod.FxError as e:
+        raise OpError(str(e))
+    if fx['type'] == 'compressor' and fx.get('sidechain'):
+        P.track(fx['sidechain'])
+    if fx['type'] == 'duck' and fx.get('source'):
+        P.track(fx['source'])
+    i = len(lst) if index is None else index
+    lst.insert(i, fx)
+    P.save()
+    chain = ', '.join(f"{j}:{f['type']}" for j, f in enumerate(lst))
+    return f"{target}: fx chain now [{chain}]"
+
+
+@op(mutates=True)
+def fx_set(project: str, target: str, index: int, params: dict) -> str:
+    """Update params of effect #index on target (merge)."""
+    P = _load(project)
+    lst = _fx_list(P, target)
+    if not 0 <= index < len(lst):
+        raise OpError(f"{target} has fx indices 0..{len(lst) - 1}: {[f['type'] for f in lst]}")
+    new = dict(lst[index], **params)
+    try:
+        fxmod.normalize(new)
+    except fxmod.FxError as e:
+        raise OpError(str(e))
+    lst[index] = new
+    P.save()
+    return f"{target} fx {index} ({new['type']}) updated"
+
+
+@op(mutates=True)
+def fx_remove(project: str, target: str, index: int) -> str:
+    """Remove effect #index from target. Automation on later fx indices is re-pointed automatically."""
+    P = _load(project)
+    lst = _fx_list(P, target)
+    if not 0 <= index < len(lst):
+        raise OpError(f"{target} has fx indices 0..{len(lst) - 1}")
+    removed = lst.pop(index)
+    if target in P.d['tracks']:
+        auto = P.d['tracks'][target].get('automation', {})
+        newauto = {}
+        for k, v in auto.items():
+            if k.startswith('fx.'):
+                _, i, p = k.split('.', 2)
+                i = int(i)
+                if i == index:
+                    continue
+                k = f"fx.{i - 1 if i > index else i}.{p}"
+            newauto[k] = v
+        P.d['tracks'][target]['automation'] = newauto
+    P.save()
+    return f"removed {removed['type']} from {target}"
+
+
+@op()
+def fx_help(project: str = None, type: str = None) -> str:
+    """Effect types with default params; type=<name> for one. Automatable params listed per type."""
+    types = [type] if type else list(fxmod.FX_DEFAULTS)
+    out = []
+    for t in types:
+        if t not in fxmod.FX_DEFAULTS:
+            raise OpError(f"unknown fx {t!r}; types: {', '.join(fxmod.FX_DEFAULTS)}")
+        out.append(f"{t}: {json.dumps(fxmod.FX_DEFAULTS[t])}  automatable: {list(fxmod.AUTOMATABLE.get(t, ()))}")
+    out.append("notes: compressor.sidechain = track name; duck.source = track name (ducks on its note-ons) or every_beats;"
+               " gate.pattern uses step chars; vocoder.modulator = track name or 'sound:<name>'; eq.bands = "
+               "[{type: peak|lowshelf|highshelf|lowcut|highcut|notch|bandpass, freq, gain_db, q, slope 12|24}]")
+    return '\n'.join(out)
+
+
+INST_CONTINUOUS = ('filter.cutoff', 'filter.res', 'drive', 'gain_db', 'noise', 'pitch')
+
+
+@op(mutates=True)
+def automation_set(project: str, track: str, param: str, points: list, mode: str = 'replace') -> str:
+    """Automate a parameter over time (track='master' for a master volume fade, track='bus:<name>' for a bus's
+    volume_db or fx.<index>.<param>, e.g. a filter sweep on a drum bus). points = [[bar, value], ...] with fractional bars allowed (17.5 = beat 3 of
+    bar 17); linear between points (log for Hz params), held before/after. param: 'volume_db' (dB OFFSET added to
+    the track fader: 0 = unchanged, -30 = fade out), 'pan',
+    'inst.<path>' (inst.filter.cutoff, inst.oscs.0.level ... see instrument_help), 'fx.<index>.<param>'.
+    mode='merge' keeps existing points outside the new points' span."""
+    P = _load(project)
+    if track == 'master':
+        if param != 'volume_db':
+            raise OpError("the master accepts only 'volume_db' automation (a dB offset, e.g. a fade out)")
+        tr = P.d['master']
+    elif track.startswith('bus:'):
+        tr = _bus(P, track)
+        if not (param == 'volume_db' or param.startswith('fx.')):
+            raise OpError("a bus accepts 'volume_db' or 'fx.<index>.<param>' automation")
+    else:
+        tr = P.track(track)
+    if param in ('volume_db', 'pan'):
+        pass
+    elif param.startswith('inst.'):
+        pp = param[5:]
+        if not (pp in INST_CONTINUOUS or (pp.startswith('oscs.') and pp.split('.')[-1] in ('level', 'pw', 'fm_amount'))):
+            raise OpError(f"inst param {pp!r} is not automatable; use one of {INST_CONTINUOUS} or oscs.N.level|pw|fm_amount")
+    elif param.startswith('fx.'):
+        try:
+            _, i, pname = param.split('.', 2)
+            f = tr['fx'][int(i)]
+        except (ValueError, IndexError):
+            raise OpError(f"bad fx param {param!r}; track fx: {[(j, f['type']) for j, f in enumerate(tr.get('fx', []))]}")
+        if pname not in fxmod.AUTOMATABLE.get(f['type'], ()):
+            raise OpError(f"{f['type']}.{pname} not automatable; automatable: {fxmod.AUTOMATABLE.get(f['type'], ())}")
+    else:
+        raise OpError("param must be volume_db, pan, inst.<path> or fx.<index>.<param>")
+    beats = [[round(P.bar_to_beat(b), 6), float(v)] for b, v in points]
+    auto = tr.setdefault('automation', {})
+    if mode == 'merge' and param in auto:
+        lo, hi = min(b for b, _ in beats), max(b for b, _ in beats)
+        beats = sorted([p for p in auto[param] if not lo <= p[0] <= hi] + beats)
+    auto[param] = sorted(beats)
+    P.save()
+    return f"{track}.{param}: {len(beats)} points from bar {points[0][0]} to {points[-1][0]}"
+
+
+def _bus(P, track):
+    b = track[4:]
+    if b not in P.d.get('buses', {}):
+        raise OpError(f"no bus {b!r}; buses: {list(P.d.get('buses', {})) or 'none'} (bus_add to create)")
+    return P.d['buses'][b]
+
+
+@op(mutates=True)
+def automation_clear(project: str, track: str, param: str = None) -> str:
+    """Remove automation for one param (or all when param is None)."""
+    P = _load(project)
+    tr = P.d['master'] if track == 'master' else _bus(P, track) if track.startswith('bus:') else P.track(track)
+    if param:
+        tr.get('automation', {}).pop(param, None)
+    else:
+        tr['automation'] = {}
+    P.save()
+    return f"cleared automation {param or '(all)'} on {track}"
+
+
+@op()
+def automation_read(project: str, track: str) -> str:
+    """List automation lanes on a track ('master' and 'bus:<name>' too) as [bar, value] points."""
+    P = _load(project)
+    tr = P.d['master'] if track == 'master' else _bus(P, track) if track.startswith('bus:') else P.track(track)
+    auto = tr.get('automation', {})
+    return '\n'.join(f"{k}: " + ' '.join(f"[{fmt_num(b / P.bpb + 1)}, {fmt_num(v)}]" for b, v in pts)
+                     for k, pts in auto.items()) or '(none)'
+
+
+# ------------------------------------------------------------------ sounds
+
+def _write_sound(P, name, y, sr, note=''):
+    from .render import write_wav
+    rel = os.path.join('sounds', f"{name}.wav")
+    write_wav(os.path.join(P.root, rel), y, sr)
+    P.d.setdefault('sounds', {})[name] = {"file": rel.replace('\\', '/'), "note": note,
+                                          "sec": round(y.shape[1] / sr, 3)}
+
+
+@op(mutates=True)
+def sound_make(project: str, name: str, instrument, notes: str = '0 C4 1', fx: list = None, tail_sec: float = 1.0,
+               normalize: bool = True, describe: bool = True) -> str:
+    """Synthesize a sound into the bank: play `notes` (notes_write format, beats at project tempo) on `instrument`
+    through `fx`. Use it as a sampler source, a wavetable, a vocoder modulator or an audio clip. Returns a timbre
+    description of the result."""
+    from .render import Renderer
+    P = _load(project)
+    inst = _resolve_instrument(instrument, P)
+    tmp = {"bpm": P.d['bpm'], "beats_per_bar": P.bpb, "sr": 44100, "offset_sec": 0.0, "tail_sec": tail_sec,
+           "tracks": {"x": {"instrument": inst, "notes": [], "fx": fx or []}}, "buses": {}, "master": {"fx": []},
+           "sounds": P.d.get('sounds', {})}
+    try:
+        rel = parse_notes(notes)
+    except NotationError as e:
+        raise OpError(str(e))
+    tmp['tracks']['x']['notes'] = [[s, p, d, v] for s, p, d, v in rel]
+    end = max(s + d for s, _, d, _ in rel)
+    tmp['length_bars'] = max(1, math.ceil(end / P.bpb))
+    R = Renderer(tmp, P.root, cache=False)
+    y, _ = R.run()
+    # trim to notes + tail and strip trailing silence
+    n = int((end * 60 / P.d['bpm'] + tail_sec) * 44100)
+    y = y[:, :n]
+    a = np.max(np.abs(y), axis=0)
+    nz = np.nonzero(a > 1e-4)[0]
+    if len(nz) == 0:
+        raise OpError("the sound rendered silent; check instrument levels/notes")
+    y = y[:, :nz[-1] + 1]
+    if normalize:
+        y = y / (np.max(np.abs(y)) + 1e-12) * 0.891
+    _write_sound(P, name, y, 44100, note=f"made from {inst['type']}")
+    P.save()
+    msg = f"sound {name!r}: {y.shape[1] / 44100:.2f}s"
+    if describe:
+        _, txt = A.timbre(os.path.join(P.root, P.d['sounds'][name]['file']), 0, y.shape[1] / 44100)
+        msg += '\n' + txt
+    return msg
+
+
+@op(mutates=True)
+def sound_import(project: str, name: str, source: str, start_sec: float = None, end_sec: float = None,
+                 bars: list = None, normalize: bool = False) -> str:
+    """Import audio into the bank from a file or any analysis source (ref, ref:vocals, track:x, render...), optionally
+    a time slice (seconds) or bars [a, b] on the project grid."""
+    import soundfile as sf
+    P = _load(project)
+    path, g = P.source(source, bars)
+    y, sr = sf.read(path, dtype='float64', always_2d=True)
+    y = y.T
+    if bars:
+        start_sec, end_sec = g.bar_time(bars[0]), g.bar_time(bars[1] + 1)
+    a = int((start_sec or 0) * sr)
+    b = int(end_sec * sr) if end_sec else y.shape[1]
+    y = y[:, a:b]
+    if y.shape[0] == 1:
+        y = np.vstack([y, y])
+    if normalize:
+        y = y / (np.max(np.abs(y)) + 1e-12) * 0.891
+    _write_sound(P, name, y, sr, note=f"imported from {source}")
+    P.save()
+    return f"sound {name!r}: {y.shape[1] / sr:.2f}s from {source}"
+
+
+@op()
+def sound_list(project: str) -> str:
+    """List the sound bank."""
+    P = _load(project)
+    s = P.d.get('sounds', {})
+    return '\n'.join(f"{k:<20} {v.get('sec', '?')}s  {v.get('note', '')}" for k, v in s.items()) or '(empty bank)'
+
+
+@op(mutates=True)
+def audio_place(project: str, track: str, sound: str, bar: float, gain_db: float = 0.0, offset_sec: float = 0.0,
+                length_beats: float = None) -> str:
+    """Place a bank sound on a track's timeline at `bar` (fractional ok) as an audio clip."""
+    P = _load(project)
+    tr = P.track(track)
+    if sound not in P.d.get('sounds', {}):
+        raise OpError(f"no sound {sound!r}; sound_list")
+    tr.setdefault('audio', []).append({"sound": sound, "at_beat": P.bar_to_beat(bar), "gain_db": gain_db,
+                                       "offset_sec": offset_sec, "length_beats": length_beats})
+    P.save()
+    return f"{track}: placed {sound} at bar {bar}"
+
+
+# ------------------------------------------------------------------ render
+
+@op()
+def render(project: str, bars: list = None, tracks: list = None, stems: bool = False, out: str = None,
+           cache: bool = True, mp3: str = 'none') -> str:
+    """Render to renders/latest.wav (and renders/<out>.wav). bars=[a,b] renders a window (fast iteration); tracks
+    limits to those tracks (+ their sidechain sources, which stay silent); stems=True writes per-track files for
+    analysis as 'track:<name>'. Analysis of a windowed render and its stems still uses song bar numbers (bars outside
+    the window raise). mp3='also' writes renders/<out or latest>.mp3 next to the wav, mp3='only' writes the named
+    render as mp3 only (latest.wav is always written: analysis reads it); needs ffmpeg on PATH or $ISMAIL_FFMPEG.
+    Returns levels, clipping and timing."""
+    if mp3 not in ('none', 'also', 'only'):
+        raise OpError("mp3 must be 'none', 'also' (wav + mp3) or 'only' (the named render as mp3 only)")
+    from .render import Renderer, write_wav, prune_cache, RenderError
+    P = _load(project)
+    if tracks:
+        for t in tracks:
+            P.track(t)
+    try:
+        R = Renderer(P.d, P.root, bars[0] if bars else None, (bars[1] + 1) if bars else None, tracks, cache)
+        y, st = R.run()
+    except (RenderError, fxmod.FxError, inst_mod.InstrumentError) as e:
+        raise OpError(f"render failed: {e}")
+    rd = os.path.join(P.root, 'renders')
+    written = ['latest.wav'] + ([out + '.wav'] if out and mp3 != 'only' else [])
+    write_wav(os.path.join(rd, 'latest.wav'), y, R.sr)
+    if out and mp3 != 'only':
+        write_wav(os.path.join(rd, out + '.wav'), y, R.sr)
+    mp3_note = ''
+    if mp3 != 'none':
+        from .render import write_mp3
+        name = (out or 'latest') + '.mp3'
+        try:
+            write_mp3(os.path.join(rd, 'latest.wav'), os.path.join(rd, name))
+        except RuntimeError as e:
+            raise OpError(f"render finished (renders/latest.wav) but the mp3 failed: {e}")
+        mp3_note = f" + renders/{name}"
+    if stems:
+        sd = os.path.join(rd, 'stems')
+        os.makedirs(sd, exist_ok=True)
+        for k, v in st.items():
+            write_wav(os.path.join(sd, k.replace(':', '_') + '.wav'), v, R.sr)
+            written.append('stems/' + k.replace(':', '_') + '.wav')
+    _record_window(rd, written, None if R.full else
+                   {'bars': [bars[0], min(bars[1], P.d['length_bars'])], 'start_sec': R.offset + R.win_b0 * R.spb})
+    prune_cache(P.root)
+    peak = 20 * np.log10(np.max(np.abs(y)) + 1e-12)
+    clip = float(np.mean(np.abs(y) >= 0.999)) * 100
+    try:
+        import pyloudnorm as pyln
+        lufs = pyln.Meter(R.sr).integrated_loudness(y.T)
+    except Exception:
+        lufs = float('nan')
+    L = [f"rendered {y.shape[1] / R.sr:.1f}s" + (f" (bars {bars[0]}-{bars[1]})" if bars else '') +
+         f" in {R.elapsed:.1f}s -> renders/latest.wav{' + renders/' + out + '.wav' if out and mp3 != 'only' else ''}{mp3_note}",
+         f"master: {lufs:.1f} LUFS, peak {peak:.1f} dBFS" + (f", CLIPPING {clip:.2f}% of samples (lower levels or add limiter)" if clip > 0.001 else '')]
+    for k, v in st.items():
+        pk = 20 * np.log10(np.max(np.abs(v)) + 1e-12)
+        rms = 10 * np.log10(np.mean(v ** 2) + 1e-12)
+        s = R.stats.get(k, {})
+        L.append(f"  {k:<14} peak {pk:6.1f} rms {rms:6.1f} dB" + (f"  ({s['sec']}s{' cached' if s.get('cached') else ''})" if s else '')
+                 + ('  SILENT - check notes/instrument/mute' if pk < -90 else ''))
+    for (trk, i), gr in R.gain_reduction.items():
+        if gr < -0.5:
+            L.append(f"  {trk} fx {i}: max gain reduction {gr:.1f} dB")
+    return '\n'.join(L)
+
+
+def _record_window(rd, files, window):
+    """Remember where each written file starts in the song (full renders start at song t=0 and are not listed)."""
+    wf = os.path.join(rd, WINDOWS_FILE)
+    try:
+        with open(wf, encoding='utf8') as f:
+            d = json.load(f)
+    except (OSError, ValueError):
+        d = {}
+    for k in files:
+        d.pop(k, None)
+        if window:
+            d[k] = window
+    with open(wf, 'w', encoding='utf8') as f:
+        json.dump(d, f, indent=1)
+
+
+# ------------------------------------------------------------------ analysis
+
+def _grid(P, bpm, offset_sec):
+    return P.grid(bpm, offset_sec)
+
+
+@op()
+def analyze_grid(project: str, source: str = 'ref', bpm_hint: float = None) -> str:
+    """Estimate tempo and the time of bar 1 of an audio source. Use the result in project_new/project_set so bars line up."""
+    P = _load(project)
+    return A.beat_grid(P.resolve_audio(source), bpm_hint, P.bpb)[1]
+
+
+@op()
+def analyze_overview(project: str, source: str = 'ref') -> str:
+    """Loudness, key and a section map (bars, level, dominant bands, chroma) of an audio source on the project grid."""
+    P = _load(project)
+    return A.overview(*P.source(source))[1]
+
+
+@op()
+def analyze_bars(project: str, source: str = 'ref', bars: list = None) -> str:
+    """Per-bar table (max 32 bars): level dB, 6 band energies, spectral centroid, onset count, chroma chord."""
+    P = _load(project)
+    return A.bar_table(*P.source(source, bars), bars)[1]
+
+
+@op()
+def analyze_chords(project: str, source: str = 'ref', bars: list = None, per_bar: int = 2) -> str:
+    """Chord + bass note per 1/per_bar of a bar (max 32 bars)."""
+    P = _load(project)
+    return A.chords(*P.source(source, bars), bars, per_bar)[1]
+
+
+@op()
+def analyze_melody(project: str, source: str = 'ref:other', bars: list = None, fmin: str = 'C1', fmax: str = 'C7',
+                   quant: float = 0.25, min_conf: float = 0.0) -> str:
+    """Monophonic pitch -> note list in notes_write format (max 16 bars). Best on a stem or a soloed line."""
+    P = _load(project)
+    return A.melody(*P.source(source, bars), bars, fmin, fmax, quant, min_conf=min_conf)[1]
+
+
+@op()
+def analyze_notes(project: str, source: str = 'ref:other', bars: list = None, quant: float = 0.25,
+                  threshold: float = 0.35, fmin: str = 'C1', max_poly: int = 6) -> str:
+    """Polyphonic note estimate -> notes_write format (max 16 bars). Raise threshold to drop weak/ghost notes."""
+    P = _load(project)
+    return A.transcribe(*P.source(source, bars), bars, quant, threshold=threshold, fmin=fmin,
+                        max_poly=max_poly)[1]
+
+
+@op()
+def analyze_pitches(project: str, source: str = 'ref:other', bars: list = None, per_bar: int = 4,
+                    max_notes: int = 6, fmin: str = 'C1', floor_db: float = -30) -> str:
+    """Pitches sounding in each 1/per_bar of a bar, loudest first with dB (max 16 bars). Best view for pads,
+    drones, sustained basses and chords; use analyze_melody for fast monophonic lines."""
+    P = _load(project)
+    return A.pitches(*P.source(source, bars), bars, per_bar, max_notes, fmin, floor_db)[1]
+
+
+@op()
+def analyze_drums(project: str, source: str = 'ref:drums', bars: list = None, steps_per_beat: int = 4,
+                  sens: float = 1.0) -> str:
+    """Drum hits as step strings per bar in 3 lanes (low/snare/hat bands), max 16 bars. Paste into pattern_write."""
+    P = _load(project)
+    return A.drums(*P.source(source, bars), bars, steps_per_beat, sens=sens)[1]
+
+
+@op()
+def analyze_envelope(project: str, source: str = 'ref', bars: list = None, steps_per_beat: int = 4,
+                     band: str = None) -> str:
+    """Level per step as digits 0-9 (max 8 bars); band = sub|bass|lowmid|mid|himid|air to isolate a range.
+    Reveals sidechain pumping, gating, note rhythm."""
+    P = _load(project)
+    return A.envelope(*P.source(source, bars), bars, steps_per_beat, band=band)[1]
+
+
+def _window(g, span, t0, t1):
+    if span:
+        return g.bar_time(span[0]), g.bar_time(span[1])
+    if t0 is None or t1 is None:
+        raise OpError("give span=[start_bar, end_bar] (fractional bars, end exclusive, e.g. [17, 17.25] = first beat"
+                      " of bar 17) or t0/t1 in seconds")
+    return t0, t1
+
+
+@op()
+def analyze_spectrum(project: str, source: str = 'ref', span: list = None, t0: float = None, t1: float = None) -> str:
+    """1/3-octave levels + strongest peaks (with note names) over a window."""
+    P = _load(project)
+    path, g = P.source(source, span=span)
+    a, b = _window(g, span, t0, t1)
+    return A.spectrum(path, a, b)[1]
+
+
+@op()
+def analyze_timbre(project: str, source: str = 'ref', span: list = None, t0: float = None, t1: float = None) -> str:
+    """Describe the sound in a window: envelope, pitch, harmonic profile -> waveform guess, brightness/filter,
+    noisiness, stereo width. Use on isolated sounds (stems, sound bank, soloed tracks) for sound design."""
+    P = _load(project)
+    path, g = P.source(source, span=span)
+    a, b = _window(g, span, t0, t1)
+    return A.timbre(path, a, b)[1]
+
+
+@op()
+def analyze_formants(project: str, source: str = 'ref:vocals', bars: list = None, steps_per_beat: int = 2) -> str:
+    """Vowel view of a voice: LPC formants F1/F2/F3 per step and the nearest vowel (max 8 bars). Use it to see what
+    a vocal part is saying/singing and to match a vocoder / formant sound to it."""
+    P = _load(project)
+    return A.formants(*P.source(source, bars), bars, steps_per_beat)[1]
+
+
+@op()
+def analyze_key(project: str, source: str = 'ref', bars: list = None) -> str:
+    """Key estimate (Krumhansl) over the whole source or bars [a, b]."""
+    P = _load(project)
+    path, g = P.source(source, bars)
+    if bars:
+        return A.key_estimate(path, g.bar_time(bars[0]), g.bar_time(bars[1] + 1))[1]
+    return A.key_estimate(path)[1]
+
+
+@op()
+def compare(project: str, a: str = 'render', b: str = 'ref', bars: list = None, offset_b: float = 0.0,
+            detail: int = 8) -> str:
+    """Compare two sources bar by bar on the project grid (default: your render vs the reference). Scores:
+    chroma_sim, rhythm_corr, band dB deltas, log-mel L1, plus the worst bars and advice. Compare stems too:
+    a='track:bass', b='ref:bass'."""
+    P = _load(project)
+    (pa, ga), (pb, gb) = P.source(a, bars), P.source(b, bars)
+    return A.compare(pa, pb, ga, bars, offset_b + gb.offset - ga.offset, detail=detail)[1]
+
+
+@op()
+def align(project: str, a: str = 'render', b: str = 'ref', bars: list = None, band: str = None) -> str:
+    """Timing lag between two sources (onset cross-correlation, optionally in one band e.g. band='sub' for kicks).
+    Use it to line a render up with the reference: project_set(offset_sec = offset_sec + lag)."""
+    P = _load(project)
+    (pa, g), (pb, gb) = P.source(a, bars), P.source(b, bars)
+    t0, t1 = (g.bar_time(bars[0]), g.bar_time(bars[1] + 1)) if bars else (None, None)
+    r = A.align(pa, pb, t0, t1, band, shift_b=gb.offset - g.offset)
+    return (f"B is {r['lag_ms']:+.1f} ms relative to A (negative = B earlier); xcorr {r['corr']:.3f} at best lag, "
+            f"{r['corr_at_0']:.3f} at 0. To match B, set offset_sec to {P.d.get('offset_sec', 0) + r['lag_ms'] / 1000:.4f}"
+            " if A is your render.")
+
+
+@op()
+def spectrogram(project: str, source: str = 'ref', bars: list = None, out: str = None) -> str:
+    """Write a mel spectrogram PNG with bar lines (the one non-text view). Returns the PNG path."""
+    P = _load(project)
+    path, g = P.source(source, bars)
+    a, b = (g.bar_time(bars[0]), g.bar_time(bars[1] + 1)) if bars else (0.0, None)
+    outp = out or os.path.join('renders', f"spec_{source.replace(':', '_').replace('/', '_')}_{bars[0] if bars else 'all'}.png")
+    if not os.path.isabs(outp):
+        outp = os.path.join(P.root, outp)  # relative paths are relative to the project
+    os.makedirs(os.path.dirname(outp), exist_ok=True)
+    return A.spectrogram_png(path, outp, a, b, g)
+
+
+@op(mutates=True)
+def separate(project: str, source: str = 'ref', model: str = 'htdemucs_ft') -> str:
+    """Split a source into drums/bass/other/vocals stems with demucs (GPU if available). For 'ref' the stems become
+    'ref:drums' etc."""
+    from .separate import separate as sep
+    P = _load(project)
+    path = P.resolve_audio(source)
+    outdir = os.path.join(P.root, 'stems', os.path.splitext(os.path.basename(path))[0])
+    names = sep(path, outdir, model)
+    if source == 'ref':
+        P.d['reference']['stems_dir'] = outdir
+        P.save()
+    return f"stems {names} in {outdir}" + (" (available as ref:<stem>)" if source == 'ref' else '')
+
+
+# ------------------------------------------------------------------ batch
+
+@op()
+def batch(project: str, ops: list, stop_on_error: bool = True) -> str:
+    """Run many ops in order: ops = [{"op": "notes_write", "track": ..., ...}, ...] (project is implied).
+    Mutations are atomic: if one fails the project is restored to its state before the batch. Returns each op's output."""
+    P = _load(project)
+    backup = json.dumps(P.d)
+    out = []
+    for i, spec in enumerate(ops):
+        spec = dict(spec)
+        name = spec.pop('op', None)
+        if name not in OPS or name == 'batch':
+            msg = f"op #{i}: unknown op {name!r}"
+            if stop_on_error:
+                _restore(P, backup)
+                raise OpError(msg + f"; batch rolled back. valid ops: {', '.join(sorted(OPS))}")
+            out.append(msg)
+            continue
+        try:
+            out.append(f"[{i}] {name}: " + OPS[name](project, **spec))
+        except (OpError, TypeError, ValueError, KeyError) as e:
+            if stop_on_error:
+                _restore(P, backup)
+                done = '\n'.join(out)
+                raise OpError(f"{done}\nop #{i} ({name}) failed: {e}\nbatch rolled back; fix op #{i} and resend the whole batch")
+            out.append(f"[{i}] {name}: ERROR {e}")
+    return '\n'.join(out)
+
+
+def _restore(P, backup):
+    with open(P.file, 'w', encoding='utf8') as f:
+        f.write(json.dumps(json.loads(backup), indent=1))
+
+
+def call(name, **kw):
+    if name not in OPS:
+        raise OpError(f"unknown op {name!r}; ops: {', '.join(sorted(OPS))}")
+    return OPS[name](**kw)
+
+
+from . import api_cmp  # noqa: E402,F401  (registers stem/structure/comparison ops)
+from . import api_sound  # noqa: E402,F401  (registers sound_compare / instrument_fit)

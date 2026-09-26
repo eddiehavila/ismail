@@ -1,0 +1,512 @@
+"""Instruments: note events -> stereo audio.
+
+Every instrument is a JSON-able dict with a "type". render_instrument() is the single entry point.
+Notes arrive as (start_sec, midi, dur_sec, vel). Automation arrives as {param_path: per-sample curve}
+covering the whole song, so voices can index absolute time.
+"""
+import copy
+import numpy as np
+
+from . import dsp
+from .notation import pitch_to_midi, midi_to_hz
+
+SR = dsp.SR
+
+# ------------------------------------------------------------------ defaults & schema
+
+SYNTH_DEFAULT = {
+    "type": "synth",
+    "oscs": [{"wave": "saw", "level": 1.0}],
+    "noise": 0.0, "noise_color": "white", "sub": 0.0,
+    "drive": 0.0,
+    "filter": {"type": "lp24", "cutoff": 20000.0, "res": 0.0, "keytrack": 0.0, "env_amount": 0.0, "vel_amount": 0.0},
+    "amp_env": {"a": 0.003, "d": 0.2, "s": 1.0, "r": 0.05},
+    "filter_env": {"a": 0.001, "d": 0.3, "s": 0.0, "r": 0.1},
+    "pitch_env": {"amount": 0.0, "decay": 0.05},
+    "lfos": [],
+    "mono": False, "glide": 0.0,
+    "velocity_sens": 0.5,
+    "gain_db": 0.0, "pan": 0.0,
+}
+OSC_DEFAULT = {"wave": "saw", "level": 1.0, "octave": 0, "semi": 0, "fine": 0.0,
+               "unison": 1, "detune": 15.0, "spread": 0.6, "pw": 0.5, "phase": "random",
+               "fm_from": None, "fm_amount": 0.0, "pan": 0.0, "partials": None, "table": None, "fixed_hz": None}
+OSC_WAVES = ('saw', 'square', 'pulse', 'triangle', 'sine', 'additive', 'table', 'noise')
+
+DRUM_DEFAULTS = {
+    "kick": {"pitch_start": 160.0, "pitch_end": 48.0, "pitch_decay": 0.045, "decay": 0.45, "click": 0.25,
+             "drive": 0.0, "hold": 0.02, "gain_db": 0.0, "pan": 0.0},
+    "snare": {"tone_hz": 185.0, "tone_decay": 0.10, "tone_mix": 0.45, "noise_decay": 0.17, "noise_hp": 1200.0,
+              "noise_lp": 10000.0, "pitch_drop": 0.3, "drive": 0.0, "gain_db": 0.0, "pan": 0.0},
+    "hat": {"decay": 0.045, "tune": 1.0, "metal": 0.6, "hp": 7000.0, "bp": 10000.0, "gain_db": 0.0, "pan": 0.0},
+    "clap": {"decay": 0.22, "bp": 1300.0, "q": 0.5, "bursts": 3, "burst_gap": 0.011, "gain_db": 0.0, "pan": 0.0},
+    "tom": {"pitch_start": 220.0, "pitch_end": 110.0, "pitch_decay": 0.08, "decay": 0.35, "click": 0.1,
+            "drive": 0.0, "hold": 0.0, "gain_db": 0.0, "pan": 0.0},
+    "noise_hit": {"decay": 0.3, "filter": "bp", "cutoff": 3000.0, "cutoff_end": 3000.0, "res": 0.3, "attack": 0.001,
+                  "gain_db": 0.0, "pan": 0.0},
+}
+SAMPLER_DEFAULT = {"type": "sampler", "sound": None, "root": "C4", "start": 0.0, "end": None, "loop": False,
+                   "loop_start": None, "loop_end": None, "one_shot": False, "pitch_track": True, "reverse": False,
+                   "transpose": 0.0, "amp_env": {"a": 0.001, "d": 0.0, "s": 1.0, "r": 0.02},
+                   "filter": None, "velocity_sens": 0.5, "gain_db": 0.0, "pan": 0.0}
+
+INSTRUMENT_TYPES = ('synth', 'sampler', 'kit', 'code') + tuple(DRUM_DEFAULTS)
+# output calibration: one synth voice peaks near -9 dBFS, one drum hit near -6 dBFS at full velocity, so a few
+# tracks at 0 dB faders sum without clipping
+SYNTH_GAIN = 0.35
+DRUM_GAIN = 0.5
+
+
+class InstrumentError(ValueError):
+    pass
+
+
+def deep_merge(base, over):
+    out = copy.deepcopy(base)
+    for k, v in (over or {}).items():
+        if isinstance(v, dict) and isinstance(out.get(k), dict):
+            out[k] = deep_merge(out[k], v)
+        else:
+            out[k] = copy.deepcopy(v)
+    return out
+
+
+def normalize(inst):
+    """Fill defaults and validate. Raises InstrumentError with a corrective message."""
+    if not isinstance(inst, dict) or 'type' not in inst:
+        raise InstrumentError(f"instrument needs a 'type': one of {', '.join(INSTRUMENT_TYPES)}")
+    t = inst['type']
+    if t == 'synth':
+        full = deep_merge(SYNTH_DEFAULT, inst)
+        full['oscs'] = [deep_merge(OSC_DEFAULT, o) for o in full['oscs']]
+        for i, o in enumerate(full['oscs']):
+            if o['wave'] not in OSC_WAVES:
+                raise InstrumentError(f"oscs[{i}].wave={o['wave']!r}: use one of {', '.join(OSC_WAVES)}")
+            if o['wave'] == 'additive' and not o['partials']:
+                raise InstrumentError(f"oscs[{i}] is additive: give 'partials': [amp_h1, amp_h2, ...]")
+            if o['wave'] == 'table' and not o['table']:
+                raise InstrumentError(f"oscs[{i}] is table: give 'table': '<sound name>' (a single-cycle sound)")
+            if o['fm_from'] is not None and not (0 <= int(o['fm_from']) < i):
+                raise InstrumentError(f"oscs[{i}].fm_from must index an EARLIER osc (0..{i - 1})")
+        unknown = set(inst) - set(SYNTH_DEFAULT)
+        if unknown:
+            raise InstrumentError(f"unknown synth keys {sorted(unknown)}; valid: {sorted(SYNTH_DEFAULT)}")
+        return full
+    if t in DRUM_DEFAULTS:
+        unknown = set(inst) - set(DRUM_DEFAULTS[t]) - {'type', 'fx'}
+        if unknown:
+            raise InstrumentError(f"unknown {t} keys {sorted(unknown)}; valid: {sorted(DRUM_DEFAULTS[t])}")
+        return deep_merge(dict(DRUM_DEFAULTS[t], type=t), inst)
+    if t == 'sampler':
+        full = deep_merge(SAMPLER_DEFAULT, inst)
+        if not full['sound']:
+            raise InstrumentError("sampler needs 'sound': '<name>' from the sound bank (see sound_list / sound_make)")
+        return full
+    if t == 'kit':
+        if not isinstance(inst.get('map'), dict) or not inst['map']:
+            raise InstrumentError("kit needs 'map': {'C1': {<instrument>}, 'D1': {...}} mapping pitches to instruments")
+        return {"type": "kit", "map": {str(pitch_to_midi(k)): normalize(v) for k, v in inst['map'].items()},
+                "gain_db": inst.get('gain_db', 0.0), "pan": inst.get('pan', 0.0)}
+    if t == 'code':
+        if 'code' not in inst:
+            raise InstrumentError("code instrument needs 'code' defining voice(freq, t, vel, gate, sr) -> array")
+        return dict({"tail": 0.3, "gain_db": 0.0, "pan": 0.0}, **inst)
+    raise InstrumentError(f"unknown instrument type {t!r}; use one of {', '.join(INSTRUMENT_TYPES)}")
+
+
+# ------------------------------------------------------------------ envelopes
+
+def adsr(n, gate_s, a, d, s, r, sr=SR):
+    t = np.arange(n) / sr
+    a = max(a, 1e-4)
+    d = max(d, 1e-4)
+    r = max(r, 1e-4)
+    pre = np.where(t < a, t / a, s + (1 - s) * np.exp(-(t - a) * 5.0 / d))
+    ta = np.clip(gate_s, 0, None)
+    lg = (ta / a) if ta < a else s + (1 - s) * np.exp(-(ta - a) * 5.0 / d)
+    post = lg * np.exp(-(t - ta) * 5.0 / r)
+    return np.where(t < ta, pre, post)
+
+
+def env_tail(env):
+    return max(env.get('r', 0.05), 1e-3)
+
+
+# ------------------------------------------------------------------ synth
+
+def _curve(auto, key, s0, n, default):
+    c = auto.get(key) if auto else None
+    if c is None:
+        return default
+    seg = c[s0:s0 + n]
+    if len(seg) < n:
+        seg = np.concatenate([seg, np.full(n - len(seg), c[-1])])
+    return seg
+
+
+def _lfo_curve(lfo, n, s0, bpm, sr):
+    rate = lfo.get('rate', 5.0)
+    if 'rate_beats' in lfo:  # period in beats, tempo-synced, phase locked to song time
+        rate = bpm / 60.0 / float(lfo['rate_beats'])
+    start = 0 if lfo.get('retrigger', True) else s0
+    phase = (start + np.arange(n)) * rate / sr + lfo.get('phase', 0.0)
+    w = dsp.lfo_wave(lfo.get('shape', 'sine'), phase) * lfo.get('depth', 1.0)
+    delay = lfo.get('delay', 0.0)
+    if delay > 0:
+        w *= np.clip(np.arange(n) / (delay * sr), 0, 1)
+    return w
+
+
+def _synth_voice(p, pitch_curve, gate_s, vel, s0, n, auto, bpm, sr, seed):
+    """Render one voice. pitch_curve: per-sample midi pitch. Returns (L, R)."""
+    rng = np.random.default_rng(seed)
+    lfo_sum = {}
+    for lfo in p['lfos']:
+        tgt = lfo.get('target', 'pitch')
+        lfo_sum[tgt] = lfo_sum.get(tgt, 0.0) + _lfo_curve(lfo, n, s0, bpm, sr)
+    pc = pitch_curve + lfo_sum.get('pitch', 0.0) + _curve(auto, 'pitch', s0, n, 0.0)
+    pe = p['pitch_env']
+    if pe['amount']:
+        pc = pc + pe['amount'] * np.exp(-np.arange(n) / (max(pe['decay'], 1e-4) * sr))
+    base_hz = 440.0 * 2 ** ((pc - 69) / 12)
+
+    L = np.zeros(n)
+    R = np.zeros(n)
+    outs = []
+    for i, o in enumerate(p['oscs']):
+        level = _curve(auto, f'oscs.{i}.level', s0, n, o['level'])
+        if np.isscalar(level) and level == 0 and not any(
+                oo.get('fm_from') == i for oo in p['oscs']):
+            outs.append(np.zeros(n))
+            continue
+        ratio = 2 ** (o['octave'] + o['semi'] / 12 + o['fine'] / 1200)
+        hz = np.full(n, float(o['fixed_hz'])) if o['fixed_hz'] else base_hz * ratio
+        uni = max(1, int(o['unison']))
+        mono_sum = np.zeros(n)
+        pw = _curve(auto, f'oscs.{i}.pw', s0, n, o['pw']) + lfo_sum.get(f'oscs.{i}.pw', lfo_sum.get('pw', 0.0)) * 0.4
+        fm = None
+        if o['fm_from'] is not None:
+            amt = _curve(auto, f'oscs.{i}.fm_amount', s0, n, o['fm_amount']) + lfo_sum.get('fm', 0.0)
+            fm = outs[int(o['fm_from'])] * amt
+        for u in range(uni):
+            off = 0.0 if uni == 1 else (u / (uni - 1) - 0.5) * 2 * o['detune']
+            upan = o['pan'] + (0.0 if uni == 1 else (u / (uni - 1) - 0.5) * 2 * o['spread'])
+            dt = hz * 2 ** (off / 1200) / sr
+            ph0 = rng.random() if o['phase'] == 'random' else float(o['phase'])
+            phase = np.cumsum(dt) + ph0
+            if fm is not None:
+                phase = phase + fm
+            w = o['wave']
+            if w == 'additive':
+                y = dsp.additive(phase, dt, o['partials'])
+            elif w == 'table':
+                y = dsp.table_osc(phase, _TABLE_RESOLVER(o['table']))
+            elif w == 'noise':
+                y = rng.standard_normal(n) * 0.5
+            else:
+                y = dsp.osc(w, phase, dt, pw)
+            y = y / np.sqrt(uni)
+            if uni == 1:
+                mono_sum += y
+            else:
+                gl, gr = dsp.pan_gains(upan)
+                L += y * gl * level
+                R += y * gr * level
+        outs.append(mono_sum)
+        if uni == 1:
+            gl, gr = dsp.pan_gains(o['pan'])
+            L += mono_sum * gl * level
+            R += mono_sum * gr * level
+    if p['sub']:
+        sub = np.sin(2 * np.pi * np.cumsum(base_hz / 2 / sr)) * p['sub']
+        L += sub
+        R += sub
+    nz = _curve(auto, 'noise', s0, n, p['noise'])
+    if np.any(nz):
+        noise = dsp.pink_noise(n, seed) if p['noise_color'] == 'pink' else rng.standard_normal(n) * 0.5
+        L += noise * nz
+        R += noise * nz
+    drive = _curve(auto, 'drive', s0, n, p['drive'])
+    if np.any(drive):
+        g = dsp.undb(drive)
+        L = np.tanh(L * g) / np.sqrt(g)
+        R = np.tanh(R * g) / np.sqrt(g)
+
+    f = p['filter']
+    fe = p['filter_env']
+    cutoff = _curve(auto, 'filter.cutoff', s0, n, f['cutoff'])
+    res = _curve(auto, 'filter.res', s0, n, f['res'])
+    need_filter = not (np.isscalar(cutoff) and cutoff >= 19999 and not f['env_amount'] and 'cutoff' not in lfo_sum) \
+        or f['type'].startswith(('hp', 'bp', 'notch'))
+    if need_filter:
+        octs = np.zeros(n)
+        if f['env_amount']:
+            octs += f['env_amount'] * adsr(n, gate_s, fe['a'], fe['d'], fe['s'], fe['r'], sr)
+        if f['keytrack']:
+            octs += f['keytrack'] * (pc - 60) / 12
+        if f['vel_amount']:
+            octs += f['vel_amount'] * (vel / 127 - 0.5) * 2
+        octs += lfo_sum.get('cutoff', 0.0)
+        c = cutoff * 2 ** octs
+        L = dsp.filt(L, f['type'], c, res, sr, f.get('drive', 1.0))
+        R = dsp.filt(R, f['type'], c, res, sr, f.get('drive', 1.0))
+    ae = p['amp_env']
+    env = adsr(n, gate_s, ae['a'], ae['d'], ae['s'], ae['r'], sr)
+    vs = p['velocity_sens']
+    amp = env * ((1 - vs) + vs * vel / 127)
+    if 'amp' in lfo_sum:
+        amp = amp * (1 + lfo_sum['amp'])
+    return L * amp, R * amp
+
+
+def _group_mono(notes):
+    """Mono mode: notes that overlap/touch form one legato phrase (single envelope, gliding pitch)."""
+    phrases = []
+    for nt in sorted(notes):
+        if phrases and nt[0] < phrases[-1][-1][0] + phrases[-1][-1][2] - 1e-6:
+            phrases[-1].append(nt)
+        else:
+            phrases.append([nt])
+    return phrases
+
+
+def render_synth(p, notes, total_n, auto, bpm, sr):
+    out = np.zeros((2, total_n))
+    tail = env_tail(p['amp_env'])
+    if p['mono']:
+        groups = _group_mono(notes)
+    else:
+        groups = [[nt] for nt in notes]
+    prev_pitch = None
+    for gi, g in enumerate(groups):
+        st = g[0][0]
+        end = max(x[0] + x[2] for x in g)
+        # mono: a new phrase cuts at the next phrase start
+        if p['mono'] and gi + 1 < len(groups):
+            end = min(end, groups[gi + 1][0][0])
+        s0 = int(round(st * sr))
+        gate = end - st
+        n = int((gate + tail) * sr) + 1
+        if p['mono'] and gi + 1 < len(groups):
+            n = min(n, int(round(groups[gi + 1][0][0] * sr)) - s0 + int(0.004 * sr))
+        n = min(n, total_n - s0)
+        if n <= 0:
+            continue
+        steps = np.zeros(n)
+        for x in g:
+            steps[max(int(round((x[0] - st) * sr)), 0):] = x[1]
+        glide = p['glide']
+        if glide > 0 and (len(g) > 1 or prev_pitch is not None):
+            first = prev_pitch if (prev_pitch is not None and p['mono']) else g[0][1]
+            steps_in = steps.copy()
+            a = np.exp(-1.0 / (glide * sr / 3))
+            from scipy.signal import lfilter
+            zi = [first * a]
+            steps = lfilter([1 - a], [1, -a], steps_in, zi=zi)[0]
+        prev_pitch = g[-1][1]
+        vel = g[0][3]
+        l, r = _synth_voice(p, steps, gate, vel, s0, n, auto, bpm, sr, seed=s0 * 31 + g[0][1])
+        if p['mono'] and gi + 1 < len(groups):
+            fade = min(int(0.004 * sr), n)
+            ramp = np.linspace(1, 0, fade)
+            l[-fade:] *= ramp
+            r[-fade:] *= ramp
+        out[0, s0:s0 + n] += l
+        out[1, s0:s0 + n] += r
+    return out
+
+
+# ------------------------------------------------------------------ drums
+
+def _hit_env(n, decay, sr, hold=0.0):
+    t = np.arange(n) / sr
+    e = np.exp(-np.maximum(t - hold, 0) * 5.0 / max(decay, 1e-3))
+    atk = min(int(0.0015 * sr), n)
+    e[:atk] *= np.linspace(0, 1, atk)
+    return e
+
+
+def render_drum(p, vel, sr, seed):
+    t = p['type']
+    rng = np.random.default_rng(seed)
+    if t in ('kick', 'tom'):
+        n = int((p['decay'] + p['hold'] + 0.05) * sr)
+        tt = np.arange(n) / sr
+        f = p['pitch_end'] + (p['pitch_start'] - p['pitch_end']) * np.exp(-tt / max(p['pitch_decay'], 1e-4))
+        y = np.sin(2 * np.pi * np.cumsum(f) / sr) * _hit_env(n, p['decay'], sr, p['hold'])
+        if p['click']:
+            cn = int(0.004 * sr)
+            click = rng.standard_normal(cn) * np.exp(-np.arange(cn) / (0.0008 * sr))
+            click = dsp.filt(click, 'hp12', 800.0, 0.0, sr)
+            y[:cn] += click * p['click']
+        if p['drive']:
+            g = dsp.undb(p['drive'])
+            y = np.tanh(y * g) / np.tanh(g)
+    elif t == 'snare':
+        n = int((max(p['tone_decay'], p['noise_decay']) + 0.05) * sr)
+        tt = np.arange(n) / sr
+        f = p['tone_hz'] * (1 + p['pitch_drop'] * np.exp(-tt / 0.01))
+        tone = np.sin(2 * np.pi * np.cumsum(f) / sr) * _hit_env(n, p['tone_decay'], sr)
+        noise = rng.standard_normal(n)
+        noise = dsp.filt(noise, 'hp12', p['noise_hp'], 0.1, sr)
+        noise = dsp.filt(noise, 'lp12', p['noise_lp'], 0.0, sr) * _hit_env(n, p['noise_decay'], sr)
+        y = tone * p['tone_mix'] + noise * (1 - p['tone_mix']) * 0.8
+        if p['drive']:
+            g = dsp.undb(p['drive'])
+            y = np.tanh(y * g) / np.tanh(g)
+    elif t == 'hat':
+        n = int((p['decay'] + 0.03) * sr)
+        tt = np.arange(n) / sr
+        freqs = np.array([205.3, 304.4, 369.6, 522.7, 540.0, 800.0]) * p['tune']
+        metal = sum(np.sign(np.sin(2 * np.pi * fr * tt + rng.random() * 6.28)) for fr in freqs) / 6
+        y = metal * p['metal'] + rng.standard_normal(n) * (1 - p['metal'])
+        y = dsp.filt(y, 'bp', p['bp'], 0.3, sr)
+        y = dsp.filt(y, 'hp24', p['hp'], 0.0, sr) * _hit_env(n, p['decay'], sr) * 2.0
+    elif t == 'clap':
+        n = int((p['decay'] + p['bursts'] * p['burst_gap'] + 0.05) * sr)
+        env = np.zeros(n)
+        for b in range(int(p['bursts'])):
+            o = int(b * p['burst_gap'] * sr)
+            m = int(0.01 * sr)
+            env[o:o + m] += np.exp(-np.arange(min(m, n - o)) / (0.003 * sr))
+        o = int((p['bursts'] - 1) * p['burst_gap'] * sr)
+        env[o:] += _hit_env(n - o, p['decay'], sr) * 0.7
+        y = dsp.filt(rng.standard_normal(n), 'bp', p['bp'], p['q'], sr) * env * 1.5
+    elif t == 'noise_hit':
+        n = int((p['decay'] + 0.05) * sr)
+        tt = np.arange(n) / sr
+        c = p['cutoff'] * (p['cutoff_end'] / p['cutoff']) ** np.clip(tt / p['decay'], 0, 1)
+        y = dsp.filt(rng.standard_normal(n), p['filter'], c, p['res'], sr)
+        e = _hit_env(n, p['decay'], sr)
+        at = min(int(p['attack'] * sr), n)
+        if at > 1:
+            e[:at] *= np.linspace(0, 1, at)
+        y = y * e
+    else:
+        raise InstrumentError(f"not a drum type: {t}")
+    return y * (0.3 + 0.7 * vel / 127)
+
+
+# ------------------------------------------------------------------ sampler
+
+_SOUND_RESOLVER = None  # set by render: name -> (stereo array (2,n), sr)
+_TABLE_RESOLVER = None
+
+
+def set_resolvers(sound_fn, table_fn):
+    global _SOUND_RESOLVER, _TABLE_RESOLVER
+    _SOUND_RESOLVER = sound_fn
+    _TABLE_RESOLVER = table_fn
+
+
+def _resample_play(sample, ratio, n_out, start_s, end_s, loop, ls, le):
+    """Read sample (2, N) at playback-rate ratio for n_out samples. Linear interpolation."""
+    N = sample.shape[1]
+    pos = start_s + np.arange(n_out) * ratio
+    if loop and le > ls:
+        span = le - ls
+        over = pos >= le
+        pos[over] = ls + np.mod(pos[over] - ls, span)
+    valid = pos < min(end_s, N - 1)
+    pos = np.where(valid, pos, 0)
+    i0 = pos.astype(np.int64)
+    fr = pos - i0
+    out = sample[:, i0] * (1 - fr) + sample[:, np.minimum(i0 + 1, N - 1)] * fr
+    return out * valid
+
+
+def render_sampler(p, notes, total_n, auto, sr):
+    snd = _SOUND_RESOLVER(p['sound'])
+    if p['reverse']:
+        snd = snd[:, ::-1]
+    N = snd.shape[1]
+    root = pitch_to_midi(p['root'])
+    start_s = p['start'] * sr
+    end_s = N if p['end'] is None else min(N, p['end'] * sr)
+    ls = (p['loop_start'] if p['loop_start'] is not None else p['start']) * sr
+    le = (p['loop_end'] * sr) if p['loop_end'] is not None else end_s
+    out = np.zeros((2, total_n))
+    ae = p['amp_env']
+    for st, m, d, v in notes:
+        semis = ((m - root) if p['pitch_track'] else 0) + p['transpose']
+        ratio = 2 ** (semis / 12) * p.get('_sr_ratio', 1.0)
+        s0 = int(round(st * sr))
+        if p['one_shot']:
+            n = int((end_s - start_s) / ratio) + 1
+            gate = n / sr
+        else:
+            gate = d
+            n = int((d + env_tail(ae)) * sr)
+        n = min(n, total_n - s0)
+        if n <= 0:
+            continue
+        y = _resample_play(snd, ratio, n, start_s, end_s, p['loop'], ls, le)
+        env = adsr(n, gate, ae['a'], ae['d'], ae['s'], ae['r'], sr)
+        vs = p['velocity_sens']
+        y = y * env * ((1 - vs) + vs * v / 127)
+        if p['filter']:
+            f = p['filter']
+            cut = _curve(auto, 'filter.cutoff', s0, n, f.get('cutoff', 20000))
+            y = np.stack([dsp.filt(ch, f.get('type', 'lp12'), cut, f.get('res', 0.0), sr) for ch in y])
+        out[:, s0:s0 + n] += y
+    return out
+
+
+# ------------------------------------------------------------------ code instrument
+
+def render_code(p, notes, total_n, sr):
+    ns = {"np": np, "dsp": dsp, "sr": sr}
+    exec(p['code'], ns)
+    if 'voice' not in ns:
+        raise InstrumentError("code instrument must define voice(freq, t, vel, gate, sr)")
+    out = np.zeros((2, total_n))
+    for st, m, d, v in notes:
+        s0 = int(round(st * sr))
+        n = min(int((d + p['tail']) * sr), total_n - s0)
+        if n <= 0:
+            continue
+        y = np.asarray(ns['voice'](midi_to_hz(m), np.arange(n) / sr, v / 127, d, sr), dtype=np.float64)
+        if y.ndim == 1:
+            y = np.stack([y, y])
+        out[:, s0:s0 + y.shape[1]] += y[:, :n]
+    return out
+
+
+# ------------------------------------------------------------------ entry point
+
+def render_instrument(inst, notes, total_n, auto=None, bpm=120.0, sr=SR):
+    """inst: normalized instrument; notes: [(start_sec, midi, dur_sec, vel)]; -> (2, total_n)."""
+    auto = auto or {}
+    t = inst['type']
+    if t == 'synth':
+        out = render_synth(inst, notes, total_n, auto, bpm, sr) * SYNTH_GAIN
+    elif t == 'sampler':
+        out = render_sampler(inst, notes, total_n, auto, sr)
+    elif t == 'code':
+        out = render_code(inst, notes, total_n, sr)
+    elif t == 'kit':
+        out = np.zeros((2, total_n))
+        by = {}
+        for nt in notes:
+            by.setdefault(str(nt[1]), []).append(nt)
+        for key, nts in by.items():
+            if key not in inst['map']:
+                continue  # unmapped pitches are silent; notes_read flags them
+            out += render_instrument(inst['map'][key], nts, total_n, None, bpm, sr)
+    elif t in DRUM_DEFAULTS:
+        out = np.zeros((2, total_n))
+        for st, m, d, v in notes:
+            s0 = int(round(st * sr))
+            y = render_drum(inst, v, sr, seed=s0) * DRUM_GAIN
+            n = min(len(y), total_n - s0)
+            if n > 0:
+                out[0, s0:s0 + n] += y[:n]
+                out[1, s0:s0 + n] += y[:n]
+    else:
+        raise InstrumentError(f"unknown instrument type {t}")
+    g = dsp.undb(_curve(auto, 'gain_db', 0, total_n, inst.get('gain_db', 0.0)))
+    pan = inst.get('pan', 0.0)
+    if pan:
+        gl, gr = dsp.pan_gains(pan)
+        out = out * np.array([[gl], [gr]])
+    return out * g
