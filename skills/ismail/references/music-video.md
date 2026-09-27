@@ -94,6 +94,7 @@ and fixes that, and makes motion read as motion:
   should lean from the chest).
 - **Props are seated, never pushed.** `S.back_mount` slides the prop along the mount axis until it just touches the
   torso (overlap-based; ripped props often have flipped normals). Mount props BEFORE posing, so the pose respects them.
+- **Corrective keys before every render:** interpolating between two clean poses can still swing a limb through the body, so `render` first samples up to 120 frames, runs `unclip` on any that clip and keys the fix on that frame (`FIXED n frames` in the log; `-- --nofix` skips it).
 - **The render refuses** while any key frame clips (`-- --allowclip` to accept it knowingly). `posesheet` shows every
   keyed pose from four sides with the hits under each row: read it before any still.
 - **Moves land on the note.** `C.hit(frame, windup, strike, after)`: windup held `antic` frames before, an ease-in
@@ -115,7 +116,7 @@ C.tape_stop(B(134), B(136, 3), 'END', 240); C.crt_off = frame; C.end_title = (B(
 C.auto_fx(); C.text(t0, t1, 'WORD', 96); C.main()
 ```
 
-Placed audio clips (speech, samples) sync as events too, with `fam` = the sound's name. `C.hold(effect, t0, t1, amp)` holds an effect over a stretch; `dmg` quantises the frame to the four Game Boy greens. Effects follow the note families (`C.fx_map`, defaults in `FX_MAP`): wub remap, dive melt, grind datamosh, robot pixelation, screech tear, metal posterize plus edges, zap invert, howl ghost double exposure (`C.ghost_key`), talk chroma roll, chop stutter. Kicks zoom-punch, sub shakes, snares and crashes flash. Everything sits under a VHS grade (lifted blacks, scanlines, vignette, grain), and `rain=True` adds a rain layer to a shot. Output: 1080p H.264 crf 18 with maxrate 24M plus the master as AAC 320k. Grain must be in the frames, not from an ffmpeg noise filter, or the file triples in size.
+Sources are decoded on demand (forward reads, a seek on a jump, the last frames kept in memory), so a full-song source costs no disk. Placed audio clips (speech, samples) sync as events too, with `fam` = the sound's name. `C.hold(effect, t0, t1, amp)` holds an effect over a stretch; `dmg` quantises the frame to the four Game Boy greens. Effects follow the note families (`C.fx_map`, defaults in `FX_MAP`): wub remap, dive melt, grind datamosh, robot pixelation, screech tear, metal posterize plus edges, zap invert, howl ghost double exposure (`C.ghost_key`), talk chroma roll, chop stutter. Kicks zoom-punch, sub shakes, snares and crashes flash. Everything sits under a VHS grade (lifted blacks, scanlines, vignette, grain), and `rain=True` adds a rain layer to a shot. Output: 1080p H.264 crf 18 with maxrate 24M plus the master as AAC 320k. Grain must be in the frames, not from an ffmpeg noise filter, or the file triples in size.
 
 ## What made it work (creative rules)
 

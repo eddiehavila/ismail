@@ -46,31 +46,51 @@ def _nframes(path):
 
 
 class _Src:
-    def __init__(self, key, stem, n, shotdir, cache):
+    """one shot's frames, decoded on demand: reads forward while the cut plays forward (it mostly does), seeks on a
+    jump, and keeps the last frames in memory for stutters and flickers. No disk cache: a full-song source at
+    960x540 would be ~10 GB."""
+
+    def __init__(self, key, stem, n, shotdir, keep=96):
         import cv2
-        self.key, self.n, self.arr = key, n, None
+        self.key, self.n, self.cap, self.pos, self.keep = key, n, None, 0, keep
+        self.lru = {}
         vs = sorted((int(f[len(stem) + 2:-4]), f) for f in os.listdir(shotdir) if f.startswith(stem + '_v')
                     and f.endswith('.mp4') and f[len(stem) + 2:-4].isdigit()) if os.path.isdir(shotdir) else []
         path = next((os.path.join(shotdir, f) for v, f in reversed(vs) if _nframes(os.path.join(shotdir, f)) >= n), None)
         if path is None:
             print(f'  [missing] {key}: {stem} (a labelled placeholder is used)')
             return
-        os.makedirs(cache, exist_ok=True)
-        c = os.path.join(cache, os.path.basename(path)[:-4] + '.u8')
-        if not os.path.exists(c):
-            raw = subprocess.run(['ffmpeg', '-v', 'error', '-i', path, '-vf', f'scale={W}:{H}', '-frames:v', str(n),
-                                  '-f', 'rawvideo', '-pix_fmt', 'bgr24', '-'], capture_output=True).stdout
-            np.frombuffer(raw, np.uint8).reshape(-1, H, W, 3)[:n].tofile(c)
-        self.arr = np.memmap(c, np.uint8, 'r', shape=(n, H, W, 3))
-        self._cv2 = cv2
+        self.path, self._cv2 = path, cv2
+        self.cap = cv2.VideoCapture(path)
+
+    def _read(self):
+        ok, im = self.cap.read()
+        self.pos += 1
+        if not ok:
+            return np.zeros((H, W, 3), np.uint8)
+        if im.shape[0] != H or im.shape[1] != W:
+            im = self._cv2.resize(im, (W, H), interpolation=self._cv2.INTER_AREA)
+        return im
 
     def get(self, i):
-        if self.arr is None:
+        if self.cap is None:
             import cv2
             im = np.zeros((H, W, 3), np.uint8)
             cv2.putText(im, self.key, (40, 80), cv2.FONT_HERSHEY_SIMPLEX, 2, (0, 0, 255), 3)
             return im
-        return np.asarray(self.arr[int(np.clip(i, 0, self.n - 1))])
+        i = int(np.clip(i, 0, self.n - 1))
+        if i in self.lru:
+            return self.lru[i]
+        if not (self.pos <= i < self.pos + 90):        # a jump: seek (forward runs just read on)
+            self.cap.set(self._cv2.CAP_PROP_POS_FRAMES, i)
+            self.pos = i
+        while self.pos < i:
+            self._read()
+        im = self._read()
+        self.lru[i] = im
+        if len(self.lru) > self.keep:
+            self.lru.pop(next(iter(self.lru)))
+        return im
 
 
 class Cut:
@@ -225,12 +245,11 @@ class Cut:
                 mm = m[ya - y0:yb - y0, xa - x0 - dx:xb - x0 - dx] * alpha
                 x[ya:yb, xa:xb, ch] = x[ya:yb, xa:xb, ch] * (1 - mm) + mm
 
-    def _prepare(self):
+    def _prepare(self, t0=0, t1=None):
         import cv2
         self.cv2 = cv2
         sd = os.path.join(self.vd, 'renders', 'shots')
-        cache = os.path.join(self.vd, 'build', 'cache')
-        self.srcs = {k: _Src(k, st, n, sd, cache) for k, (st, n) in self.shots.items()}
+        self.srcs = {k: _Src(k, st, n, sd) for k, (st, n) in self.shots.items()}
         yy, xx = np.mgrid[0:H, 0:W].astype(np.float32)
         self.yy, self.xx = yy, xx
         self.vig = (1 - 0.32 * (((xx - W / 2) / (W / 2)) ** 2 + ((yy - H / 2) / (H / 2)) ** 2)).clip(0.25, 1)[..., None]
@@ -352,7 +371,7 @@ class Cut:
 
     # ---- output
     def run(self, t0, t1, out, audio=True, sheet=None):
-        self._prepare()
+        self._prepare(t0, t1)
         cv2 = self.cv2
         st, prev = time.time(), None
         if sheet:

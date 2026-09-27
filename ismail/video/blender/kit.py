@@ -438,7 +438,7 @@ class Character:
               'l_up': 'l_up', 'l_fore': 'l_up', 'l_hand': 'l_fore', 'l_fing': 'l_fore',
               'head': 'neck', 'cap': 'neck', 'r_foot': 'r_thigh', 'r_shin': 'r_thigh', 'l_foot': 'l_thigh', 'l_shin': 'l_thigh'}
 
-    def unclip(self, step=4.0, max_deg=25.0, max_iter=12, others=(), verbose=False):
+    def unclip(self, step=4.0, max_deg=25.0, max_iter=12, others=(), verbose=False, quiet=False):
         """the smallest change that takes the pose out of clipping, on the live (unkeyed) pose: contact, not
         clearance. Per round, for each clipping pair (deepest first) the part that can move (arms, then head, then
         legs; rig json "movers" overrides {part: bone}) swings its mover bone `step` degrees away (up to max_deg per
@@ -455,6 +455,7 @@ class Character:
         inv = self.rig.matrix_world.inverted()
         spent = {}
         hits = []
+        self._unclip_moved = False
         for it in range(max_iter):
             hits = self.clip([None], others, ignore, quiet=True)
             if not hits:
@@ -499,12 +500,12 @@ class Character:
                     continue
                 self.rot(mv, lever.cross(away).normalized(), step)
                 spent[mv] = spent.get(mv, 0) + step
-                moved = True
+                moved = self._unclip_moved = True
                 if verbose:
                     print(f'UNCLIP {self.name}: {part} x {other} ({100 * d:.1f}%) -> {mv} {step:g} deg')
             if not moved:
                 break
-        if hits:
+        if hits and not quiet:
             print(f'UNCLIP {self.name}: left {len(hits)} (budget spent): ' +
                   ', '.join(f'{a} x {b} {100 * d:.1f}%' for _, a, b, d in hits[:4]))
         return hits
@@ -894,12 +895,28 @@ class Shot:
             for l in bpy.data.lights:
                 l.energy *= float(a['gain'])
 
+    def fix(self, limit=120, passes=4):
+        """corrective keys: interpolating between two clean poses can still swing a limb through the body, so every
+        sampled frame that clips gets the pose unclip() finds for it, keyed on that frame. Runs before the check."""
+        for _ in range(passes):
+            n = 0
+            for C in self.chars:
+                for f in C.key_frames(limit):
+                    self.scene.frame_set(f)
+                    C.unclip(quiet=True)
+                    if C._unclip_moved:
+                        C._key(f)
+                        n += 1
+            print(f'FIXED {n} frames')
+            if not n:
+                break
+
     def check(self, frames=None):
         """the clipping check for every character (and the props mounted on it); returns the number of hits."""
         n = 0
         for C in self.chars:
             props = [(o, b) for c, o, b in self.clip_props if c is C]
-            n += len(C.clip(frames or C.key_frames(), [o for o, _ in props], [b for _, b in props]))
+            n += len(C.clip(frames or C.key_frames(120), [o for o, _ in props], [b for _, b in props]))
         return n
 
     def _posesheet(self):
@@ -950,6 +967,8 @@ class Shot:
             self._posesheet()
             return
         if self.chars and not self.a.get('noclip'):
+            if not still and not self.a.get('nofix'):
+                self.fix()
             hits = self.check([int(still)] if still else None)
             if hits and not still and not self.a.get('allowclip'):
                 print(f'NOT RENDERED: {hits} clipping hits (fix the poses, or pass --allowclip to accept them)')
