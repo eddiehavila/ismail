@@ -72,6 +72,10 @@ S.go()
 - **Mirrors:** `S.cut_faces(room, pred)` removes the glass (test `abs(normal)`, since rip normals face either way), then add a mirrored copy of the room and a double under an empty scaled (1, -1, 1).
 - **Sky domes** block lightning and sun: split the dome off by material and set it `visible_shadow = False`.
 - Game-specific props (a vacuum, a ghost with a fixed orientation) go in a helper module in `shots/`, not in the kit.
+- **Build in metres.** If a rip is thousands of units across (cm-like units), load it with `S.room(stem, scale=0.01)`, scale characters to real heights, pass `gain=1.0` and write lights in real watts. Blender reads 1 unit as 1 m: a 9000-unit arena is 9 km and no sane light reaches across it. `Shot.gain` is only for rooms near metre scale.
+- **Raised stages:** `S.floor(x, y)` casts up from below and can return a platform's underside; `S.top(x, y, z_from)` from just above the floor is safer. `--top` markers scale with the view span.
+- **A 2D game layer** (a handheld's screen, a battle UI): render it once for the whole song as a PNG sequence driven by the events (text typed on the song's blip notes, bars that drain on hits), then use it twice: as a screen texture (image sequence, `frame_offset` = the song frame of the shot's start, Closest interpolation) and as a flat full-screen source in the edit. Write each frame's brightness to a json and key the screen's glow light from it, so a flash on the screen lights the room. Area lights shine down their local -Z: flip one to face out of a screen.
+- Song-local helper modules in `shots/` import directly (the kit puts that folder on the path).
 - **GPU budget.** Shots render at `pct` 50 (960x540) with 16 EEVEE samples and are upscaled in the edit. A throttled consumer GPU manages about 1 to 2.5 s per frame, so a 384-frame shot takes 10 to 15 minutes. Budget the whole shot list before rendering, and check the GPU clock if times double.
 
 ## Animation (what separates a video from a slideshow of poses)
@@ -111,7 +115,7 @@ C.tape_stop(B(134), B(136, 3), 'END', 240); C.crt_off = frame; C.end_title = (B(
 C.auto_fx(); C.text(t0, t1, 'WORD', 96); C.main()
 ```
 
-Effects follow the note families (`C.fx_map`, defaults in `FX_MAP`): wub remap, dive melt, grind datamosh, robot pixelation, screech tear, metal posterize plus edges, zap invert, howl ghost double exposure (`C.ghost_key`), talk chroma roll, chop stutter. Kicks zoom-punch, sub shakes, snares and crashes flash. Everything sits under a VHS grade (lifted blacks, scanlines, vignette, grain), and `rain=True` adds a rain layer to a shot. Output: 1080p H.264 crf 18 with maxrate 24M plus the master as AAC 320k. Grain must be in the frames, not from an ffmpeg noise filter, or the file triples in size.
+Placed audio clips (speech, samples) sync as events too, with `fam` = the sound's name. `C.hold(effect, t0, t1, amp)` holds an effect over a stretch; `dmg` quantises the frame to the four Game Boy greens. Effects follow the note families (`C.fx_map`, defaults in `FX_MAP`): wub remap, dive melt, grind datamosh, robot pixelation, screech tear, metal posterize plus edges, zap invert, howl ghost double exposure (`C.ghost_key`), talk chroma roll, chop stutter. Kicks zoom-punch, sub shakes, snares and crashes flash. Everything sits under a VHS grade (lifted blacks, scanlines, vignette, grain), and `rain=True` adds a rain layer to a shot. Output: 1080p H.264 crf 18 with maxrate 24M plus the master as AAC 320k. Grain must be in the frames, not from an ffmpeg noise filter, or the file triples in size.
 
 ## What made it work (creative rules)
 

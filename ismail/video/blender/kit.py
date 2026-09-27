@@ -33,6 +33,7 @@ def _video_dir():
 
 
 VD = _video_dir()
+sys.path.insert(0, os.path.join(VD, 'shots'))     # song-local helper modules (props, rigs) import directly
 X = os.path.join(VD, 'build', 'x')
 ASSETS = os.path.join(VD, 'assets')
 CFG = json.load(open(os.path.join(VD, 'config.json'))) if os.path.exists(os.path.join(VD, 'config.json')) else {}
@@ -101,6 +102,9 @@ class Character:
         self.ctl.location = loc
         self.ctl.rotation_euler = (0, 0, math.radians(yaw))
         self.rig = next(o for o in self.root.children_recursive if o.type == 'ARMATURE')
+        for o in self.root.children_recursive:      # rig json "hide": mesh-name substrings (a surfboard, a spare hand)
+            if o.type == 'MESH' and any(h in o.name for h in self.cfg.get('hide', [])):
+                o.hide_render = o.hide_viewport = True
         for pb in self.rig.pose.bones:
             pb.rotation_mode = 'QUATERNION'
         self.eye_values, self.eye_order = [], []
@@ -330,7 +334,7 @@ class Character:
     @staticmethod
     def _depth(A, B):
         """how deep two parts pass into each other: over the vertices of the triangles that intersect, the largest
-        distance behind the other part's surface (0 when they only touch or do not meet)."""
+        distance inside the other part (behind its nearest face AND enclosed by it; 0 when they only touch)."""
         pairs = A[2].overlap(B[2])
         if not pairs:
             return 0.0
@@ -340,8 +344,11 @@ class Character:
             for k in {k for i in idx for k in P[1][i]}:
                 v = P[0][k]
                 loc, nrm, _, dist = Q[2].find_nearest(v)
-                if loc is not None and nrm.dot(v - loc) < 0:
-                    d = max(d, dist)
+                if loc is None or dist <= d or nrm.dot(v - loc) >= 0:
+                    continue
+                # enclosed, not just behind a face: rays both ways must hit (a flat tail or ear encloses nothing)
+                if Q[2].ray_cast(v, nrm)[0] is not None and Q[2].ray_cast(v, -nrm)[0] is not None:
+                    d = dist
             return d
         return max(inside(A, B, {p[0] for p in pairs}), inside(B, A, {p[1] for p in pairs}))
 
@@ -867,8 +874,8 @@ class Shot:
         if a.get('top'):
             cx, cy, span, zc = map(float, a['top'].split(','))
             self.scene.frame_set(int(a.get('still', 1)))
-            for loc, r, col in ((self.cam.matrix_world.translation.copy(), 3, (1, 0, 0, 1)),
-                                (self.target.matrix_world.translation.copy(), 2, (0, 1, 1, 1))):
+            for loc, r, col in ((self.cam.matrix_world.translation.copy(), span * 0.012, (1, 0, 0, 1)),
+                                (self.target.matrix_world.translation.copy(), span * 0.008, (0, 1, 1, 1))):
                 bpy.ops.mesh.primitive_uv_sphere_add(radius=r, location=(loc.x, loc.y, zc - 1))
                 mm = bpy.data.materials.new('mark')
                 b = next(n for n in mm.node_tree.nodes if n.type == 'BSDF_PRINCIPLED')

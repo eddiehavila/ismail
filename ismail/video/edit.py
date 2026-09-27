@@ -32,7 +32,8 @@ FX_MAP = {'wub': 'wub', 'yoi': 'yoi', 'screech': 'screech', 'metal': 'metal', 'z
           'grind': 'grind', 'robot': 'robot', 'howl': 'howl', 'talk': 'talk', 'chop': 'stutter',
           'bang': 'bang', 'reload': 'reload'}
 EFFECTS = ('wub', 'yoi', 'screech', 'metal', 'zap', 'dive', 'grind', 'robot', 'howl', 'kick', 'snare', 'flash',
-           'tear', 'talk', 'ghost')
+           'tear', 'talk', 'ghost', 'dmg')
+DMG_BGR = np.array([(15, 56, 15), (48, 98, 48), (15, 172, 139), (15, 188, 155)], np.float32) / 255   # Game Boy greens
 
 
 def _nframes(path):
@@ -159,6 +160,11 @@ class Cut:
         self.texts.append((t0, t1, s, size, cx, cy))
 
     # ---- effects
+    def hold(self, key, t0, t1, amp=1.0):
+        """an effect held on for a stretch (e.g. hold('dmg', ...) draws a whole turn in Game Boy greens)."""
+        e = self.env[key]
+        e[max(0, t0):min(self.total, t1)] = np.maximum(e[max(0, t0):min(self.total, t1)], amp)
+
     def pulse(self, key, f0, length, tau=None, amp=1.0):
         tau = tau or max(2.0, length * 0.45)
         e = self.env[key]
@@ -300,6 +306,11 @@ class Cut:
             x = np.round(x * lvls) / lvls
             g = cv2.cvtColor(np.clip(x, 0, 1), cv2.COLOR_BGR2GRAY)
             x = x + (np.abs(cv2.Laplacian(g, cv2.CV_32F)) * 1.5 * mt)[..., None]
+        dm = env['dmg'][t]
+        if dm > 0.05:                                     # the four Game Boy greens
+            g = cv2.cvtColor(np.clip(x, 0, 1), cv2.COLOR_BGR2GRAY)
+            q = np.clip((g * 1.25 * 4).astype(np.int32), 0, 3)
+            x = x * (1 - dm) + DMG_BGR[q] * dm
         if env['zap'][t] > 0.5:
             x = 1 - np.clip(x, 0, 1)
         hw = max(env['howl'][t], env['ghost'][t])
