@@ -148,6 +148,20 @@ Every metric sits between two baselines computed from the reference alone: the r
 
 The perceptual group exists because the others can all look fine while the result still sounds different, and the clean group exists because note metrics reward clutter. Use `cmp_run(stems='demucs')` at checkpoints so your render goes through the same separation as the reference. Any change to the scoring should be checked against a known-bad and a known-good draft before you trust it.
 
+## Music videos (optional)
+
+`ismail.video` makes a music video from a finished song, with every cut and glitch placed from the song's own notes (the event list comes from the project, so the sync is frame exact). It needs `pip install -e .[video]`, Blender 5.x and ffmpeg.
+
+```bash
+python -m ismail.video init   -s songs/<slug>        # scaffold songs/<slug>/video/
+python -m ismail.video sync   -s songs/<slug>        # notes -> frames
+python -m ismail.video still  -s songs/<slug> s01_example.py 48
+python -m ismail.video render -s songs/<slug> s01_example.py
+python -m ismail.video edit   -s songs/<slug> -- --sheet 33 41 16
+```
+
+Shots are Blender scripts built on a small kit (rooms, rigged characters from JSON, lights, fog, cameras), the cut list is Python written in bars, and review is by stills and contact sheets. Per-song work lives in `songs/<slug>/video/`. The skill reference `skills/ismail/references/music-video.md` has the full method.
+
 ## Tests
 
 ```bash
@@ -172,6 +186,7 @@ ismail/
   perceptual.py  CLAP similarity
   sounddesign.py one-shot rendering, sound distance, parameter fitting
   trackfit.py    in-context fitting against a reference stem
+  video/         optional music-video pipeline: sync, edit engine, Blender shot kit, CLI
   voices/        voice modules: grand_piano, additive_piano, growl, sfx
   api.py, api_cmp.py, api_sound.py   the operations (CLI and MCP tools)
   mcp_server.py, guide.py

@@ -1,0 +1,101 @@
+# Music videos for ismail songs
+
+`ismail.video` (optional: `pip install -e .[video]`, plus Blender 5.x and ffmpeg on PATH) turns a finished song into a music video whose every cut and glitch is placed from the song's own notes. You never watch video. You review stills and contact sheets, and the sync is exact because the event list comes from `proj/project.json`, not from audio detection.
+
+Use it when the user asks for a music video, visualizer, or clip for a song made with ismail.
+
+## Layout (everything lives next to the song)
+
+```
+songs/<slug>/video/
+  config.json    title, master wav, named note families, blender path, pct, samples, font
+  plan.md        the treatment (write it first)
+  cut.py         the cut list + effects (ismail.video.edit.Cut)
+  shots/*.py     one Blender script per shot (ismail.video.blender.kit), plus song-local helper modules
+  rigs/*.json    characters: bone map, poses, eye textures, mounts
+  assets/        models and textures (.dae / .obj folders)
+  build/         x/ (extracted models), events.json, features.npz, look/ (stills, sheets), cache/, logs/
+  renders/       shots/<name>_vN.mp4 (never overwritten), <Title> vN.mp4
+```
+
+`songs/` is git-ignored, so models and per-song work stay private. If another song already has a `video/` folder, read its `plan.md`, `cut.py` and two shot scripts before starting: that is the worked example.
+
+## The CLI
+
+```
+python -m ismail.video init    -s songs/<slug>                    scaffold video/ (never overwrites)
+python -m ismail.video rip     -s songs/<slug> video/assets/<dir>  .dae files or folders -> build/x
+python -m ismail.video sync    -s songs/<slug>                    events.json + features.npz (rerun after any song change)
+python -m ismail.video still   -s songs/<slug> s04_foyer.py 120 [-- --top cx,cy,span,z | --dbg nofog | --pct 25]
+python -m ismail.video render  -s songs/<slug> s04_foyer.py s05_insert.py ...
+python -m ismail.video contact -s songs/<slug> video/renders/shots/s04_foyer_v1.mp4 16
+python -m ismail.video edit    -s songs/<slug> [-- --sheet 33 41 16 | -- --range 33 41]
+```
+
+`render` holds a machine-wide GPU lock, so queues started from several shells run one at a time instead of thrashing. `still` does not take the lock. Run the module from a directory that is not the repo's parent, or the source folder can shadow the installed package.
+
+## The loop
+
+1. **Listen to the arrangement as data.** `sync`, then read `build/events.json`: tracks, notes as frames, families. Know the form map (intro, build, dropout, drops, break, the last-bar moment) by bar number before writing a single shot.
+2. **Treatment** in `plan.md`: one-line story, hook words and the picture for each, look, timeline by bars, shot list with frames and start bars. Show it to the user before rendering anything expensive.
+3. **Assets.** Models come from the user or from sources they approve. Always ask before downloading. `rip` the .dae files, put .obj folders under `assets/`.
+4. **One shot at a time:** write the script, then take stills at 2 or 3 frames at `--pct 25`, read them, fix, and repeat. For a black or empty frame, use `--top` (an ortho plan view with the camera as a red dot and its target as cyan) and `--dbg nofog`. Only a shot whose stills are right goes to `render`.
+5. **Render the queue** in the background (one `render` call with every approved shot). Contact-sheet each result as it lands.
+6. **Cut** in `cut.py` against the bar grid, then `edit -- --sheet a b n` on every section and read the sheets. Fix, then run the full `edit`.
+7. **Review the final** with `contact` over the whole render (about 40 frames), and report the file, its size and the sheet.
+
+## Sync math
+
+Frames per beat = fps * 60 / BPM (150 BPM at 30 fps: beat 12, 16th 3, bar 48, triplet quarter 8). `Cut.B(bar, beat)` and `Shot.events(track)` do this for you. The growl voice's articulation lives in `vel // 10` (1 yoi, 2 wub, 3 screech, 4 metal, 5 dive, 6 zap, 7 grind, 8 chop, 9 talk, 11 robot, 12 howl). Other named families go in `config.json`, for example `"families": {"growl": {"90": "name"}, "gun": {"10": "bang"}}`, and appear as `e['fam']`.
+
+## Shots (Blender kit)
+
+```python
+import os, sys; sys.path.insert(0, os.environ['ISMAIL_VIDEO_KIT'])
+import kit
+S = kit.Shot('s04_foyer', 384, start_bar=9)       # frame 1 = the song frame of bar 9
+room = S.room('Foyer'); Z = S.floor(0, 50)
+L = S.character('hero', loc=(0, 34, Z), yaw=180)  # rigs/hero.json
+L.pose(L.poses['scared'], frame=1); L.eyes('wide', 1)
+S.flashlight(L); S.fog((0, 0, 40), (400, 400, 120)); S.light('SPOT', ...)
+for e in S.events('kick'): S.flicker(lamp, [e['lf']])
+S.camera(1, (0, -80, 30), (0, 30, 20), lens=18); S.camera(384, ...); S.handheld(0.3)
+S.go()
+```
+
+- **Units.** Ripped rooms are often about 20x metres, sometimes 10x more. Write light energies as if metres and let `Shot.gain` (40) scale them (the sun is not scaled). Check scale with `S.bounds()` before placing anything.
+- **Floors** are not the bounding-box bottom. Use `S.floor(x, y)` and `S.top(x, y)` (raycasts).
+- **Posing** is by direction, never by guessed Euler angles: `('p', bone, child, [x, y, z])` points a bone at a direction in armature space, `('r', bone, axis, deg)` rotates. Write the axes convention of the rig in its `notes`.
+- **Eyes** are texture swaps, keyed per frame (`L.eyes(state, frame)`).
+- **Props** mount in world space along bone to child and are then parented (`S.mount`, `S.back_mount`). A light inside a glove is shadowed by it: push it forward (`fwd`).
+- **Mirrors:** `S.cut_faces(room, pred)` removes the glass (test `abs(normal)`, since rip normals face either way), then add a mirrored copy of the room and a double under an empty scaled (1, -1, 1).
+- **Sky domes** block lightning and sun: split the dome off by material and set it `visible_shadow = False`.
+- Game-specific props (a vacuum, a ghost with a fixed orientation) go in a helper module in `shots/`, not in the kit.
+- **GPU budget.** Shots render at `pct` 50 (960x540) with 16 EEVEE samples and are upscaled in the edit. A throttled consumer GPU manages about 1 to 2.5 s per frame, so a 384-frame shot takes 10 to 15 minutes. Budget the whole shot list before rendering, and check the GPU clock if times double.
+
+## The edit (Cut)
+
+```python
+from ismail.video.edit import Cut
+C = Cut(__file__); B, ev = C.B, C.ev
+C.shot('FOY', 's04_foyer', 384, gain=1.2)            # newest complete renders/shots/s04_foyer_vN.mp4
+C.sections([(1, 17, .25), (33, 65, 1.0), ...])       # glitch intensity per section
+C.seg(B(9), B(17), 'FOY')                             # bars 9-16, source frame 0 onward
+for e in ev('growl', 12, 17): C.seg(e['f'], e['f'] + e['len'], 'INSERT', 20)   # an insert for exactly one note
+C.cycle_cuts(B(25), B(29), [e['f'] for e in ev('snare', 25, 29)], ['A', 'B'], {'A': 0, 'B': 100})
+C.tape_stop(B(134), B(136, 3), 'END', 240); C.crt_off = frame; C.end_title = (B(137, 2), 'TITLE')
+C.auto_fx(); C.text(t0, t1, 'WORD', 96); C.main()
+```
+
+Effects follow the note families (`C.fx_map`, defaults in `FX_MAP`): wub remap, dive melt, grind datamosh, robot pixelation, screech tear, metal posterize plus edges, zap invert, howl ghost double exposure (`C.ghost_key`), talk chroma roll, chop stutter. Kicks zoom-punch, sub shakes, snares and crashes flash. Everything sits under a VHS grade (lifted blacks, scanlines, vignette, grain), and `rain=True` adds a rain layer to a shot. Output: 1080p H.264 crf 18 with maxrate 24M plus the master as AAC 320k. Grain must be in the frames, not from an ffmpeg noise filter, or the file triples in size.
+
+## What made it work (creative rules)
+
+- **The story comes from the source's own lore**, so each shot means something to someone who knows it. The song's hook words each get one picture, shown exactly for the note's length.
+- **Cut rate is the arrangement.** Long shots in the intro, snare rolls set the cut rate in builds, triplet hooks cut on every hit, the drop 2 chains are the cadence, and the final section strobes on 6 frames.
+- **The dropout bar before a drop** is black, then one held image and the title.
+- **The bar-96 moment** (the last bar of build 2) gets its own shot.
+- **The ending pays off the opening** (the painting he becomes, the TV that turns on and then off).
+- **Subliminals:** one frame of the payoff image on every sixth tick in the break.
+- **Brightness:** the first cut was too dark to read on a phone. Aim for readable mids and let the grade darken the edges.
+- **Avoid:** real people's likenesses and depicted violence against people. Keep the menace in the music, the monsters and the edit.

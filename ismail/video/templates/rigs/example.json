@@ -1,0 +1,11 @@
+{
+  "model": "<stem in build/x>",
+  "scale": 0.09,
+  "bones": {"hips": "", "chest": "", "neck": "", "head": "",
+            "r_up": "", "r_fore": "", "r_hand": "", "r_fing": "",
+            "l_up": "", "l_fore": "", "l_hand": "", "l_fing": "",
+            "r_thigh": "", "r_shin": "", "r_foot": "", "l_thigh": "", "l_shin": "", "l_foot": ""},
+  "eyes": {"base": "<the eye texture file name>", "dir": "assets/<model folder>", "states": {"default": "<same file>"}},
+  "poses": {"stand": [["p", "r_up", "r_fore", [-0.3, -1, 0.05]], ["p", "l_up", "l_fore", [0.3, -1, 0.05]]]},
+  "mounts": {"hand": ["r_hand", "r_fing"], "back": "chest"}
+}

@@ -1,6 +1,6 @@
 ---
 name: ismail
-description: Compose, arrange, sound-design, mix and recreate music with the ismail agent DAW (MCP tools mcp__ismail__*, or `python -m ismail -p <project> <op>`). Use whenever the user asks to make a song, beat, loop, track, jingle, soundtrack cue, remix or cover, to recreate or match a reference recording, to design a sound or instrument, or to fix how a render sounds (muddy, harsh, cluttered, flat, off-tempo), and ismail is available. The skill makes you plan the piece as a Session Sheet before writing notes, listen to every render through ismail's text analysis, and judge a reference match with its baseline-scored comparisons instead of by feel. Not for music theory questions with no rendering, lyrics-only writing, or editing audio in other DAWs.
+description: Compose, arrange, sound-design, mix and recreate music with the ismail agent DAW (MCP tools mcp__ismail__*, or `python -m ismail -p <project> <op>`). Use whenever the user asks to make a song, beat, loop, track, jingle, soundtrack cue, remix or cover, to recreate or match a reference recording, to design a sound or instrument, to fix how a render sounds (muddy, harsh, cluttered, flat, off-tempo), or to make a music video for a finished song (ismail.video), and ismail is available. The skill makes you plan the piece as a Session Sheet before writing notes, listen to every render through ismail's text analysis, and judge a reference match with its baseline-scored comparisons instead of by feel. Not for music theory questions with no rendering, lyrics-only writing, or editing audio in other DAWs.
 license: MIT
 metadata:
   author: newsbubbles
@@ -49,6 +49,7 @@ Registers must not collide: at most one part per octave band doing sustained wor
 - `references/sound-design.md`: recipes per role with parameter ranges, gain staging, when and how to use `instrument_fit`, `track_fit`, `sound_extract`, formant and vocoder voices. Read when choosing or designing sounds.
 - `references/listening.md`: which analysis tool answers which question, how to read the text views (digits, rolls, zoom codes), and the Listening Report checks. Read before the first listen.
 - `references/recreate.md`: matching a reference recording: grid and alignment, separation, consensus transcription, comparisons, what the scores mean, and the traps that make a draft score better while sounding worse. Read whenever a reference track is involved.
+- `references/music-video.md`: music videos with `ismail.video`: the per-song `video/` folder, the CLI, the shot kit (units, floors, posing, mirrors, GPU budget), the cut list and note-driven glitches, contact-sheet review and the creative rules. Read before planning any video.
 
 ## Non-negotiables
 
