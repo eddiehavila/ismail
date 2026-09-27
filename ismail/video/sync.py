@@ -49,6 +49,11 @@ def events(song):
             if fam is not None:
                 e['fam'] = fam
             ev.append(e)
+        for clip in tr.get('audio') or []:          # placed audio (speech, samples): fam = the sound's name
+            snd = p.get('sounds', {}).get(clip['sound'], {})
+            sec = clip['length_beats'] * 60.0 / bpm if clip.get('length_beats') else snd.get('sec') or 1.0
+            ev.append({'f': int(round(clip['at_beat'] * fpb + off)), 'beat': clip['at_beat'], 'pitch': None,
+                       'len': max(1, int(round(sec * fps))), 'vel': 100, 'fam': clip['sound']})
         out[name] = sorted(ev, key=lambda e: e['f'])
     return {'fps': fps, 'bpm': bpm, 'frames_per_beat': fpb, 'beats_per_bar': p.get('beats_per_bar', 4),
             'offset_frames': off, 'length_bars': p['length_bars'], 'tracks': out}
