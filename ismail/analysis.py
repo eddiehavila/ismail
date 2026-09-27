@@ -420,7 +420,7 @@ def chords(path, grid, bars=None, per_bar=2, max_bars=32):
             cells.append(f"{lab}/{midi_to_name(bn + 24)}" + ('?' if conf < 0.7 else ''))
             data.append({'bar': b, 'part': k, 'chord': lab, 'bass': midi_to_name(bn + 24), 'conf': round(conf, 2)})
         lines.append(f"bar {b:>3}: " + '  '.join(f"{c:<12}" for c in cells))
-    lines.append("(chord/bass-note; '?' = weak template match — likely a riff or single-note line, not a chord)")
+    lines.append("(chord/bass-note; '?' = weak template match: likely a riff or single-note line, not a chord)")
     return data, '\n'.join(lines)
 
 
