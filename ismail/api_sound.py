@@ -131,15 +131,23 @@ def sound_extract(project: str, name: str, source: str, bars: list, step: int, s
     pre = int(pre_ms / 1000 * sr)
     bars_list = [b for b in range(bars[0], bars[1] + 1, max(1, every))
                  if which == 'all' or (which == 'odd' and b % 2) or (which == 'even' and not b % 2)]
-    segs = []
+    segs, used, skipped = [], [], []
     for b in bars_list:
         t = g.bar_time(b + step / steps_per_bar)
         a = int(t * sr) - pre - int(0.02 * sr)
-        if a < 0 or a + n + int(0.04 * sr) > y.shape[1]:
+        L = n + int(0.04 * sr)
+        if a + L > y.shape[1]:
+            skipped.append(b)  # runs past the end of the audio
             continue
-        segs.append(y[:, a:a + n + int(0.04 * sr)])
+        seg = y[:, max(a, 0):a + L]
+        if a < 0:  # event right at the start of the file: pad the pre-roll with silence
+            seg = np.concatenate([np.zeros((y.shape[0], -a)), seg], axis=1)
+        segs.append(seg)
+        used.append(b)
     if len(segs) < 2:
-        raise OpError("fewer than 2 occurrences in range; widen bars or check step")
+        raise OpError(f"fewer than 2 occurrences: bars tried {bars_list}, usable {used}"
+                      f"{f', past the end of the audio {skipped}' if skipped else ''}; widen bars, lower every, or "
+                      f"check step (0-based 16th within the bar)")
     ref = segs[0].mean(0)
     shift = int(0.02 * sr)
     aligned = []
@@ -155,7 +163,8 @@ def sound_extract(project: str, name: str, source: str, bars: list, step: int, s
     _write_sound(P, name, avg, sr, note=f"avg of {len(aligned)} x {source} step {step} bars {bars}")
     P.save()
     d = SD.descriptor(avg if sr == SD.SR else avg)
-    return (f"sound {name!r}: average of {len(aligned)} occurrences; consistency {cons:.2f} "
+    return (f"sound {name!r}: average of {len(aligned)} occurrences (bars {used}"
+            f"{f'; skipped {skipped}, past the end' if skipped else ''}); consistency {cons:.2f} "
             f"(1 = identical each time, <0.5 = the event varies or is buried; widen/narrow the bar set)\n"
             f"centroid {d['centroid']:.0f} Hz, width {d['width']:.2f}")
 

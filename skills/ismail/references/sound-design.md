@@ -17,7 +17,7 @@ One synth voice peaks near -9 dBFS and one drum hit near -6 dBFS at full velocit
 | kick | `{"type": "kick"}` | pitch_end = key root around 38-55 Hz, pitch_start 90-160, pitch_decay 0.02-0.05, decay 0.25-0.45, click 0.1-0.4, drive 3-6 dB |
 | snare | `{"type": "snare"}` | tone_hz 130-200 (the body), tone_mix 0.35-0.55, noise_hp 300-2000, noise_decay 0.15-0.35 |
 | hat | `{"type": "hat"}` | decay 0.03 closed / 0.2 open, hp 1.5-8 kHz, metal 0.5-0.9; add `chorus` or `tremolo mode=pan` for width |
-| bass | saw + sine sub at octave -1 | lp24 400-1600 Hz, mono true, glide 0.02; eq lowcut 40 Hz; `duck` source=kick depth -6 to -12 dB |
+| bass | saw + sine sub at octave -1 | lp24 400-1600 Hz, mono true, glide 0.02; fx `{"type": "eq", "bands": [{"type": "lowcut", "freq": 40}]}`; `duck` source=kick depth -6 to -12 dB |
 | stabs / riff | saw unison 3-4, detune 10-25 cents | lp24 1-3 kHz, filter env_amount 0.5-1.5 oct (4 oct makes every note a bright click), amp s 0.5-0.8 so gaps don't open |
 | pad | saw unison 3-5 + noise 0.1-0.3 | lp 1.5-3 kHz, amp a 0.005-0.6, s 0.3-0.8, chorus + reverb send -8 dB |
 | lead | square pw 0.3 + saw | lp 3-6 kHz with env, delay 0.75 beats pingpong, reverb send |

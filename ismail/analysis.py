@@ -112,7 +112,26 @@ def beat_grid(path, bpm_hint=None, beats_per_bar=4):
         fine = comb(np.arange(coarse[1] - 0.06, coarse[1] + 0.06, 0.002))
         if best is None or fine[0] > best[0]:
             best = fine
-    _, bpm, ph = best
+    best_score, bpm, ph = best
+
+    def alternatives(bpm, score):
+        out = []
+        for r, label in ((2.0, 'x2'), (1.5, 'x1.5'), (2 / 3, 'x2/3'), (0.5, '/2')):
+            a = bpm * r
+            if 55 <= a <= 200:
+                sc_a = comb(np.arange(a - 0.3, a + 0.3, 0.01))
+                out.append((label, sc_a[1], sc_a[0] / (score + 1e-9), sc_a))
+        return out
+    # tempo-octave alternatives: half-time genres (dubstep, DnB, trap) often read at /2 or x2/3 of the played tempo.
+    # Octave doubts (x2, /2) stay a report; a x1.5 or x2/3 reading that combs clearly stronger replaces the estimate
+    # (tested on 8 songs of known tempo: fixed a 150 BPM track read as 100, changed none of the others)
+    alts = alternatives(bpm, best_score)
+    strong = [x for x in alts if x[0] in ('x1.5', 'x2/3') and x[2] > 1.2]
+    if strong:
+        s0 = max(strong, key=lambda x: x[2])[3]
+        best_score, bpm, ph = comb(np.arange(s0[1] - 0.06, s0[1] + 0.06, 0.002))
+        alts = alternatives(bpm, best_score)
+    alts = [(lab, b, r) for lab, b, r, _ in alts]
     # refine phase finely
     period = fps * 60 / bpm
     phs = np.linspace(ph - 2, ph + 2, 41)
@@ -124,9 +143,24 @@ def beat_grid(path, bpm_hint=None, beats_per_bar=4):
     freqs = librosa.fft_frequencies(sr=ASR, n_fft=2048)
     low = librosa.onset.onset_strength(S=librosa.amplitude_to_db(S[freqs < 150]), sr=ASR, hop_length=HOP)
     lz = low - low.mean()
-    on = lz[np.clip((k + ph).astype(int), 0, len(lz) - 1)].mean()
-    off = lz[np.clip((k + ph + period / 2).astype(int), 0, len(lz) - 1)].mean()
-    if off > on:
+
+    def at(sig, p):
+        return sig[np.clip((k + p).astype(int), 0, len(sig) - 1)].mean()
+
+    def vote(a, b):
+        return (a - b) / (abs(a) + abs(b) + 1e-9)
+    # three votes for "ph is the beat, not the off-beat": kick-band onsets, chord changes (harmony moves on the
+    # beat; a ducked bass swells on the off-beat and fools the kick band alone), and the first sound of the track
+    v_low = vote(at(lz, ph), at(lz, ph + period / 2))
+    chroma_f = librosa.feature.chroma_stft(S=S ** 2, sr=ASR, hop_length=HOP)
+    dl = max(int(0.08 * fps), 1)
+    cc = np.r_[np.zeros(dl), np.linalg.norm(chroma_f[:, 2 * dl:] - chroma_f[:, :-2 * dl], axis=0), np.zeros(dl)]
+    cc = cc - cc.mean()
+    v_chroma = vote(at(cc, ph), at(cc, ph + period / 2))
+    first = float(np.argmax(oenv > 0.2 * oenv.max()))
+    dist = ((first - ph) / period) % 1.0
+    v_start = 1.0 if min(dist, 1 - dist) < 0.15 else (-1.0 if abs(dist - 0.5) < 0.15 else 0.0)
+    if v_low + v_chroma + 0.75 * v_start < 0:
         ph = (ph + period / 2) % period
     beat0 = ph / fps
     # fine phase on a sharp envelope: 2048-sample frames put flux peaks ~30 ms late
@@ -150,11 +184,33 @@ def beat_grid(path, bpm_hint=None, beats_per_bar=4):
     for p in range(beats_per_bar):
         scores.append(low[bf[p::beats_per_bar]].mean() / (low[bf].mean() + 1e-9)
                       + cchg[p::beats_per_bar].mean() / (cchg.mean() + 1e-9))
-    p = int(np.argmax(scores))
+    bar_len = beats_per_bar * 60 / bpm
+    # section evidence: the biggest level jumps between beats (parts entering, drops) land on bar starts, and a
+    # track usually begins on a downbeat. Each is scored per phase and added to the kick/chroma score.
+    rms = librosa.feature.rms(y=y, frame_length=2048, hop_length=HOP)[0]
+    bl = np.array([20 * np.log10(rms[max(f - int(0.05 * fps), 0):f + int(0.25 * fps) + 1].mean() + 1e-9) for f in bf])
+    jump = np.r_[0, np.diff(bl)]
+    top = [int(i) for i in np.argsort(jump)[::-1][:12] if jump[i] > 3.0]
+    sect = []
+    for p in range(beats_per_bar):
+        sect.append(float(np.mean([(b - p) % beats_per_bar == 0 for b in top])) if top else 0.0)
+    first_onset = float(np.argmax(oenv > 0.2 * oenv.max()) / fps)
+    start = []
+    for p in range(beats_per_bar):
+        fd = beat0 + p * 60 / bpm
+        off_p = fd - np.floor(fd / bar_len) * bar_len
+        # distance (in beats) from the first sound to the nearest bar start of this phase
+        d = ((first_onset - off_p) / (60 / bpm)) % beats_per_bar
+        start.append(1.0 if min(d, beats_per_bar - d) < 0.25 else 0.0)
+    total = [scores[p] + 1.5 * sect[p] + 0.5 * start[p] for p in range(beats_per_bar)]
+    p = int(np.argmax(total))
     first_down = beat0 + p * 60 / bpm
     # pull offset back to the earliest bar start >= 0
-    bar_len = beats_per_bar * 60 / bpm
     offset = first_down - np.floor(first_down / bar_len) * bar_len
+    cand_offsets = []
+    for q in range(beats_per_bar):
+        fd = beat0 + q * 60 / bpm
+        cand_offsets.append(round(float(fd - np.floor(fd / bar_len) * bar_len), 4))
     # stability: local tempo in 30 s windows
     local = []
     for w0 in range(0, int(len(y) / ASR) - 30, 30):
@@ -164,11 +220,23 @@ def beat_grid(path, bpm_hint=None, beats_per_bar=4):
     data = {'bpm': round(float(bpm), 3), 'offset_sec': round(float(offset), 4), 'beats_per_bar': beats_per_bar,
             'downbeat_scores': [round(float(s), 2) for s in scores], 'local_tempo': local,
             'bars': int((len(y) / ASR - offset) / bar_len)}
+    data.update({'section_scores': [round(v, 2) for v in sect], 'start_scores': start,
+                 'candidate_offsets': cand_offsets})
+    ranked = sorted(range(beats_per_bar), key=lambda q: -total[q])
     txt = (f"tempo {bpm:.2f} BPM (constant-tempo fit); bar 1 starts at {offset:.3f}s; ~{data['bars']} bars of "
-           f"{beats_per_bar}/4.\ndownbeat phase scores (beat1..{beats_per_bar}): {data['downbeat_scores']} "
-           f"(chosen {p + 1}; ambiguous if close).\nlocal tempo per 30s: " +
+           f"{beats_per_bar}/4.\ndownbeat candidates (bar 1 at ... s: kick/chord score + section-change score + "
+           f"starts-on-it):\n" +
+           '\n'.join(f"  {cand_offsets[q]:.4f}s  {scores[q]:.2f} + {1.5 * sect[q]:.2f} + {0.5 * start[q]:.1f} = "
+                     f"{total[q]:.2f}{'  <- chosen' if q == p else ''}" for q in ranked) +
+           ("\n  close call: check with analyze_structure(source=...) after project_set(offset_sec=...): sections "
+            "should start on bars 1, 5, 9, 17 ..., not mid-phrase" if total[ranked[0]] - total[ranked[1]] < 0.5 else '') +
+           "\nlocal tempo per 30s: " +
            ', '.join(f"{w}s:{t:.1f}" for w, t in local) +
-           "\nIf the local tempos disagree with the fit by >1 BPM (other than x2/÷2) the track has tempo changes.")
+           "\nIf the local tempos disagree with the fit by >1 BPM (other than x2 or /2) the track has tempo changes." +
+           ("\nother tempo readings (comb strength vs the chosen one): " +
+            ', '.join(f"{lab} = {b:.2f} BPM ({r:.2f})" for lab, b, r in alts) +
+            ". Half-time genres read low: if the genre usually sits at 140-175 BPM, try the x2 or x1.5 reading"
+            " in project_new and check analyze_drums (kick and snare should land on the expected steps)." if alts else ''))
     return data, txt
 
 

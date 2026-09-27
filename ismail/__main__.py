@@ -24,6 +24,9 @@ def parse_args(args):
         return {'ops': v} if isinstance(v, list) else v
     if len(args) == 1 and args[0].lstrip().startswith('{'):
         return json.loads(args[0])
+    if any(a.lstrip().startswith('{') for a in args):
+        raise ValueError("pass either one JSON object or key=value pairs, not both; e.g. "
+                         "instrument_fit '{\"target\": \"sound:x\", \"params\": {...}}' or target=sound:x params='{...}'")
     kw = {}
     for a in args:
         k, _, v = a.partition('=')
@@ -54,7 +57,11 @@ def main(argv):
         print(f"{argv[1]}{inspect.signature(fn)}\n{inspect.getdoc(fn)}")
         return 0
     name = argv[0]
-    kw = parse_args(argv[1:])
+    try:
+        kw = parse_args(argv[1:])
+    except (ValueError, OSError) as e:
+        print(f"ERROR {e}", file=sys.stderr)
+        return 2
     if name not in OPS:
         print(f"ERROR unknown op {name!r}; run 'python -m ismail ops'", file=sys.stderr)
         return 2

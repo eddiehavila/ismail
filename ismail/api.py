@@ -33,12 +33,43 @@ class OpError(ValueError):
     """Raised with a message that says what to do next."""
 
 
+ARG_ALIASES = {'name': 'track', 'track': 'name', 'map': 'mapping', 'stem_map': 'mapping'}
+
+
+def _alias_args(sig, kw):
+    """Accept the names agents reach for: name/track for each other, map for mapping, and bars=[a, b] (inclusive)
+    where an op takes span=[a, b) (fractional bars, end exclusive)."""
+    params = sig.parameters
+    for k in list(kw):
+        if k in params:
+            continue
+        alt = ARG_ALIASES.get(k)
+        if alt and alt in params and alt not in kw:
+            kw[alt] = kw.pop(k)
+        elif k == 'bars' and 'span' in params and 'span' not in kw and isinstance(kw[k], (list, tuple)):
+            b = kw.pop(k)
+            kw['span'] = [b[0], b[-1] + 1]
+    return kw
+
+
 def op(mutates=False):
     def deco(fn):
-        OPS[fn.__name__] = fn
+        import functools
+        import inspect
+        sig = inspect.signature(fn)
+
+        @functools.wraps(fn)
+        def wrapped(*a, **kw):
+            kw = _alias_args(sig, kw)
+            try:
+                sig.bind(*a, **kw)
+            except TypeError as e:
+                raise OpError(f"bad arguments for {fn.__name__}: {e}. Signature: {fn.__name__}{sig}")
+            return fn(*a, **kw)
+        OPS[fn.__name__] = wrapped
         if mutates:
             MUTATING.add(fn.__name__)
-        return fn
+        return wrapped
     return deco
 
 
@@ -491,7 +522,7 @@ def instrument_set(project: str, track: str, instrument, merge: bool = True) -> 
             new['oscs'] = instrument['oscs']
         if 'map' in instrument:
             new['map'] = inst_mod.deep_merge(tr['instrument'].get('map', {}), instrument['map'])
-        new = _resolve_instrument(new)
+        new = _resolve_instrument(new, P)
     else:
         new = _resolve_instrument(instrument, P)
     tr['instrument'] = new
@@ -604,7 +635,8 @@ def notes_read(project: str, track: str, bars: list = None, view: str = 'list', 
     if view == 'roll':
         if b - a + 1 > 8:
             raise OpError("roll view is limited to 8 bars; narrow `bars`")
-        return piano_roll(sel, b0, b1 - b0, step, P.bpb)
+        head = f"{track} bars {a}-{b} (one char per {step:g} beat; # = note start, = = held)"
+        return head + '\n' + piano_roll(sel, b0, b1 - b0, step, P.bpb)
     if view == 'rel':
         return '\n'.join(f"{fmt_num(s - b0)} {midi_to_name(p)} {fmt_num(d)} {v}" for s, p, d, v in sel) or '(empty)'
     if len(sel) > 300:
@@ -1009,7 +1041,7 @@ def render(project: str, bars: list = None, tracks: list = None, stems: bool = F
         pk = 20 * np.log10(np.max(np.abs(v)) + 1e-12)
         rms = 10 * np.log10(np.mean(v ** 2) + 1e-12)
         s = R.stats.get(k, {})
-        L.append(f"  {k:<14} peak {pk:6.1f} rms {rms:6.1f} dB" + (f"  ({s['sec']}s{' cached' if s.get('cached') else ''})" if s else '')
+        L.append(f"  {k:<14} peak {pk:6.1f} rms {rms:6.1f} dB" + (f"  ({'cached' if s.get('cached') else 'rendered in ' + str(s['sec']) + 's'})" if s else '')
                  + ('  SILENT - check notes/instrument/mute' if pk < -90 else ''))
     for (trk, i), gr in R.gain_reduction.items():
         if gr < -0.5:
@@ -1132,7 +1164,7 @@ def _window(g, span, t0, t1):
 
 @op()
 def analyze_spectrum(project: str, source: str = None, span: list = None, t0: float = None, t1: float = None) -> str:
-    """1/3-octave levels + strongest peaks (with note names) over a window."""
+    """1/3-octave levels + strongest peaks (with note names) over a window. Window: span=[a, b] in fractional bars, end exclusive (span=[5, 6] = all of bar 5, [5, 5.25] = its first beat), or bars=[a, b] inclusive like the other analysis tools, or t0/t1 in seconds."""
     P = _load(project)
     path, g = P.source(source, span=span)
     a, b = _window(g, span, t0, t1)
@@ -1142,7 +1174,7 @@ def analyze_spectrum(project: str, source: str = None, span: list = None, t0: fl
 @op()
 def analyze_timbre(project: str, source: str = None, span: list = None, t0: float = None, t1: float = None) -> str:
     """Describe the sound in a window: envelope, pitch, harmonic profile -> waveform guess, brightness/filter,
-    noisiness, stereo width. Use on isolated sounds (stems, sound bank, soloed tracks) for sound design."""
+    noisiness, stereo width. Use on isolated sounds (stems, sound bank, soloed tracks) for sound design. Window: span=[a, b] in fractional bars, end exclusive (span=[5, 6] = all of bar 5, [5, 5.25] = its first beat), or bars=[a, b] inclusive like the other analysis tools, or t0/t1 in seconds."""
     P = _load(project)
     path, g = P.source(source, span=span)
     a, b = _window(g, span, t0, t1)

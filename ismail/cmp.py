@@ -251,6 +251,7 @@ GROUPS = {'notes': ('note_f1', 'pc_f1'),
           'clean': ('clutter', 'consistency', 'extra_share'),
           'sound': ('band_err', 'level_err', 'transient_err', 'shape'),
           'perceptual': ('perceptual',)}
+MIN_SPREAD = 0.05  # a metric whose ceiling and floor differ less than this cannot tell right from wrong: not scored
 PERC_FLOOR = 0.5  # CLAP cosine typical of unrelated music; the ceiling is the reference vs itself one loop later
 
 
@@ -267,11 +268,11 @@ def closeness(s, base, cons_a=None):
         if s.get(k) is None or lo.get(k) is None:
             continue
         if k in HIGHER_BETTER:
-            if hi.get(k) is None or hi[k] - lo[k] < 0.03:
+            if hi.get(k) is None or hi[k] - lo[k] < MIN_SPREAD:
                 continue
             v = (s[k] - lo[k]) / (hi[k] - lo[k])
         elif k in LOWER_BETTER_SHARE:
-            if hi.get(k) is None or lo[k] - hi[k] < 0.03:
+            if hi.get(k) is None or lo[k] - hi[k] < MIN_SPREAD:
                 continue
             v = (lo[k] - s[k]) / (lo[k] - hi[k])
         else:
@@ -323,6 +324,9 @@ def view_summary(rep):
             floor_v = PERC_FLOOR if k == 'perceptual' else base[FLOOR_OF.get(k, 'half_loop')].get(k)
             L.append(f"  {k:<10} {_fmt(s[k], k)} {_fmt(ceil_v, k)} {_fmt(floor_v, k)} "
                      f"{('%6.2f' % cl[k]) if k in cl else '   -  '}")
+        if s.get('perceptual') is not None and not base.get('perc_ceiling'):
+            L.append("  perceptual has no ceiling here (the song is too short to compare the reference with itself one"
+                     " loop later); read the raw value: about 0.5 = unrelated music, 0.9+ = very close")
         ca, cb = st.get('consistency_a') or {}, base.get('self_loop', {})
         if ca.get('attack_f1') is not None and cb.get('attack_f1') is not None:
             L.append(f"  loop self-consistency (each vs one loop later): yours note {ca['note_f1']:.2f} attack "
@@ -332,7 +336,8 @@ def view_summary(rep):
         if s.get('transient_bias') is not None and s['transient_bias'] > 1.5:
             L.append(f"  WARNING attacks are {s['transient_bias']:+.1f} dB/frame sharper than the reference: hard, clicky or "
                      f"too many note starts (sounds cluttered even when pitches match). Soften attacks or remove notes")
-        if s.get('extra_share') is not None and s['extra_share'] > 0.3:
+        ref_extra = base.get('self_loop', {}).get('extra_share')
+        if s.get('extra_share') is not None and s['extra_share'] > max(0.3, (ref_extra or 0) + 0.05):
             L.append(f"  WARNING {s['extra_share']:.0%} of your attack loudness starts notes the reference does not "
                      f"start (attack precision {s.get('attack_p', 0):.2f}): audible clutter. cmp_zoom a bar to see them")
         if cl:
@@ -349,13 +354,17 @@ def view_sections(rep, stem='mix'):
     st = rep['stems'][stem]
     L = [f"[{stem}] per reference section (B's sections)"]
     ks = [k for k in METRIC_ORDER if st['summary'].get(k) is not None]
-    L.append(f"{'sect':<5}{'bars':<9}" + ''.join(f"{k:>10}" for k in ks) + f"{'lvlA-B':>8}")
+    L.append(f"{'sect':<5}{'bars':<9}" + ''.join(f"{k[:11]:>12}" for k in ks) + f"{'lvlA-B':>8}")
+    nbars = len(st['rows'])
     for sec in rep.get('sections_b', []):
+        if sec['start'] > nbars:
+            continue  # the reference runs longer than your project: nothing of yours to compare there
+        sec = dict(sec, end=min(sec['end'], nbars))
         s = summarize(st['rows'], [sec['start'], sec['end']])
         if not s:
             L.append(f"{sec['label']:<5}{sec['start']:>3}-{sec['end']:<5} (silent on both)")
             continue
-        L.append(f"{sec['label']:<5}{sec['start']:>3}-{sec['end']:<5}" + ''.join(f"{_fmt(s.get(k), k):>10}" for k in ks)
+        L.append(f"{sec['label']:<5}{sec['start']:>3}-{sec['end']:<5}" + ''.join(f"{_fmt(s.get(k), k):>12}" for k in ks)
                  + f"{s['level_bias']:+8.1f}")
     return '\n'.join(L)
 
@@ -420,6 +429,7 @@ def view_worst(rep, stem='mix', metric=None, n=10):
 def view_bars_list(rep, stem, bars):
     st = rep['stems'][stem]
     lines = view_bars(rep, stem, [bars[0], bars[0]]).split('\n')[:2]
+    lines[0] = f"[{stem}] bars {', '.join(map(str, bars))} (A=yours, B=ref)"
     body = [view_bars(rep, stem, [b, b]).split('\n')[2] for b in bars]
     return '\n'.join(lines + body)
 
