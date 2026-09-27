@@ -27,7 +27,8 @@ python -m ismail.video init    -s songs/<slug>                    scaffold video
 python -m ismail.video rip     -s songs/<slug> video/assets/<dir>  .dae files or folders -> build/x
 python -m ismail.video sync    -s songs/<slug>                    events.json + features.npz (rerun after any song change)
 python -m ismail.video still   -s songs/<slug> s04_foyer.py 120 [-- --top cx,cy,span,z | --dbg nofog | --pct 25]
-python -m ismail.video render  -s songs/<slug> s04_foyer.py s05_insert.py ...
+python -m ismail.video posesheet -s songs/<slug> s04_foyer.py [f,f]   each character alone, 4 sides, key frames + clipping
+python -m ismail.video render  -s songs/<slug> s04_foyer.py s05_insert.py ...   (refuses on clipping; -- --allowclip)
 python -m ismail.video contact -s songs/<slug> video/renders/shots/s04_foyer_v1.mp4 16
 python -m ismail.video edit    -s songs/<slug> [-- --sheet 33 41 16 | -- --range 33 41]
 ```
@@ -39,7 +40,7 @@ python -m ismail.video edit    -s songs/<slug> [-- --sheet 33 41 16 | -- --range
 1. **Listen to the arrangement as data.** `sync`, then read `build/events.json`: tracks, notes as frames, families. Know the form map (intro, build, dropout, drops, break, the last-bar moment) by bar number before writing a single shot.
 2. **Treatment** in `plan.md`: one-line story, hook words and the picture for each, look, timeline by bars, shot list with frames and start bars. Show it to the user before rendering anything expensive.
 3. **Assets.** Models come from the user or from sources they approve. Always ask before downloading. `rip` the .dae files, put .obj folders under `assets/`.
-4. **One shot at a time:** write the script, then take stills at 2 or 3 frames at `--pct 25`, read them, fix, and repeat. For a black or empty frame, use `--top` (an ortho plan view with the camera as a red dot and its target as cyan) and `--dbg nofog`. Only a shot whose stills are right goes to `render`.
+4. **One shot at a time:** write the script, run `posesheet` until every row says clean (see Animation below), then take stills at 2 or 3 frames at `--pct 25`, read them, fix, and repeat. For a black or empty frame, use `--top` (an ortho plan view with the camera as a red dot and its target as cyan) and `--dbg nofog`. Only a shot whose stills are right goes to `render`.
 5. **Render the queue** in the background (one `render` call with every approved shot). Contact-sheet each result as it lands.
 6. **Cut** in `cut.py` against the bar grid, then `edit -- --sheet a b n` on every section and read the sheets. Fix, then run the full `edit`.
 7. **Review the final** with `contact` over the whole render (about 40 frames), and report the file, its size and the sheet.
@@ -72,6 +73,29 @@ S.go()
 - **Sky domes** block lightning and sun: split the dome off by material and set it `visible_shadow = False`.
 - Game-specific props (a vacuum, a ghost with a fixed orientation) go in a helper module in `shots/`, not in the kit.
 - **GPU budget.** Shots render at `pct` 50 (960x540) with 16 EEVEE samples and are upscaled in the edit. A throttled consumer GPU manages about 1 to 2.5 s per frame, so a 384-frame shot takes 10 to 15 minutes. Budget the whole shot list before rendering, and check the GPU clock if times double.
+
+## Animation (what separates a video from a slideshow of poses)
+
+The first video posed characters by eye and shipped hands inside thighs and a head inside a backpack. The kit now checks
+and fixes that, and makes motion read as motion:
+
+- **Clipping is checked on the deformed mesh.** `C.clip(frames)` measures how deep body parts pass into each other (and
+  into mounted props) as a fraction of the character's height, minus what already overlaps at rest. Joint contact the
+  camera never sees (upper arm and chest, the thighs) is skipped (`JOINTS`, rig json "joints"). Arms against the torso
+  get a softer tolerance (`SOFT`, 4.5%): a hanging arm should rest on the body and trace its contour, like flesh would.
+  Hands in thighs and heads in props stay strict (1.2%).
+- **`pose()` unclips by default:** the part that can move swings its mover bone a few degrees at a time and stops the
+  moment it is back on the surface: contact, not clearance, and never more than 25 degrees per bone. What it cannot fix
+  inside that budget is printed; fix the pose, do not raise the budget (a head that cannot look up past a backpack
+  should lean from the chest).
+- **Props are seated, never pushed.** `S.back_mount` slides the prop along the mount axis until it just touches the
+  torso (overlap-based; ripped props often have flipped normals). Mount props BEFORE posing, so the pose respects them.
+- **The render refuses** while any key frame clips (`-- --allowclip` to accept it knowingly). `posesheet` shows every
+  keyed pose from four sides with the hits under each row: read it before any still.
+- **Moves land on the note.** `C.hit(frame, windup, strike, after)`: windup held `antic` frames before, an ease-in
+  snap so the fastest motion is the frame before the note, an overshoot two frames after, a settle.
+- **Follow-through and life.** `C.spring(chain, [(frame, amp)])` rings ears, tails and capes after hits, each link
+  lagging its parent; `C.breathe()` keeps a held pose from freezing. Both bake on top of the keys: call them last.
 
 ## The edit (Cut)
 

@@ -4,7 +4,9 @@
   rip <path>...             extract .dae models (files or folders) into video/build/x for the Blender kit
   sync                      song project -> video/build/events.json + features.npz (run after every song change)
   still <shot.py> <frame>   one frame -> video/build/look/<shot>_<frame>.png  (extra args after --, e.g. -- --top 0,60,300,20)
-  render <shot.py>...       full shot renders, one at a time (a lock serialises every queue on the machine)
+  posesheet <shot.py> [f,f] every character alone from four sides at its key frames + the clipping check -> build/look/posesheet_<shot>.png
+  render <shot.py>...       full shot renders, one at a time (a lock serialises every queue on the machine); refuses on
+                            clipping unless -- --allowclip
   contact <video> [n]       contact sheet of n frames of any video -> video/build/look/contact_<name>.png
   edit [-- --sheet a b n | -- --range a b]   runs video/cut.py (sheet = contact sheet of bars a..b-1)
 """
@@ -73,10 +75,44 @@ def _blender(song, shot, extra, log=None):
             return subprocess.run(cmd, env=env, stdout=f, stderr=subprocess.STDOUT).returncode
     r = subprocess.run(cmd, env=env, capture_output=True, text=True)
     noise = ('BlenderMCP', 'Server thread', 'socket', 'Blender quit', 'Fra:', 'Saved:', 'Time:', 'Deprecation', 'use_nodes', 'OBJ import')
-    for line in (r.stdout + r.stderr).splitlines():
-        if line.strip() and not any(n in line for n in noise):
-            print(line)
+    lines = [l for l in (r.stdout + r.stderr).splitlines() if l.strip() and not any(n in l for n in noise)]
+    for line in lines:
+        print(line)
+    _blender.lines = lines
     return r.returncode
+
+
+def cmd_posesheet(song, shot, frames, extra):
+    """every character of a shot alone, from four sides, at its key frames (or the given ones), with the clipping
+    check's hits written under the frame they happen on."""
+    from PIL import Image, ImageDraw
+    vd = video_dir(song)
+    name = os.path.splitext(os.path.basename(shot))[0]
+    pd = os.path.join(vd, 'build', 'look', 'pose')
+    for f in glob.glob(os.path.join(pd, f'{name}__*.png')):
+        os.replace(f, f + '.old')        # keep nothing stale in the sheet without deleting anything
+    _blender(song, shot, ['--posesheet', frames or ''] + extra if frames else ['--posesheet'] + extra)
+    clips = [l for l in _blender.lines if l.startswith('CLIP') and ' f' in l]
+    files = sorted(glob.glob(os.path.join(pd, f'{name}__*.png')))
+    rows = sorted({tuple(os.path.basename(f)[:-4].split('__')[1:2]) + (os.path.basename(f)[:-4].split('__')[2][:4],) for f in files})
+    if not rows:
+        print('no pose frames rendered')
+        return
+    S, H = 300, 44
+    sheet = Image.new('RGB', (S * 4, (S + H) * len(rows)), (20, 20, 22))
+    d = ImageDraw.Draw(sheet)
+    for r, (who, fr) in enumerate(rows):
+        for i in range(4):
+            fp = os.path.join(pd, f'{name}__{who}__{fr}_{i}.png')
+            if os.path.exists(fp):
+                sheet.paste(Image.open(fp).convert('RGB').resize((S, S)), (i * S, r * (S + H)))
+        hit = [l.split(':', 1)[1].strip() for l in clips if l.startswith(f'CLIP {who} f{int(fr)}:')]
+        y = r * (S + H) + S + 4
+        d.text((6, y), f'{who} frame {int(fr)}', fill=(230, 230, 230))
+        d.text((6, y + 16), ('CLIP: ' + '; '.join(hit))[:190] if hit else 'clean', fill=(255, 90, 90) if hit else (120, 220, 120))
+    out = os.path.join(vd, 'build', 'look', f'posesheet_{name}.png')
+    sheet.save(out)
+    print(f'posesheet -> {out}  ({len(clips)} clipping hits)')
 
 
 def cmd_init(song):
@@ -118,7 +154,11 @@ def cmd_render(song, shots, extra):
         with gpu_lock():
             t = time.time()
             code = _blender(song, s, extra, log)
-        out = next((l.split('RENDERED', 1)[1].strip() for l in open(log, errors='replace') if 'RENDERED' in l), None)
+        text = open(log, errors='replace').read().splitlines()
+        out = next((l.split('RENDERED', 1)[1].strip() for l in text if l.startswith('RENDERED')), None)
+        for l in text:
+            if l.startswith(('CLIP', 'NOT RENDERED')):
+                print('  ' + l)
         print(f'{name}: exit {code}, {time.time() - t:.0f}s -> {out or "NO OUTPUT, see " + log}', flush=True)
 
 
@@ -156,6 +196,8 @@ def main():
         run(song)
     elif c == 'still':          # no lock: a still is seconds, fine beside a queued render
         _blender(song, a.args[0], ['--still', a.args[1]] + extra)
+    elif c == 'posesheet':
+        cmd_posesheet(song, a.args[0], a.args[1] if len(a.args) > 1 else None, extra)
     elif c == 'render':
         cmd_render(song, a.args, extra)
     elif c == 'contact':

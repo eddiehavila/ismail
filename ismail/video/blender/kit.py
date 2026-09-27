@@ -18,7 +18,7 @@ import os
 import sys
 
 import bpy
-from mathutils import Matrix, Vector
+from mathutils import Matrix, Quaternion, Vector
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -88,6 +88,8 @@ class Character:
     def __init__(self, shot, rig, loc=(0, 0, 0), yaw=0.0, name=None, scale=None):
         self.cfg = json.load(open(os.path.join(VD, 'rigs', rig + '.json')))
         name = name or rig
+        self.shot, self.name = shot, name
+        shot.chars.append(self)
         self.bones = self.cfg.get('bones', {})
         self.poses = self.cfg.get('poses', {})
         self.scale = scale or self.cfg.get('scale', 1.0)
@@ -181,15 +183,331 @@ class Character:
         pb.matrix = Matrix.Translation(h) @ q.to_matrix().to_4x4() @ Matrix.Translation(-h) @ pb.matrix.copy()
         bpy.context.view_layer.update()
 
-    def pose(self, spec, frame=None, extra=()):
-        """spec/extra: ops applied from rest, parents first. Keyframes every bone when frame is given."""
+    def pose(self, spec, frame=None, extra=(), interp=None, easing=None, unclip=True):
+        """spec/extra: ops applied from rest, parents first. Keyframes every bone when frame is given
+        (interp/easing set the curve out of this key, e.g. 'EXPO', 'EASE_IN'). unclip: move limbs out of the body
+        before keying (see unclip())."""
         self.rest()
         for op in list(spec) + list(extra):
             (self.point if op[0] == 'p' else self.rot)(*op[1:])
+        if unclip:
+            self.unclip()
         if frame is not None:
-            for pb in self.rig.pose.bones:
-                pb.keyframe_insert('rotation_quaternion', frame=frame)
-                pb.keyframe_insert('location', frame=frame)
+            self._key(frame, interp, easing)
+
+    def _key(self, frame, interp=None, easing=None):
+        for pb in self.rig.pose.bones:
+            pb.keyframe_insert('rotation_quaternion', frame=frame)
+            pb.keyframe_insert('location', frame=frame)
+        if interp:
+            for fc in fcurves(self.rig):
+                for k in fc.keyframe_points:
+                    if abs(k.co.x - frame) < 0.5:
+                        k.interpolation = interp
+                        if easing:
+                            k.easing = easing
+
+    def quats(self):
+        return {pb.name: pb.rotation_quaternion.copy() for pb in self.rig.pose.bones}
+
+    # ---- motion that reads as animation, not as poses
+    def hit(self, frame, windup, strike, after=None, antic=4, over=0.3, settle=8, extra=()):
+        """a move that lands ON `frame` (put a note's frame here): the windup is held `antic` frames before, the body
+        snaps into the strike (ease-in, so the fastest motion is the last frame before the note), overshoots it by
+        `over` of the windup->strike motion two frames later, and settles into `after` (default the strike).
+        Leave room: keys at frame-antic .. frame+2+settle."""
+        self.pose(windup, None, extra)
+        qw = self.quats()
+        self.pose(windup, frame - antic, extra, 'EXPO', 'EASE_IN')
+        self.pose(strike, frame, extra, 'SINE', 'EASE_OUT')
+        for pb in self.rig.pose.bones:
+            qs = pb.rotation_quaternion.copy()
+            d = qw[pb.name].inverted() @ qs
+            if d.w < 0:
+                d.negate()
+            axis, ang = d.to_axis_angle()
+            pb.rotation_quaternion = qs @ Quaternion(axis, ang * over)
+        bpy.context.view_layer.update()
+        self._key(frame + 2)
+        self.pose(after if after is not None else strike, frame + 2 + settle, extra)
+
+    def layer(self, fn, bones, f0=1, f1=None):
+        """procedural motion added on top of the keyed animation. fn(bone, frame) -> (axis, deg) or None, the axis in
+        armature space. Samples the keyed curves first, then rewrites every frame of those bones: call it last."""
+        f1 = f1 or self.shot.frames
+        names = [self.b(b) for b in bones]
+        base = {}
+        for f in range(f0, f1 + 1):
+            self.shot.scene.frame_set(f)
+            base[f] = {n: self.rig.pose.bones[n].rotation_quaternion.copy() for n in names}
+        for key, n in zip(bones, names):
+            pb = self.rig.pose.bones[n]
+            to_local = pb.bone.matrix_local.to_3x3().inverted()
+            for f in range(f0, f1 + 1):
+                r = fn(key, f)
+                q = base[f][n]
+                if r:
+                    q = q @ Quaternion((to_local @ Vector(r[0])).normalized(), math.radians(r[1]))
+                pb.rotation_quaternion = q
+                pb.keyframe_insert('rotation_quaternion', frame=f)
+
+    def spring(self, chain, hits, axis=(1, 0, 0), deg=18.0, hz=3.0, decay=8.0, lag=2, falloff=0.85, f0=1, f1=None):
+        """follow-through on ears, tails, capes: each (frame, amp) in hits sets the chain ringing; every link rings
+        `lag` frames after its parent, so the motion travels down the chain."""
+        fps = self.shot.scene.render.fps
+
+        def fn(key, f):
+            i, a = chain.index(key), 0.0
+            for t0, amp in hits:
+                t = f - t0 - i * lag
+                if t >= 0:
+                    a += amp * math.exp(-t / decay) * math.sin(2 * math.pi * hz * t / fps)
+            return (axis, deg * a * falloff ** i) if a else None
+        self.layer(fn, chain, f0, f1)
+
+    def breathe(self, bones=('chest',), deg=2.0, period=48, axis=(1, 0, 0), f0=1, f1=None):
+        """a slow sway so a held pose never freezes (period 48 frames = one bar at 150 BPM)."""
+        self.layer(lambda k, f: (axis, deg * math.sin(2 * math.pi * f / period)), list(bones), f0, f1)
+
+    # ---- the clipping check (runs on the deformed mesh, so it sees what the camera sees)
+    def _hops(self):
+        par = {b.name: b.parent.name if b.parent else None for b in self.rig.data.bones}
+
+        def chain(n):
+            out = []
+            while n:
+                out.append(n)
+                n = par[n]
+            return out
+        ch = {n: chain(n) for n in par}
+
+        def hops(a, b):
+            ca, cb = ch[a], ch[b]
+            common = next((x for x in ca if x in cb), None)
+            return (ca.index(common) + cb.index(common)) if common else 99
+        return hops
+
+    def _parts(self):
+        """the deformed mesh as triangles grouped by the bone that owns them: {bone: (verts, tris, BVHTree)}."""
+        from mathutils.bvhtree import BVHTree
+        dg = bpy.context.evaluated_depsgraph_get()
+        by = {}
+        for o in [o for o in self.root.children_recursive if o.type == 'MESH' and not o.hide_render]:
+            gname = {g.index: g.name for g in o.vertex_groups}
+            dom = [gname.get(max(v.groups, key=lambda g: g.weight).group) if len(v.groups) else None for v in o.data.vertices]
+            oe = o.evaluated_get(dg)
+            me = oe.to_mesh()
+            me.calc_loop_triangles()
+            co = [o.matrix_world @ v.co for v in me.vertices]
+            for t in me.loop_triangles:
+                b = dom[t.vertices[0]]
+                if b is None:
+                    continue
+                V, T = by.setdefault(b, ([], []))
+                i = len(V)
+                V.extend(co[k] for k in t.vertices)
+                T.append((i, i + 1, i + 2))
+            oe.to_mesh_clear()
+        return {b: (V, T, BVHTree.FromPolygons(V, T)) for b, (V, T) in by.items()}
+
+    @staticmethod
+    def _mesh_part(ob):
+        from mathutils.bvhtree import BVHTree
+        dg = bpy.context.evaluated_depsgraph_get()
+        V, T = [], []
+        for o in [ob] + list(ob.children_recursive):
+            if o.type != 'MESH' or o.hide_render:
+                continue
+            oe = o.evaluated_get(dg)
+            me = oe.to_mesh()
+            me.calc_loop_triangles()
+            i = len(V)
+            V.extend(o.matrix_world @ v.co for v in me.vertices)
+            T.extend(tuple(i + k for k in t.vertices) for t in me.loop_triangles)
+            oe.to_mesh_clear()
+        return (V, T, BVHTree.FromPolygons(V, T)) if T else None
+
+    @staticmethod
+    def _depth(A, B):
+        """how deep two parts pass into each other: over the vertices of the triangles that intersect, the largest
+        distance behind the other part's surface (0 when they only touch or do not meet)."""
+        pairs = A[2].overlap(B[2])
+        if not pairs:
+            return 0.0
+
+        def inside(P, Q, idx):
+            d = 0.0
+            for k in {k for i in idx for k in P[1][i]}:
+                v = P[0][k]
+                loc, nrm, _, dist = Q[2].find_nearest(v)
+                if loc is not None and nrm.dot(v - loc) < 0:
+                    d = max(d, dist)
+            return d
+        return max(inside(A, B, {p[0] for p in pairs}), inside(B, A, {p[1] for p in pairs}))
+
+    def _names(self):
+        sem = {v: k for k, v in self.bones.items()}
+
+        def nm(b):          # report under the nearest named ancestor: "r_hand", not "Bone21"
+            bone = self.rig.data.bones.get(b)
+            while bone and bone.name not in sem:
+                bone = bone.parent
+            return sem[bone.name] if bone else b
+        return nm
+
+    SOFT = 0.045    # arms resting on the torso: flesh would give there, so contact this deep still reads as touching
+    ARM = ('r_up', 'r_fore', 'r_hand', 'r_fing', 'l_up', 'l_fore', 'l_hand', 'l_fing')
+    TORSO = ('hips', 'chest', 'belly')
+
+    def _tol(self, a, b, tol):
+        soft = self.cfg.get('soft')
+        if soft is not None:
+            return max(tol, soft) if frozenset((a, b)) in {frozenset(x) for x in soft} else tol
+        return max(tol, self.SOFT) if (a in self.ARM and b in self.TORSO) or (b in self.ARM and a in self.TORSO) else tol
+
+    def _ensure_base(self):
+        """the rest pose's own overlaps (subtracted later) and the character's height (depths are fractions of it)."""
+        if hasattr(self, '_base'):
+            return
+        hops, nm = self._hops(), self._names()
+        joints = {frozenset(j) for j in self.cfg.get('joints', self.JOINTS)}
+        self.rig.data.pose_position = 'REST'
+        bpy.context.view_layer.update()
+        rest = self._parts()
+        zs = [v.z for V, _, _ in rest.values() for v in V]
+        self._height = max(zs) - min(zs)
+        self._base = {}
+        for a in rest:
+            for b in rest:
+                if a < b and hops(a, b) >= 3 and nm(a) != nm(b) and frozenset((nm(a), nm(b))) not in joints:
+                    self._base[(a, b)] = self._depth(rest[a], rest[b])
+        self.rig.data.pose_position = 'POSE'
+        bpy.context.view_layer.update()
+
+    def clip(self, frames, others=(), ignore=(), tol=0.012, quiet=False):
+        """body parts (and mounted props) that pass INTO each other, not just touch: for bones >= 3 hops apart in the
+        bone tree, the penetration depth as a fraction of the character's height, reported when it exceeds the
+        rest pose's own overlap by more than `tol` (arms against the torso get the softer SOFT: resting contact).
+        others: prop objects, tested against every part except the one they are mounted on (`ignore`).
+        Prints CLIP lines, returns [(frame, a, b, depth)] worst first per frame."""
+        hops, nm = self._hops(), self._names()
+        ign0 = {self.b(x) for x in ignore}
+        ign_parts = {nm(g) for g in ign0}
+        ign = {b.name for b in self.rig.data.bones if nm(b.name) in ign_parts or any(hops(b.name, g) <= 1 for g in ign0)}
+        self._ensure_base()
+        H = self._height
+        agg = {}
+        for f in frames:
+            if f is not None:           # None = the live, unkeyed pose (unclip)
+                self.shot.scene.frame_set(f)
+            P = self._parts()
+            for (a, b), d0 in self._base.items():
+                if a in P and b in P:
+                    d = self._depth(P[a], P[b]) - d0
+                    if d > self._tol(nm(a), nm(b), tol) * H:
+                        k = (f,) + tuple(sorted((nm(a), nm(b))))
+                        agg[k] = max(agg.get(k, 0), d / H)
+            for ob in others:
+                M = self._mesh_part(ob)
+                if M is None:
+                    continue
+                for b, Pb in P.items():
+                    if b not in ign:
+                        d = self._depth(M, Pb)
+                        if d > tol * H:
+                            k = (f,) + tuple(sorted((ob.name, nm(b))))
+                            agg[k] = max(agg.get(k, 0), d / H)
+        out = sorted(((f, a, b, d) for (f, a, b), d in agg.items()), key=lambda x: (x[0] or 0, -x[3]))
+        if not quiet:
+            for f, a, b, d in out:
+                print(f'CLIP {self.name} f{f}: {a} x {b} ({100 * d:.1f}% of height deep)')
+            if not out:
+                print(f'CLIP {self.name}: clean on {len(frames)} frames')
+        return out
+
+    JOINTS = [('chest', 'r_up'), ('chest', 'l_up'), ('hips', 'r_thigh'), ('hips', 'l_thigh'), ('chest', 'neck'),
+              ('hips', 'chest'), ('r_thigh', 'l_thigh'), ('neck', 'head'), ('head', 'cap')]   # contact the camera never sees
+    MOVERS = {'r_up': 'r_up', 'r_fore': 'r_up', 'r_hand': 'r_fore', 'r_fing': 'r_fore',
+              'l_up': 'l_up', 'l_fore': 'l_up', 'l_hand': 'l_fore', 'l_fing': 'l_fore',
+              'head': 'neck', 'cap': 'neck', 'r_foot': 'r_thigh', 'r_shin': 'r_thigh', 'l_foot': 'l_thigh', 'l_shin': 'l_thigh'}
+
+    def unclip(self, step=4.0, max_deg=25.0, max_iter=12, others=(), verbose=False):
+        """the smallest change that takes the pose out of clipping, on the live (unkeyed) pose: contact, not
+        clearance. Per round, for each clipping pair (deepest first) the part that can move (arms, then head, then
+        legs; rig json "movers" overrides {part: bone}) swings its mover bone `step` degrees away (up to max_deg per
+        bone in total) and stops the moment it is back on the surface, so a hanging arm ends resting on the body.
+        An arm in the torso swings outward. Mounted props never move here. What the budgets cannot fix is printed."""
+        props = [(o, b) for c, o, b in self.shot.clip_props if c is self]
+        others = list(others) or [o for o, _ in props]
+        ignore = [b for _, b in props]
+        movers = dict(self.MOVERS, **self.cfg.get('movers', {}))
+        movers = {k: v for k, v in movers.items() if self.b(k) in self.rig.pose.bones and self.b(v) in self.rig.pose.bones}
+        prio = lambda n: (0 if n[:2] in ('r_', 'l_') and n[2:] in ('up', 'fore', 'hand', 'fing') else
+                          1 if n in ('head', 'cap') else 2)
+        nm = self._names()
+        inv = self.rig.matrix_world.inverted()
+        spent = {}
+        hits = []
+        for it in range(max_iter):
+            hits = self.clip([None], others, ignore, quiet=True)
+            if not hits:
+                break
+            P = self._parts()
+            cen = {}
+            for raw, (V, T, _) in P.items():
+                cen.setdefault(nm(raw), []).extend(V)
+            cen = {k: sum(v, Vector()) / len(v) for k, v in cen.items()}
+            for o in others:
+                lo, hi = self.shot.bounds(o)
+                cen[o.name] = (lo + hi) / 2
+            pnames = {o.name: o for o in others}
+            done, moved = set(), False
+            for _, a, b, d in hits:
+                pr = pnames.get(a) or pnames.get(b)
+                if pr is not None:              # props are seated once (Shot.seat) and never pushed: the body gives way
+                    part, other = (b if a == pr.name else a), pr.name
+                else:
+                    cand = sorted([x for x in (a, b) if x in movers], key=prio)
+                    if not cand:
+                        continue
+                    part = cand[0]
+                    other = b if part == a else a
+                if part not in movers or part not in cen or other not in cen:
+                    continue
+                mv = movers[part]
+                if mv in done or spent.get(mv, 0) >= max_deg:
+                    continue
+                done.add(mv)
+                if other in ('hips', 'chest', 'neck', 'head') and prio(part) == 0:
+                    side = cen[part] - self.ctl.matrix_world.translation     # an arm in the torso: swing it outward
+                    side.z = 0
+                    away = inv.to_3x3() @ side
+                else:
+                    away = inv.to_3x3() @ (cen[part] - cen[other])
+                pb = self.rig.pose.bones[self.b(mv)]
+                lever = inv @ cen[part] - pb.head
+                ln = lever.normalized()
+                away = away - ln * away.dot(ln)
+                if away.length < 1e-6:
+                    continue
+                self.rot(mv, lever.cross(away).normalized(), step)
+                spent[mv] = spent.get(mv, 0) + step
+                moved = True
+                if verbose:
+                    print(f'UNCLIP {self.name}: {part} x {other} ({100 * d:.1f}%) -> {mv} {step:g} deg')
+            if not moved:
+                break
+        if hits:
+            print(f'UNCLIP {self.name}: left {len(hits)} (budget spent): ' +
+                  ', '.join(f'{a} x {b} {100 * d:.1f}%' for _, a, b, d in hits[:4]))
+        return hits
+
+    def key_frames(self, limit=48):
+        """the keyed frames plus the midpoints between them (overshoot and interpolation clip there too)."""
+        ks = sorted({int(round(k.co.x)) for fc in fcurves(self.rig) for k in fc.keyframe_points})
+        fs = sorted(set(ks) | {(a + b) // 2 for a, b in zip(ks, ks[1:])})
+        fs = [f for f in fs if 1 <= f <= self.shot.frames] or [1]
+        return fs if len(fs) <= limit else [fs[round(i * (len(fs) - 1) / (limit - 1))] for i in range(limit)]
 
     def walk(self, ph, stride=0.35, lift=0.35):
         """leg ops for a creeping walk at phase ph (0..1); add to a pose: C.pose(C.poses['stand'] + C.walk(ph))."""
@@ -205,6 +523,7 @@ class Character:
 class Shot:
     def __init__(self, name, frames, res=(1920, 1080), samples=None, pct=None, start_bar=1, gain=40.0):
         self.name, self.frames, self.start_bar, self.gain = name, frames, start_bar, gain
+        self.chars, self.clip_props = [], []     # characters and (character, prop, bone) for the clipping check
         self.a = args()
         self.pct = int(self.a.get('pct', pct or CFG.get('pct', 50)))
         bpy.ops.wm.read_factory_settings(use_empty=True)
@@ -427,6 +746,8 @@ class Shot:
         obj.parent, obj.parent_type, obj.parent_bone = C.rig, 'BONE', C.b(bone)
         bpy.context.view_layer.update()
         obj.matrix_world = M
+        if obj.type != 'LIGHT':
+            self.clip_props.append((C, obj, bone))
         return obj
 
     def flashlight(self, C, energy=6000, deg=34, color=(1.0, 0.93, 0.75), tilt=-0.12, fwd=1.6):
@@ -436,8 +757,9 @@ class Shot:
         lt.data.use_soft_falloff = False
         return lt
 
-    def back_mount(self, C, obj, back=3.2, down=1.2, yaw=180.0, scale=None):
-        """a backpack (world placement at the current pose, then bone-parented to the mount's back bone)."""
+    def back_mount(self, C, obj, back=3.2, down=1.2, yaw=180.0, scale=None, seat=True):
+        """a backpack (world placement at the current pose, then bone-parented to the mount's back bone), then
+        seated: slid along the back axis until it rests on the body (see seat())."""
         bone = C.cfg.get('mounts', {}).get('back', 'chest')
         bpy.context.view_layer.update()
         chest = C.bone_world(bone)
@@ -448,6 +770,37 @@ class Shot:
         obj.parent, obj.parent_type, obj.parent_bone = C.rig, 'BONE', C.b(bone)
         bpy.context.view_layer.update()
         obj.matrix_world = M
+        if obj.type != 'LIGHT':
+            self.clip_props.append((C, obj, bone))
+        if seat:
+            self.seat(C, obj, -fwd, bone)
+        return obj
+
+    def seat(self, C, obj, away, bone='chest', tol=0.012, step=0.01, max_steps=60):
+        """rest a mounted prop ON the body: slide it along `away` (world, pointing off the body) while it sinks in
+        deeper than `tol` of the character's height, or toward the body while it floats clear of it. Done once,
+        at mount time; after that the prop is an obstacle the body has to respect (unclip never moves it)."""
+        C._ensure_base()
+        H, away = C._height, Vector(away).normalized()
+        nm = C._names()
+        rest_on = {nm(C.b(bone))} | set(C.TORSO)       # it rests on the torso; head and arms are the body's to avoid
+
+        def touching():
+            M = C._mesh_part(obj)
+            return any(M[2].overlap(tree) for raw, (V, T, tree) in C._parts().items() if nm(raw) in rest_on)
+
+        def move(k):
+            obj.matrix_world.translation += away * k * step * H
+            bpy.context.view_layer.update()
+        n, moved = 0, 0                         # overlap, not depth: ripped props often have flipped normals
+        while touching() and n < max_steps:     # sunk in: out until clear...
+            move(1); moved += 1; n += 1
+        while not touching() and n < max_steps:  # ...then in until it meets the body, and one step back
+            move(-1); moved -= 1; n += 1
+        if touching():
+            move(1); moved += 1
+        print(f'SEAT {obj.name} on {C.name}: moved {100 * moved * step:+.1f}% of height along the mount axis'
+              + ('' if n < max_steps else ' (gave up: check the placement)'))
         return obj
 
     def flicker(self, light, frames_off, length=6):
@@ -534,11 +887,66 @@ class Shot:
             for l in bpy.data.lights:
                 l.energy *= float(a['gain'])
 
+    def check(self, frames=None):
+        """the clipping check for every character (and the props mounted on it); returns the number of hits."""
+        n = 0
+        for C in self.chars:
+            props = [(o, b) for c, o, b in self.clip_props if c is C]
+            n += len(C.clip(frames or C.key_frames(), [o for o, _ in props], [b for _, b in props]))
+        return n
+
+    def _posesheet(self):
+        """each character alone, flat-lit, from four sides at its key frames -> build/look/pose/ (tiled by the CLI)."""
+        s, a = self.scene, self.a
+        out = os.path.join(VD, 'build', 'look', 'pose')
+        os.makedirs(out, exist_ok=True)
+        keep = set()
+        for C in self.chars:
+            keep |= {C.ctl, C.root, *C.root.children_recursive}
+        for _, o, _ in self.clip_props:
+            keep |= {o, *o.children_recursive}
+        for o in bpy.data.objects:
+            if o not in keep and o.type in ('MESH', 'LIGHT', 'VOLUME', 'CURVE'):
+                o.hide_render = True
+        self.bg.inputs['Color'].default_value = (0.32, 0.33, 0.36, 1)
+        self.bg.inputs['Strength'].default_value = 1.0
+        sun = bpy.data.objects.new('pose_sun', bpy.data.lights.new('pose_sun', 'SUN'))
+        sun.data.energy = 3.0
+        sun.rotation_euler = (math.radians(40), 0, math.radians(30))
+        self.coll.objects.link(sun)
+        for fc in fcurves(self.cam) + fcurves(self.target) + fcurves(self.cam.data):
+            fc.mute = True
+        self.cam.data.type, self.cam.data.lens = 'PERSP', 50
+        s.render.resolution_x, s.render.resolution_y, s.render.resolution_percentage = 400, 400, 100
+        for C in self.chars:
+            fs = [int(x) for x in str(a['posesheet']).split(',')] if a['posesheet'] is not True else C.key_frames(12)
+            for f in fs:
+                s.frame_set(f)
+                lo, hi = self.bounds(C.ctl)
+                c, r = (lo + hi) / 2, max(hi - lo) * 1.7
+                fwd = (C.ctl.matrix_world.to_3x3() @ Vector((0, -1, 0))).normalized()
+                for i, (az, el) in enumerate(((0, 8), (90, 8), (215, 18), (40, 55))):
+                    d = Matrix.Rotation(math.radians(az), 3, 'Z') @ fwd
+                    d = (d * math.cos(math.radians(el)) + Vector((0, 0, math.sin(math.radians(el))))).normalized()
+                    self.cam.location, self.target.location = c + d * r, c
+                    s.render.filepath = os.path.join(out, f'{self.name}__{C.name}__{f:04d}_{i}.png')
+                    bpy.ops.render.render(write_still=True)
+            print('POSESHEET', C.name, ','.join(map(str, fs)))
+
     def go(self):
         s = self.scene
         self._debug()
         s.render.resolution_percentage = self.pct
         still = self.a.get('still')
+        if self.a.get('posesheet'):
+            self.check()
+            self._posesheet()
+            return
+        if self.chars and not self.a.get('noclip'):
+            hits = self.check([int(still)] if still else None)
+            if hits and not still and not self.a.get('allowclip'):
+                print(f'NOT RENDERED: {hits} clipping hits (fix the poses, or pass --allowclip to accept them)')
+                return
         if still:
             s.frame_set(int(still))
             s.render.image_settings.media_type = 'IMAGE'
