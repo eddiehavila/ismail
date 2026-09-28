@@ -32,8 +32,7 @@ FX_MAP = {'wub': 'wub', 'yoi': 'yoi', 'screech': 'screech', 'metal': 'metal', 'z
           'grind': 'grind', 'robot': 'robot', 'howl': 'howl', 'talk': 'talk', 'chop': 'stutter',
           'bang': 'bang', 'reload': 'reload'}
 EFFECTS = ('wub', 'yoi', 'screech', 'metal', 'zap', 'dive', 'grind', 'robot', 'howl', 'kick', 'snare', 'flash',
-           'tear', 'talk', 'ghost', 'dmg')
-DMG_BGR = np.array([(15, 56, 15), (48, 98, 48), (15, 172, 139), (15, 188, 155)], np.float32) / 255   # Game Boy greens
+           'tear', 'talk', 'ghost', 'palette')
 
 
 def _nframes(path):
@@ -120,6 +119,8 @@ class Cut:
         self.end_title = None  # (t0, text)
         self.ghost_key = None  # the shot double-exposed on 'howl'/'ghost'
         self.grade_gamma = 0.85
+        self.palette = [(20, 20, 20), (90, 90, 90), (170, 170, 170), (235, 235, 235)]   # RGB, dark to light
+        self.palette_gain = 1.25                        # brightens night renders before they are mapped
 
     # ---- time
     def B(self, bar, beat=0.0):
@@ -181,7 +182,7 @@ class Cut:
 
     # ---- effects
     def hold(self, key, t0, t1, amp=1.0):
-        """an effect held on for a stretch (e.g. hold('dmg', ...) draws a whole turn in Game Boy greens)."""
+        """an effect held on for a stretch (e.g. hold('palette', ...) draws a whole section in C.palette)."""
         e = self.env[key]
         e[max(0, t0):min(self.total, t1)] = np.maximum(e[max(0, t0):min(self.total, t1)], amp)
 
@@ -325,11 +326,12 @@ class Cut:
             x = np.round(x * lvls) / lvls
             g = cv2.cvtColor(np.clip(x, 0, 1), cv2.COLOR_BGR2GRAY)
             x = x + (np.abs(cv2.Laplacian(g, cv2.CV_32F)) * 1.5 * mt)[..., None]
-        dm = env['dmg'][t]
-        if dm > 0.05:                                     # the four Game Boy greens
+        pm = env['palette'][t]
+        if pm > 0.05:                                     # every pixel to the nearest shade of C.palette, by brightness
+            pal = np.array([c[::-1] for c in self.palette], np.float32) / 255
             g = cv2.cvtColor(np.clip(x, 0, 1), cv2.COLOR_BGR2GRAY)
-            q = np.clip((g * 1.25 * 4).astype(np.int32), 0, 3)
-            x = x * (1 - dm) + DMG_BGR[q] * dm
+            q = np.clip((g * self.palette_gain * len(pal)).astype(np.int32), 0, len(pal) - 1)
+            x = x * (1 - pm) + pal[q] * pm
         if env['zap'][t] > 0.5:
             x = 1 - np.clip(x, 0, 1)
         hw = max(env['howl'][t], env['ghost'][t])

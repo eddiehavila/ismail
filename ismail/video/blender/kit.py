@@ -102,7 +102,7 @@ class Character:
         self.ctl.location = loc
         self.ctl.rotation_euler = (0, 0, math.radians(yaw))
         self.rig = next(o for o in self.root.children_recursive if o.type == 'ARMATURE')
-        for o in self.root.children_recursive:      # rig json "hide": mesh-name substrings (a surfboard, a spare hand)
+        for o in self.root.children_recursive:      # rig json "hide": mesh-name substrings (a baked-in prop, a spare part)
             if o.type == 'MESH' and any(h in o.name for h in self.cfg.get('hide', [])):
                 o.hide_render = o.hide_viewport = True
         for pb in self.rig.pose.bones:
