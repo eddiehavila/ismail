@@ -8,7 +8,8 @@ the track's "params" dict is passed as keywords. A module-level INFO dict docume
 
 A track uses one with {"type": "code", "voice": "<name>", "fn": "voice", "params": {}, "tail": 1.0}.
 Search order: <project>/voices/, then each directory in $ISMAIL_VOICES (os.pathsep-separated), then these
-built-ins. A song voice with a built-in's name overrides it; it can also extend one
+built-ins; each with its family subfolders (strings/, keys/, bass/, fx/ ...). Names are flat: a track says
+"voice": "grand_piano" wherever the file sits. Mimic profiles (<name>.mimic.json) are found the same way. A song voice with a built-in's name overrides it; it can also extend one
 (`from ismail.voices.growl import *`). Data files sit next to the module and are found through __file__.
 """
 import hashlib
@@ -26,13 +27,31 @@ class VoiceError(ValueError):
     pass
 
 
+def _tree(d):
+    """d and its family subfolders (strings/, keys/ ...), depth first, sorted; skips caches and private folders."""
+    out = [d]
+    if os.path.isdir(d):
+        for f in sorted(os.listdir(d)):
+            sub = os.path.join(d, f)
+            if os.path.isdir(sub) and not f.startswith(('_', '.')):
+                out += _tree(sub)
+    return out
+
+
 def search_path(root=None):
-    dirs = []
+    """[(origin, dir)]: the song's voices/, each $ISMAIL_VOICES folder, then the built-ins, each with its family
+    subfolders. origin reads 'song', 'env' or 'built-in', plus '/<family>' for a subfolder."""
+    tops = []
     if root:
-        dirs.append(('song', os.path.join(root, 'voices')))
+        tops.append(('song', os.path.join(root, 'voices')))
     for d in filter(None, os.environ.get('ISMAIL_VOICES', '').split(os.pathsep)):
-        dirs.append(('env', d))
-    dirs.append(('built-in', BUILTIN))
+        tops.append(('env', d))
+    tops.append(('built-in', BUILTIN))
+    dirs = []
+    for origin, top in tops:
+        for d in _tree(top):
+            rel = os.path.relpath(d, top).replace(os.sep, '/')
+            dirs.append((origin if rel == '.' else f'{origin}/{rel}', d))
     return dirs
 
 
@@ -49,13 +68,14 @@ def find(name, root=None):
             return origin, p
     have = sorted({n for _, d in search_path(root) for n in _names(d)})
     raise VoiceError(f"no voice {name!r}; available: {', '.join(have) or 'none'} (voices_list shows them; a song "
-                     f"voice goes in <project>/voices/{name}.py)")
+                     f"voice goes in <project>/voices/{name}.py, or a family subfolder like voices/strings/)")
 
 
 def load(name, root=None):
     origin, path = find(name, root)
-    if origin == 'built-in':
-        return importlib.import_module(f"{__name__}.{name}")
+    if origin.startswith('built-in'):
+        rel = os.path.relpath(path, BUILTIN)[:-3].replace(os.sep, '.')
+        return importlib.import_module(f"{__name__}.{rel}")
     key = (path, os.path.getmtime(path))
     if key not in _LOADED:
         mod_name = f"ismail_voice_{name}_{hashlib.sha1(path.encode()).hexdigest()[:8]}"
@@ -184,3 +204,33 @@ def _note_name(m):
     names = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
     m = int(round(m))
     return f"{names[m % 12]}{m // 12 - 1}"
+
+
+class _FamilyAlias:
+    """`import ismail.voices.growl` keeps working after the built-ins moved into family folders
+    (ismail/voices/bass/growl.py): the old flat name resolves to the same module object."""
+
+    def find_spec(self, fullname, path=None, target=None):
+        parts = fullname.split('.')
+        if len(parts) != 3 or parts[:2] != [__name__.split('.')[0], 'voices'] or parts[2].startswith('_'):
+            return None
+        for d in _tree(BUILTIN)[1:]:
+            if os.path.isfile(os.path.join(d, parts[2] + '.py')):
+                real = __name__ + '.' + os.path.relpath(os.path.join(d, parts[2]), BUILTIN).replace(os.sep, '.')
+                return importlib.util.spec_from_loader(fullname, _AliasLoader(real))
+        return None
+
+
+class _AliasLoader:
+    def __init__(self, real):
+        self.real = real
+
+    def create_module(self, spec):
+        return importlib.import_module(self.real)
+
+    def exec_module(self, module):
+        pass
+
+
+if not any(isinstance(f, _FamilyAlias) for f in sys.meta_path):
+    sys.meta_path.append(_FamilyAlias())

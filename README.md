@@ -134,12 +134,15 @@ Keep your projects under `songs/` (git-ignored) or anywhere else; a project is j
 
 Some instruments are easier to write than to patch: a measured grand piano, a dubstep bass whose note velocity picks the articulation, a set of sound effects. These live as voice modules, Python files that define `voice(freq, t, vel, gate, sr)` and return a mono `(n,)` or stereo `(2, n)` array. `freq` is in Hz, `t` is an array of seconds from the note start that covers the held time plus the instrument's `tail`, `vel` is 0 to 1, `gate` is how long the note is held in seconds, and `sr` is the sample rate.
 
-| voice | what it is |
-|---|---|
-| `grand_piano` | grand piano calibrated from measured notes (partials, decay times, inharmonicity, stereo image, hammer knock, dampers); `fn: voice_sym` is an undamped sympathetic string |
-| `additive_piano` | a lighter additive piano with no data file |
-| `growl` | dubstep bass engine: velocity 1x yoi, 2x wub, 3x screech, 4x metal, 5x dive, 6x zap, 7x grind, 8x chop, 9x talk, 11x robot, 12x howl; the LFO rates follow the song tempo |
-| `sfx` | one-shots by velocity: gunshot, reload, shell casing, bone crunch, punch, rip, gong |
+The library is grouped in family folders under `ismail/voices/`; names stay flat, so a track says `"voice": "grand_piano"` whatever folder it lives in, and `voices_list` shows the family.
+
+| family | voice | what it is |
+|---|---|---|
+| keys | `grand_piano` | grand piano calibrated from measured notes (partials, decay times, inharmonicity, stereo image, hammer knock, dampers); `fn: voice_sym` is an undamped sympathetic string |
+| keys | `additive_piano` | a lighter additive piano with no data file |
+| strings | `violin`, `cello`, `contrabass` | mimic profiles measured from real recordings (use `{"type": "mimic", "profile": "violin"}`); open strings, measured room and vibrato included; `params.players` makes a section |
+| bass | `growl` | dubstep bass engine: velocity 1x yoi, 2x wub, 3x screech, 4x metal, 5x dive, 6x zap, 7x grind, 8x chop, 9x talk, 11x robot, 12x howl; the LFO rates follow the song tempo |
+| fx | `sfx` | one-shots by velocity: gunshot, reload, shell casing, bone crunch, punch, rip, gong |
 
 Use one with `instrument={"type": "code", "voice": "grand_piano", "tail": 4.0}` or `"preset:grand_piano"`. `voices_list` shows what is available and `voice_help(name)` explains a voice's velocity mapping, functions and parameters.
 
@@ -149,9 +152,11 @@ Voices are looked up in this order:
 2. Each folder in `$ISMAIL_VOICES` (a path list): your personal library, outside any repo.
 3. `ismail/voices/`: the built-ins.
 
+Each of these may have family subfolders (`strings/`, `keys/`, `percussion/` ...), searched too; mimic profiles (`<name>.mimic.json`) are found the same way.
+
 A voice function may take extra keyword arguments: `bpm` is passed automatically, and the track's `"params"` dict is passed as keywords (`{"type": "code", "voice": "mine", "params": {"brightness": 0.3}}`). A module-level `INFO` dict documents it for `voice_help`; every key is optional: `summary` (one line for `voices_list`), `range`, `velocity` (what velocity does), `functions` (name to description), `params` (name to description) and `tail` (recommended tail). Data files sit next to the module (`grand_piano.json`) and are found through `__file__`. Editing a voice file invalidates the render cache for the tracks that use it.
 
-To add a voice to the library, move it from a song's `voices/` folder into `ismail/voices/`, give it an `INFO` dict, and add a line to the test that renders every built-in.
+To add a voice to the library, move it from a song's `voices/` folder into the right family folder under `ismail/voices/` (a new family needs an empty `__init__.py` and a line in `pyproject.toml`), give it an `INFO` dict, and add a line to the test that renders every built-in.
 
 ## mimic: instruments measured from recordings
 

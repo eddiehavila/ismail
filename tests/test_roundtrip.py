@@ -262,3 +262,17 @@ def test_sprite_is_the_synth_and_mimic_profiles_carry_defaults():
     bright = mimic.render(prof, 440.0, t, 0.7, 1.0, variation=0.0, seed=1)
     assert not np.allclose(plain, bright)
     assert np.allclose(mimic.render(prof, 440.0, t, 0.7, 1.0, variation=0.0, seed=1, bright=0.0), plain)
+
+
+def test_voice_families_and_builtin_mimic_strings():
+    from ismail import voices, mimic
+    import ismail.voices.growl as g_old
+    import ismail.voices.bass.growl as g_new
+    assert g_old is g_new                                   # flat imports from older songs still work
+    fam = {n: o for n, o, _ in voices.available()}
+    assert fam['grand_piano'] == 'built-in/keys' and fam['growl'] == 'built-in/bass'
+    profs = {n: o for n, o, _ in voices.mimic_profiles()}
+    for name in ('violin', 'cello', 'contrabass'):
+        assert profs[name] == 'built-in/strings'
+        y = mimic.render(mimic.load_profile(name), 220.0, np.arange(4410) / 44100, 0.7, 0.08, room=0.0)
+        assert y.shape == (2, 4410) and np.isfinite(y).all() and np.abs(y).max() > 1e-4
