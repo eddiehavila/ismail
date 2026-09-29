@@ -222,3 +222,42 @@ def test_graph_errors_point_forward(eng):
         eng.cmd_fx('s', 0, {'nonsense': 1})
     with pytest.raises(LiveError, match='out of range'):
         eng.cmd_fx('s', 3, {'mix': 1})
+
+
+def test_after_batch_index(eng):
+    eng.cmd_track('p', instrument='preset:pluck')
+    out = eng.cmd_queue([{'track': 'p', 'notes': '0 C4 1', 'bars': 1, 'loop': 2},
+                         {'track': 'p', 'notes': '0 E4 1', 'bars': 1, 'loop': 1, 'at': 'after:#0'},
+                         {'track': 'p', 'notes': '0 G4 1', 'bars': 1, 'at': 'after:#1'}])
+    assert 'c2 p: bar 4' in out and 'c3 p: bar 5' in out
+    with pytest.raises(LiveError, match='earlier clip'):
+        eng.cmd_queue([{'track': 'p', 'notes': '0 C4 1', 'at': 'after:#0'}])
+
+
+def test_ramp_schedule_keeps_earlier_ramps(eng):
+    eng.cmd_track('p', instrument='preset:pad', fx=[{'type': 'gain', 'gain_db': 0}])
+    eng.cmd_fx('p', 0, {'gain_db': -20}, ramp_beats=4, at='bar:2')      # beats 4-8
+    eng.cmd_fx('p', 0, {'gain_db': 0}, ramp_beats=4, at='bar:4')        # beats 12-16
+    sch = eng.ramps[('track:p', 0, 'gain_db')]
+    s = eng.sample
+    assert sch.value(s(2)) == 0 and abs(sch.value(s(6)) + 10) < 0.1 and sch.value(s(10)) == -20
+    assert abs(sch.value(s(14)) + 10) < 0.1 and sch.value(s(20)) == 0
+    c = sch.curve(s(7), 4 * 22050)                                      # a block spanning ramp end and hold
+    assert c[0] > -20 and abs(c[-1] + 20) < 1e-9
+
+
+def test_recording_starts_on_a_downbeat(eng, tmp_path):
+    import json
+    import soundfile as sf
+    eng.cmd_track('k', instrument={'type': 'kick'})
+    eng.cmd_queue([{'track': 'k', 'lanes': {'C1': 'x...x...x...x...'}}])
+    run(eng, 2.3)                                              # mid bar 2
+    out = eng.cmd_record(True)
+    assert 'from bar 3' in out
+    run(eng, 3.0)
+    eng.cmd_record(False)
+    y, sr = sf.read(eng.rec_path)
+    meta = json.load(open(eng.rec_path[:-4] + '.json'))
+    assert meta['first_bar'] == 3
+    first = np.nonzero(np.abs(y[:, 0]) > 0.02)[0][0]
+    assert first < 0.001 * SR                                  # the bar-3 kick is at t=0

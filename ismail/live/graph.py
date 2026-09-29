@@ -41,6 +41,38 @@ class Ramp:
         return float(c if np.isscalar(c) else c[0])
 
 
+class Schedule:
+    """Ramps of one param in time order. Like clips: a ramp added at p0 replaces those starting at or after p0."""
+
+    def __init__(self):
+        self.r = []
+
+    def add(self, ramp):
+        self.r = [x for x in self.r if x.p0 < ramp.p0] + [ramp]
+
+    def value(self, pos):
+        cur = [x for x in self.r if x.p0 <= pos]
+        return cur[-1].value(pos) if cur else self.r[0].v0
+
+    def curve(self, pos, n):
+        while len(self.r) > 1 and self.r[1].p0 <= pos:      # fully superseded
+            self.r.pop(0)
+        first = self.r[0]
+        if len(self.r) == 1 or self.r[1].p0 >= pos + n:
+            return first.curve(pos, n) if pos + n > first.p0 or pos >= first.p0 else first.v0
+        t = pos + np.arange(n)
+        out = np.full(n, first.v0)
+        for x in self.r:
+            m = t >= x.p0
+            if m.any():
+                out[m] = np.broadcast_to(x.curve(pos, n), (n,))[m]
+        return out
+
+    @property
+    def target(self):
+        return self.r[-1]
+
+
 def deps(fxs):
     """Tracks whose audio or notes an effect chain reads."""
     out = set()
@@ -140,8 +172,8 @@ class LiveBlock(F.Block):
         self.pos, self.n, self.post, self._ons = pos, n, post, onsets
 
     def param(self, name, default):
-        r = self.eng.ramps.get((self.target, self.idx, name))
-        return default if r is None else r.curve(self.pos, self.n)
+        sch = self.eng.ramps.get((self.target, self.idx, name))
+        return default if sch is None else sch.curve(self.pos, self.n)
 
     def key(self, track):
         y = self.post.get(track)

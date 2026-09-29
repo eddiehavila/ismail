@@ -164,7 +164,8 @@ def live_queue(project: str, clips: list) -> str:
       bars (or beats, for odd lengths): clip length; default = whole bars covering the notes. It repeats every length.
       loop: repeats before it ends (default 'forever': it plays until something replaces it).
       at: next_bar (default) | next_beat | next_2 | next_4 | next_8 | next_16 (phrase boundaries counted from bar 1)
-          | asap | bar:<n> | after:<clip id> (when that clip ends; chain clips to pre-program an arc).
+          | asap | bar:<n> | after:<clip id> (when that clip ends; chain clips to pre-program an arc)
+          | after:#<k> (when item k of this same batch ends: a whole arc in one call, no ids needed).
     A clip on a track replaces whatever that track would play from its start (a playing clip is cut there; its
     last notes ring out). {track, stop: true, at} silences a track. The reply gives each clip's id and the exact
     bar it lands on (moved later when its first notes cannot render in time) and the runway: how long until the
@@ -187,12 +188,29 @@ def live_view(project: str, bars: int = 8, clip: str = None) -> str:
 
 
 @op()
-def live_listen(project: str, bars: int = 4, view: str = 'bars', band: str = None) -> str:
+def live_listen(project: str, bars=4, view: str = 'bars', band: str = None, recording: str = None) -> str:
     """Hear the live output: analyse the last `bars` complete bars (max 32; bar numbers are the live set's).
     view: bars (level, bands, centroid, onsets, chord per bar) | envelope (level per 16th, max 8 bars; band=
-    sub|bass|lowmid|mid|himid|air) | pitches | drums | chords. This is the audio after the safety chain."""
+    sub|bass|lowmid|mid|himid|air) | pitches | drums | chords. This is the audio after the safety chain.
+    recording='rec_<time>.wav' (in <project>/live/) analyses a finished live_record take instead, with bars=[a, b]
+    in the set's own bar numbers; works after live_stop too."""
     if view not in VIEWS:
         raise OpError(f"view={view!r}; use one of {', '.join(VIEWS)}")
+    if recording:
+        path = recording if os.path.isabs(recording) else os.path.join(os.path.abspath(project), 'live', recording)
+        try:
+            with open(path[:-4] + '.json', encoding='utf8') as f:
+                meta = json.load(f)
+        except (OSError, ValueError):
+            raise OpError(f"no recording {path} with its .json sidecar; recordings: " + ', '.join(
+                sorted(x for x in os.listdir(os.path.join(os.path.abspath(project), 'live')) if x.endswith('.wav'))))
+        bpb, first = meta['beats_per_bar'], meta['first_bar']
+        g = A.Grid(meta['bpm'], -(first - 1) * bpb * 60.0 / meta['bpm'], bpb)
+        if not isinstance(bars, (list, tuple)) or len(bars) != 2:
+            raise OpError(f"with recording=, bars is [first, last] in set bars; this take starts at bar {first}")
+        kw = {'band': band} if view == 'envelope' else {}
+        head = f"{os.path.basename(path)} bars {bars[0]}-{bars[1]} ({view})"
+        return head + '\n' + VIEWS[view](path, g, list(bars), **kw)[1]
     d = _call(project, 'listen', bars=bars)
     bar_sec = d['bpb'] * 60.0 / d['bpm']
     g = A.Grid(d['bpm'], -(d['first'] - 1) * bar_sec, d['bpb'])

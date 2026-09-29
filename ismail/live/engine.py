@@ -359,7 +359,11 @@ class Engine:
         if j - i < n:
             self.air[:, :n - (j - i)] = y[:, j - i:]
         if self.rec is not None:
-            self.rec.write(y.T)
+            # file t=0 is exactly the downbeat of the first recorded bar (output trails the mix by lat samples)
+            m0 = p0 - self.safety.la - G.LAT_BUDGET
+            if m0 + n > self.rec_start:
+                self.rec.write(y[:, max(0, self.rec_start - m0):].T)
+                self.rec_n += n - max(0, self.rec_start - m0)
         self.pos = p1
         return y
 
@@ -727,10 +731,14 @@ class Engine:
                     v = float(v)
                 except (TypeError, ValueError):
                     raise LiveError(f"{f['type']}.{name} = {v!r}: a number")
-                old = self.ramps.get((key, index, name))
-                v0 = old.value(s0) if old is not None else float(f[name])
+                sch = self.ramps.get((key, index, name))
+                if sch is None:
+                    sch = self.ramps[(key, index, name)] = G.Schedule()
+                    v0 = float(f[name])
+                else:
+                    v0 = sch.value(s0)
                 log = any(k in name for k in G.LOG_PARAMS)
-                self.ramps[(key, index, name)] = G.Ramp(s0, v0, s1, v, log)
+                sch.add(G.Ramp(s0, v0, s1, v, log))
                 f[name] = v
                 msg.append(f"{name} {v0:g} -> {v:g}" + (f" over {float(ramp_beats):g} beats" if ramp_beats else ''))
             rebuild = {k: v for k, v in params.items() if k not in auto}
@@ -822,7 +830,17 @@ class Engine:
             tl = copy.deepcopy(self.tl)
             claims, lines, added = [], [], []
             extra = 0                        # events of earlier clips in this batch, rendered alongside
+            batch_ids = {}                   # batch index -> clip id, for at='after:#<index>'
             for i, (track, notes, length, loop, at) in enumerate(parsed):
+                if at.startswith('after:#'):
+                    try:
+                        k = int(at[7:])
+                    except ValueError:
+                        raise LiveError(f"clip [{i}] at={at!r}: after:#<index of an earlier clip in this batch>")
+                    if k not in batch_ids:
+                        raise LiveError(f"clip [{i}] at={at!r}: item [{k}] is not an earlier clip of this batch "
+                                        f"(stops have no end). Nothing was queued.")
+                    at = 'after:' + batch_ids[k]
                 inst = self.tracks[track]['inst']
                 onsets = [notes[g[0]][0] for g in _mono_groups(sorted(notes), inst)] if notes else []
                 ready = now + self._lead_beats(track, onsets, extra)
@@ -844,6 +862,7 @@ class Engine:
                                  + (f"\n  note: {note}" if note else ''))
                     continue
                 c = tl.add(track, notes, length, loop, beat, at)
+                batch_ids[i] = c.id
                 added.append(c)
                 bars = length / self.bpb
                 lines.append(f"{c.id} {track}: {fmt_bar(beat, self.bpb)} ({at}), {fmt_num(bars)} bars x "
@@ -937,8 +956,9 @@ class Engine:
                 lines.append(f"  bus {name:<6} fx {b['path'].chain.describe()} | vol {b['volume_db']:+g} | level "
                              f"{lvl:6.1f} dBFS | fed by {', '.join(users) or 'nothing yet'}")
                 b['path'].chain.gr = {}
-            moving = [f"{k[0]} fx[{k[1]}].{k[2]} -> {r.v1:g} by {fmt_bar(self.beat(r.p1), self.bpb)}"
-                      for k, r in self.ramps.items() if r.p1 > self.pos]
+            moving = [f"{k[0]} fx[{k[1]}].{k[2]} -> " + ', '.join(f"{r.v1:g} by {fmt_bar(self.beat(r.p1), self.bpb)}"
+                                                                   for r in sch.r if r.p1 > self.pos)
+                      for k, sch in self.ramps.items() if sch.target.p1 > self.pos]
             if moving:
                 lines.append("ramps: " + '; '.join(moving))
             if self.swaps:
@@ -1003,13 +1023,18 @@ class Engine:
                 d = os.path.join(self.root, 'live')
                 os.makedirs(d, exist_ok=True)
                 self.rec_path = os.path.join(d, time.strftime('rec_%Y%m%d_%H%M%S.wav'))
+                bar = int(self.beat(self.pos) // self.bpb) + 2            # next full bar not yet mixed
+                self.rec_start = self.sample((bar - 1) * self.bpb)
+                self.rec_n = 0
+                with open(self.rec_path[:-4] + '.json', 'w', encoding='utf8') as f:
+                    json.dump({'bpm': self.bpm, 'beats_per_bar': self.bpb, 'first_bar': bar}, f)
                 self.rec = sf.SoundFile(self.rec_path, 'w', SR, 2, 'PCM_24')
-                self.rec_from = self.pos
-                return f"recording to {self.rec_path} from {fmt_bar(self.beat(self.pos), self.bpb)}"
+                return (f"recording to {self.rec_path} from bar {bar} (file starts on that downbeat; "
+                        f"{os.path.basename(self.rec_path[:-4])}.json has bpm and first_bar for analysis)")
             if not on and self.rec is not None:
                 self.rec.close()
                 self.rec = None
-                return f"stopped recording: {self.rec_path} ({(self.pos - self.rec_from) / SR:.1f} s)"
+                return f"stopped recording: {self.rec_path} ({self.rec_n / SR:.1f} s)"
             return "recording already " + ("on: " + self.rec_path if self.rec else "off")
 
     def cmd_stop(self, fade_s=1.0):
