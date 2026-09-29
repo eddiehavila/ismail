@@ -90,14 +90,18 @@ def pink_noise(n, seed):
 
 # ---------------------------------------------------------------- filters
 
+# Stateful kernels: every loop kernel takes its state as small float64 arrays and updates them in place, so a
+# signal processed in blocks gives exactly the result of processing it whole (live effects rely on this). The
+# plain names start from silence, as before.
+
 @njit(cache=True)
-def svf(x, cutoff, res, mode, sr):
+def svf_s(x, cutoff, res, mode, sr, st):
     """Zavalishin TPT state-variable filter, per-sample cutoff (Hz) and res (0..1).
-    mode: 0 lp, 1 hp, 2 bp, 3 notch, 4 peak(allpass-ish)."""
+    mode: 0 lp, 1 hp, 2 bp, 3 notch, 4 peak(allpass-ish). st: [ic1, ic2]."""
     n = len(x)
     y = np.empty(n)
-    ic1 = 0.0
-    ic2 = 0.0
+    ic1 = st[0]
+    ic2 = st[1]
     for i in range(n):
         fc = min(max(cutoff[i], 10.0), sr * 0.49)
         g = np.tan(np.pi * fc / sr)
@@ -120,15 +124,24 @@ def svf(x, cutoff, res, mode, sr):
             y[i] = x[i] - k * v1
         else:
             y[i] = x[i] - 2.0 * k * v1
+    st[0] = ic1
+    st[1] = ic2
     return y
 
 
+def svf(x, cutoff, res, mode, sr):
+    return svf_s(x, cutoff, res, mode, sr, np.zeros(2))
+
+
 @njit(cache=True)
-def ladder(x, cutoff, res, drive, sr):
-    """4-pole Moog-style ladder (Huovilainen-lite), per-sample cutoff/res. res 0..1 (1 ~ self-osc)."""
+def ladder_s(x, cutoff, res, drive, sr, st):
+    """4-pole Moog-style ladder (Huovilainen-lite), per-sample cutoff/res. res 0..1 (1 ~ self-osc). st: [s0..s3]."""
     n = len(x)
     y = np.empty(n)
-    s0 = s1 = s2 = s3 = 0.0
+    s0 = st[0]
+    s1 = st[1]
+    s2 = st[2]
+    s3 = st[3]
     for i in range(n):
         fc = min(max(cutoff[i], 10.0), sr * 0.45)
         g = np.tan(np.pi * fc / sr)
@@ -148,45 +161,68 @@ def ladder(x, cutoff, res, drive, sr):
         l3 = v + s3
         s3 = l3 + v
         y[i] = l3
+    st[0] = s0
+    st[1] = s1
+    st[2] = s2
+    st[3] = s3
     return y
+
+
+def ladder(x, cutoff, res, drive, sr):
+    return ladder_s(x, cutoff, res, drive, sr, np.zeros(4))
 
 
 FILTER_MODES = {'lp': 0, 'hp': 1, 'bp': 2, 'notch': 3, 'peak': 4}
 
 
-def filt(x, ftype, cutoff, res, sr=SR, drive=1.0):
-    """ftype: lp12 lp24 hp12 hp24 bp notch ladder. cutoff/res scalar or per-sample arrays."""
+def filt_state():
+    """State for filt_s (enough for every filter type)."""
+    return np.zeros(4)
+
+
+def filt_s(x, ftype, cutoff, res, sr, drive, st):
+    """filt with its state carried in `st` (from filt_state())."""
     n = len(x)
     c = as_curve(cutoff, n)
     r = as_curve(res, n)
     if ftype == 'ladder':
-        return ladder(x, c, r, float(drive), float(sr))
+        return ladder_s(x, c, r, float(drive), float(sr), st)
     base = ftype.rstrip('0123456789') or 'lp'
     if base not in FILTER_MODES:
         raise ValueError(f"unknown filter type {ftype!r}: use lp12 lp24 hp12 hp24 bp notch ladder")
     mode = FILTER_MODES[base]
-    y = svf(x, c, r, mode, float(sr))
+    y = svf_s(x, c, r, mode, float(sr), st[0:2])
     if ftype.endswith('24'):
         # second stage at low resonance keeps the peak sane
-        y = svf(y, c, r * 0.5, mode, float(sr))
+        y = svf_s(y, c, r * 0.5, mode, float(sr), st[2:4])
     return y
+
+
+def filt(x, ftype, cutoff, res, sr=SR, drive=1.0):
+    """ftype: lp12 lp24 hp12 hp24 bp notch ladder. cutoff/res scalar or per-sample arrays."""
+    return filt_s(x, ftype, cutoff, res, sr, drive, filt_state())
 
 
 # ---------------------------------------------------------------- dynamics
 
 @njit(cache=True)
-def env_follow(x, attack_s, release_s, sr):
+def env_follow_s(x, attack_s, release_s, sr, st):
     n = len(x)
     a = np.exp(-1.0 / max(attack_s * sr, 1.0))
     r = np.exp(-1.0 / max(release_s * sr, 1.0))
-    e = 0.0
+    e = st[0]
     out = np.empty(n)
     for i in range(n):
         v = abs(x[i])
         c = a if v > e else r
         e = c * e + (1.0 - c) * v
         out[i] = e
+    st[0] = e
     return out
+
+
+def env_follow(x, attack_s, release_s, sr):
+    return env_follow_s(x, attack_s, release_s, sr, np.zeros(1))
 
 
 @njit(cache=True)
@@ -205,30 +241,35 @@ def gain_computer(level_db, thresh, ratio, knee):
 
 
 @njit(cache=True)
-def smooth_gain(gr_db, attack_s, release_s, sr):
-    """Smooth gain reduction (dB, <=0): attack when reducing more, release when recovering."""
+def smooth_gain_s(gr_db, attack_s, release_s, sr, st):
+    """Smooth gain reduction (dB, <=0): attack when reducing more, release when recovering. st: [g]."""
     n = len(gr_db)
     a = np.exp(-1.0 / max(attack_s * sr, 1.0))
     r = np.exp(-1.0 / max(release_s * sr, 1.0))
-    g = 0.0
+    g = st[0]
     out = np.empty(n)
     for i in range(n):
         c = a if gr_db[i] < g else r
         g = c * g + (1 - c) * gr_db[i]
         out[i] = g
+    st[0] = g
     return out
+
+
+def smooth_gain(gr_db, attack_s, release_s, sr):
+    return smooth_gain_s(gr_db, attack_s, release_s, sr, np.zeros(1))
 
 
 # ---------------------------------------------------------------- delay-based
 
 @njit(cache=True)
-def mod_delay(x, delay_samps, feedback, mix):
-    """Delay line with per-sample fractional delay (samples). Used for chorus/flanger/vibrato."""
+def mod_delay_s(x, delay_samps, feedback, mix, buf, st):
+    """Delay line with per-sample fractional delay (samples). Used for chorus/flanger/vibrato.
+    buf: circular buffer at least the largest delay + 2 long; st: [write index]."""
     n = len(x)
-    size = int(np.max(delay_samps)) + 4
-    buf = np.zeros(size)
+    size = len(buf)
     y = np.empty(n)
-    w = 0
+    w = int(st[0])
     for i in range(n):
         d = delay_samps[i]
         rpos = w - d
@@ -241,20 +282,24 @@ def mod_delay(x, delay_samps, feedback, mix):
         buf[w] = x[i] + wet * feedback
         y[i] = x[i] * (1 - mix) + wet * mix
         w = (w + 1) % size
+    st[0] = w
     return y
 
 
+def mod_delay(x, delay_samps, feedback, mix):
+    return mod_delay_s(x, delay_samps, feedback, mix, np.zeros(int(np.max(delay_samps)) + 4), np.zeros(1))
+
+
 @njit(cache=True)
-def feedback_delay(xl, xr, dsamp, fb, pingpong, lp_coef):
+def feedback_delay_s(xl, xr, dsamp, fb, pingpong, lp_coef, bl, br, st):
+    """bl, br: buffers of dsamp + 1; st: [write index, lowpass state L, lowpass state R]."""
     n = len(xl)
     size = dsamp + 1
-    bl = np.zeros(size)
-    br = np.zeros(size)
     yl = np.empty(n)
     yr = np.empty(n)
-    w = 0
-    fl = 0.0
-    fr = 0.0
+    w = int(st[0])
+    fl = st[1]
+    fr = st[2]
     for i in range(n):
         r = (w - dsamp) % size
         ol = bl[r]
@@ -270,36 +315,48 @@ def feedback_delay(xl, xr, dsamp, fb, pingpong, lp_coef):
         yl[i] = ol
         yr[i] = orr
         w = (w + 1) % size
+    st[0] = w
+    st[1] = fl
+    st[2] = fr
     return yl, yr
 
 
+def feedback_delay(xl, xr, dsamp, fb, pingpong, lp_coef):
+    return feedback_delay_s(xl, xr, dsamp, fb, pingpong, lp_coef, np.zeros(dsamp + 1), np.zeros(dsamp + 1),
+                            np.zeros(3))
+
+
 @njit(cache=True)
-def _comb(x, d, fb, damp):
+def _comb_s(x, fb, damp, buf, st):
+    """st: [index, damping store]."""
     n = len(x)
-    buf = np.zeros(d)
+    d = len(buf)
     y = np.empty(n)
-    idx = 0
-    store = 0.0
+    idx = int(st[0])
+    store = st[1]
     for i in range(n):
         o = buf[idx]
         store = o * (1 - damp) + store * damp
         buf[idx] = x[i] + store * fb
         y[i] = o
         idx = (idx + 1) % d
+    st[0] = idx
+    st[1] = store
     return y
 
 
 @njit(cache=True)
-def _allpass(x, d, fb):
+def _allpass_s(x, fb, buf, st):
     n = len(x)
-    buf = np.zeros(d)
+    d = len(buf)
     y = np.empty(n)
-    idx = 0
+    idx = int(st[0])
     for i in range(n):
         b = buf[idx]
         y[i] = -x[i] + b
         buf[idx] = x[i] + b * fb
         idx = (idx + 1) % d
+    st[0] = idx
     return y
 
 
@@ -307,28 +364,42 @@ COMBS = (1116, 1188, 1277, 1356, 1422, 1491, 1557, 1617)
 ALLPASSES = (556, 441, 341, 225)
 
 
+class Freeverb:
+    """Freeverb on a mono input -> (L, R) wet, keeping its state between calls."""
+
+    def __init__(self, size=0.8, damp=0.4, sr=SR, spread=23):
+        scale = sr / 44100
+        self.fb = 0.7 + 0.28 * size
+        self.damp = damp
+        self.sides = []
+        for sp in (0, spread):
+            combs = [(np.zeros(int((c + sp) * scale)), np.zeros(2)) for c in COMBS]
+            aps = [(np.zeros(int((a + sp) * scale)), np.zeros(1)) for a in ALLPASSES]
+            self.sides.append((combs, aps))
+
+    def process(self, x):
+        outs = []
+        for combs, aps in self.sides:
+            acc = np.zeros(len(x))
+            for buf, st in combs:
+                acc += _comb_s(x, self.fb, self.damp, buf, st)
+            for buf, st in aps:
+                acc = _allpass_s(acc, 0.5, buf, st)
+            outs.append(acc * 0.03)
+        return outs[0], outs[1]
+
+
 def freeverb(x, size=0.8, damp=0.4, sr=SR, spread=23):
     """Freeverb on a mono input -> (L, R) wet."""
-    scale = sr / 44100
-    fb = 0.7 + 0.28 * size
-    outs = []
-    for sp in (0, spread):
-        acc = np.zeros(len(x))
-        for c in COMBS:
-            acc += _comb(x, int((c + sp) * scale), fb, damp)
-        for a in ALLPASSES:
-            acc = _allpass(acc, int((a + sp) * scale), 0.5)
-        outs.append(acc * 0.03)
-    return outs[0], outs[1]
+    return Freeverb(size, damp, sr, spread).process(x)
 
 
 @njit(cache=True)
-def allpass1_chain(x, coef, stages, feedback):
-    """Phaser: chain of first-order allpasses with per-sample coefficient."""
+def allpass1_chain_s(x, coef, stages, feedback, z, st):
+    """Phaser: chain of first-order allpasses with per-sample coefficient. z: (stages,), st: [last output]."""
     n = len(x)
-    z = np.zeros(stages)
     y = np.empty(n)
-    last = 0.0
+    last = st[0]
     for i in range(n):
         s = x[i] + last * feedback
         a = coef[i]
@@ -338,7 +409,12 @@ def allpass1_chain(x, coef, stages, feedback):
             s = o
         last = s
         y[i] = s
+    st[0] = last
     return y
+
+
+def allpass1_chain(x, coef, stages, feedback):
+    return allpass1_chain_s(x, coef, stages, feedback, np.zeros(stages), np.zeros(1))
 
 
 # ---------------------------------------------------------------- helpers
