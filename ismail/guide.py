@@ -42,6 +42,10 @@ LIVE (play in real time while you edit; a separate engine process per project fo
   Effects: live_track(fx=[...]) sets a track's chain (fx_help; 'track:<name>' copies a project track's chain),
   live_bus + sends={bus: dB} share one hall/delay across tracks, live_fx(target, index, params, ramp_beats)
   moves automatable params (a sweep, a fade, a build) without resending the chain. Replaced chains ring out.
+  Decks: live_load(deck, song=<ismail project folder>, bars=[a, b]) puts a whole song on a deck (cued, off air,
+  while another deck plays); live_listen(deck=...) hears the cued deck; live_transition(to, style, bars) queues
+  the mix (blend | bass_swap | filter | cut); live_deck sets fader, 3-band isolator (kill at -40), filter knob,
+  transpose. live_status shows the mixer load: keep it under ~70%.
 
 RECREATE A REFERENCE (what worked)
   1. analyze_grid -> project_set(bpm, offset_sec); then align(a='track:<drum>', b='ref:drums') and correct

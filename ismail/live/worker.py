@@ -74,7 +74,7 @@ def self_warm(root):
     """Pay first-use costs before taking jobs: one note of each built-in instrument kind and of every mimic
     profile the project can see (imports, numba loads, profile parsing)."""
     import glob
-    from .. import mimic, voices
+    from .. import voices
     specs = [{'type': 'synth'}, {'type': 'kick'}, {'type': 'snare'}, {'type': 'hat'}, {'type': 'clap'},
              {'type': 'code', 'voice': 'grand_piano'}]
     for _, d in voices.search_path(root):
@@ -95,6 +95,7 @@ def main(own, shared, results, root, wid=0):
     import queue
     bank = SoundBank(root)
     instruments.set_resolvers(bank.sound, bank.table)
+    banks = {root: bank}
     t0 = time.time()
     warmed = self_warm(root)
     results.put(('ready', wid, time.time() - t0, warmed))
@@ -108,10 +109,13 @@ def main(own, shared, results, root, wid=0):
                 continue
         if job is None:
             return
-        jid, inst, notes, lead_s, bpm = job
+        jid, inst, notes, lead_s, bpm, jroot = job
         t0 = time.time()
         try:
-            y = render_event(inst, notes, lead_s, bpm, root)
+            if jroot not in banks:
+                banks[jroot] = SoundBank(jroot)
+            instruments.set_resolvers(banks[jroot].sound, banks[jroot].table)
+            y = render_event(inst, notes, lead_s, bpm, jroot)
             err = check(y)
             if err:
                 y = None

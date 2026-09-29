@@ -88,11 +88,12 @@ def live_stop(project: str, fade_sec: float = 1.0) -> str:
 
 
 @op()
-def live_status(project: str) -> str:
-    """Where the live set is: bar heard, each track (instrument, fader, level, playing/next clip, render cost,
-    errors), the safety chain's gain reduction since the last status, runway (the last scheduled change and what
-    loops after it) and render health (backlog, late events, underruns)."""
-    return _call(project, 'status')
+def live_status(project: str, deck: str = None) -> str:
+    """Where the live set is: bar heard, each deck (on air or cued, fader, eq, filter, level, song), each track
+    not on a deck (instrument, fader, level, playing/next clip, render cost, errors), the safety chain's gain
+    reduction since the last status, runway (the last scheduled change and what loops after it) and render health
+    (backlog, late events, underruns). deck='B' lists that deck's tracks and buses instead."""
+    return _call(project, 'status', deck=deck)
 
 
 def _project_fx(project, spec):
@@ -111,7 +112,7 @@ def _project_fx(project, spec):
 
 @op()
 def live_track(project: str, track: str, instrument=None, volume_db: float = None, pan: float = None,
-               fx=None, sends: dict = None, remove: bool = False, at: str = 'next_bar') -> str:
+               fx=None, sends: dict = None, remove: bool = False, at: str = 'next_bar', deck: str = None) -> str:
     """Create or change a live track. instrument: a dict (instrument_help), 'preset:<name>' (presets_list),
     {'type': 'code', 'voice': '<name>'} (voices_list) or 'track:<name>' (copy from the folder's project.json).
     fx: the track's whole effect chain, a list of effect dicts (fx_help), or 'track:<name>' to copy a project
@@ -119,7 +120,8 @@ def live_track(project: str, track: str, instrument=None, volume_db: float = Non
     the track's sends (post-fader; live_bus creates buses). A new instrument or chain on a playing track takes
     over at `at` (live_queue values, or 'now'); a replaced chain's tail rings out. New instruments warm up off the
     air first (live_status shows WARMING). volume_db <= +6. remove=True silences and deletes the track now.
-    To move one effect param (a sweep, a fade), use live_fx instead of resending the chain."""
+    To move one effect param (a sweep, a fade), use live_fx instead of resending the chain. deck='B' puts a new
+    track on deck B (created if needed): it then plays through that deck's strip and cue."""
     if isinstance(fx, str):
         if not fx.startswith(('track:', 'bus:')):
             raise OpError("fx: a list of effect dicts, or 'track:<name>' / 'bus:<name>' to copy from project.json")
@@ -133,7 +135,48 @@ def live_track(project: str, track: str, instrument=None, volume_db: float = Non
         # a folder without project.json still has song voices in <folder>/voices: check against that root
         instrument = api._resolve_instrument(instrument, P or type('Root', (), {'root': os.path.abspath(project)})())
     return _call(project, 'track', track=track, instrument=instrument, volume_db=volume_db, pan=pan, remove=remove,
-                 at=at, fx=fx, sends=sends)
+                 at=at, fx=fx, sends=sends, deck=deck)
+
+
+@op()
+def live_deck(project: str, deck: str, volume_db: float = None, low_db: float = None, mid_db: float = None,
+              high_db: float = None, filter: float = None, transpose: int = None, cue: bool = None,
+              ramp_beats: float = 0, at: str = 'now', remove: bool = False) -> str:
+    """A deck's channel strip (a deck = a group of tracks, e.g. a loaded song). volume_db: fader (-60 or less =
+    off). low_db / mid_db / high_db: 3-band isolator, bands split at 250 Hz and 2.5 kHz; -40 or less kills the
+    band. filter: one knob, -1 (low-pass closed) .. 0 (off) .. +1 (high-pass closed). These glide over ramp_beats
+    from `at` ('now' or a live_queue value), like live_fx. transpose: semitones for the deck's pitched tracks
+    (drums stay), from `at`. cue=True takes the deck off the air (live_listen(deck=...) still hears it: prepare
+    the next part there); cue=False puts it on air. remove=True deletes the deck and its tracks."""
+    return _call(project, 'deck', deck=deck, volume_db=volume_db, low_db=low_db, mid_db=mid_db, high_db=high_db,
+                 filter=filter, transpose=transpose, cue=cue, ramp_beats=ramp_beats, at=at, remove=remove)
+
+
+@op()
+def live_load(project: str, deck: str, song: str, bars: list = None, at: str = 'next_bar', loop: bool = True,
+              cue: bool = None) -> str:
+    """Load an ismail song (its project folder: tracks, instruments, effects, buses, notes) onto a deck; every
+    track starts on the same bar. bars=[a, b] takes a section. It plays at the house tempo (re-rendered, not
+    time-stretched) and loops unless loop=False. Cued (off air) by default while another deck is on air: listen
+    with live_listen(deck=...), then bring it in with live_transition. Automation and placed audio clips do not
+    come over (the reply lists what was left out). Loading replaces what a cued deck held."""
+    if not os.path.isabs(song):
+        cand = os.path.join(os.path.abspath(project), song)
+        song = cand if os.path.exists(cand) else os.path.abspath(song)
+    return _call(project, 'load', deck=deck, song=song, bars=bars, at=at, loop=loop, cue=cue, timeout=120)
+
+
+@op()
+def live_transition(project: str, to: str, from_deck: str = None, at: str = 'next_8', bars: int = 16,
+                    style: str = 'blend', stop_from: bool = True) -> str:
+    """Queue a mix from one deck to another as ramps on their strips, starting at `at` (a phrase boundary).
+    style: blend (new deck fades up without bass, bass swap half-way, old fades out) | bass_swap (both full, one
+    bass at a time, old leaves in the last quarter) | filter (old thins out through a rising high-pass while the
+    new opens from a low-pass) | cut (switch on the boundary). The `to` deck must be playing by then (live_load
+    or live_queue it first, cued); it goes on air at the start. from_deck defaults to the one deck on air. With
+    stop_from, the old deck's tracks stop when the transition ends. The reply is the timeline of every move."""
+    return _call(project, 'transition', to=to, from_deck=from_deck, at=at, bars=bars, style=style,
+                 stop_from=stop_from)
 
 
 @op()
@@ -191,12 +234,14 @@ def live_view(project: str, bars: int = 8, clip: str = None) -> str:
 
 
 @op()
-def live_listen(project: str, bars=4, view: str = 'bars', band: str = None, recording: str = None) -> str:
+def live_listen(project: str, bars=4, view: str = 'bars', band: str = None, recording: str = None,
+                deck: str = None) -> str:
     """Hear the live output: analyse the last `bars` complete bars (max 32; bar numbers are the live set's).
     view: bars (level, bands, centroid, onsets, chord per bar) | envelope (level per 16th, max 8 bars; band=
     sub|bass|lowmid|mid|himid|air) | pitches | drums | chords. This is the audio after the safety chain.
     recording='rec_<time>.wav' (in <project>/live/) analyses a finished live_record take instead, with bars=[a, b]
-    in the set's own bar numbers; works after live_stop too."""
+    in the set's own bar numbers; works after live_stop too. deck='B' hears only that deck, after its strip, even
+    while it is cued (off the air): the headphones for preparing the next part."""
     if view not in VIEWS:
         raise OpError(f"view={view!r}; use one of {', '.join(VIEWS)}")
     if recording:
@@ -214,7 +259,7 @@ def live_listen(project: str, bars=4, view: str = 'bars', band: str = None, reco
         kw = {'band': band} if view == 'envelope' else {}
         head = f"{os.path.basename(path)} bars {bars[0]}-{bars[1]} ({view})"
         return head + '\n' + VIEWS[view](path, g, list(bars), **kw)[1]
-    d = _call(project, 'listen', bars=bars)
+    d = _call(project, 'listen', bars=bars, deck=deck)
     bar_sec = d['bpb'] * 60.0 / d['bpm']
     g = A.Grid(d['bpm'], -(d['first'] - 1) * bar_sec, d['bpb'])
     rng = [d['first'], d['last']]

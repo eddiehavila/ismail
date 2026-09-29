@@ -203,6 +203,44 @@ def filt(x, ftype, cutoff, res, sr=SR, drive=1.0):
     return filt_s(x, ftype, cutoff, res, sr, drive, filt_state())
 
 
+@njit(cache=True)
+def sos_s(x, sos, zi):
+    """Cascaded biquads (second-order sections, a0 = 1) on x (channels, n), transposed direct form II like
+    scipy.signal.sosfilt; zi (sections, channels, 2) is the state, updated in place."""
+    c, n = x.shape
+    k = sos.shape[0]
+    y = np.empty((c, n))
+    for ch in range(c):
+        for i in range(n):
+            v = x[ch, i]
+            for s in range(k):
+                o = sos[s, 0] * v + zi[s, ch, 0]
+                zi[s, ch, 0] = sos[s, 1] * v - sos[s, 4] * o + zi[s, ch, 1]
+                zi[s, ch, 1] = sos[s, 2] * v - sos[s, 5] * o
+                v = o
+            y[ch, i] = v
+    return y
+
+
+@njit(cache=True)
+def lfilter_s(x, b, a, zi):
+    """scipy.signal.lfilter along the last axis of x (channels, n) for a0 = 1 and len(a) == len(b) (pad with
+    zeros); zi (channels, len(b) - 1) is the state, updated in place."""
+    c, n = x.shape
+    m = len(b) - 1
+    y = np.empty((c, n))
+    for ch in range(c):
+        for i in range(n):
+            v = x[ch, i]
+            o = b[0] * v + (zi[ch, 0] if m > 0 else 0.0)
+            for j in range(m - 1):
+                zi[ch, j] = b[j + 1] * v - a[j + 1] * o + zi[ch, j + 1]
+            if m > 0:
+                zi[ch, m - 1] = b[m] * v - a[m] * o
+            y[ch, i] = o
+    return y
+
+
 # ---------------------------------------------------------------- dynamics
 
 @njit(cache=True)

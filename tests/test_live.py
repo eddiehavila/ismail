@@ -261,3 +261,74 @@ def test_recording_starts_on_a_downbeat(eng, tmp_path):
     assert meta['first_bar'] == 3
     first = np.nonzero(np.abs(y[:, 0]) > 0.02)[0][0]
     assert first < 0.001 * SR                                  # the bar-3 kick is at t=0
+
+
+# ------------------------------------------------------------------ decks
+
+def test_isolator_sums_flat_and_kills():
+    from ismail.live.decks import Strip, PARAMS
+    st = Strip()
+    x = np.zeros((2, SR))
+    x[:, 100] = 1.0
+    y = st.process(x, dict(PARAMS))
+    H = np.abs(np.fft.rfft(y[0]))
+    fr = np.fft.rfftfreq(SR, 1 / SR)
+    band = (fr > 30) & (fr < 16000)
+    assert np.max(np.abs(20 * np.log10(H[band]))) < 0.1          # flat to 0.1 dB at 0 dB gains
+    st = Strip()
+    y = st.process(x, dict(PARAMS, low_db=-40))
+    H = np.abs(np.fft.rfft(y[0]))
+    assert 20 * np.log10(np.mean(H[(fr > 30) & (fr < 80)])) < -30  # low band killed
+    assert abs(20 * np.log10(np.mean(H[(fr > 5000) & (fr < 10000)]))) < 0.5
+
+
+def make_song(root, name, pitch, bpm=100):
+    from ismail.api import OPS
+    OPS['project_new'](root, bpm=bpm, length_bars=4, name=name)
+    OPS['track_add'](root, 'kick', instrument='preset:kick')
+    OPS['notes_write'](root, 'kick', 1, '0 C1 0.5; 1 C1 0.5; 2 C1 0.5; 3 C1 0.5', repeat=4)
+    OPS['track_add'](root, 'lead', instrument='preset:pluck')
+    OPS['notes_write'](root, 'lead', 1, f'0 {pitch} 1; 2 {pitch} 1', repeat=4)
+    return root
+
+
+def test_load_cue_transition(eng, tmp_path):
+    a = make_song(str(tmp_path / 'songA'), 'Song A', 'C4')
+    b = make_song(str(tmp_path / 'songB'), 'Song B', 'G4')
+    out = eng.cmd_load('A', a, at='next_bar')
+    assert 'ON AIR' in out and '100 BPM plays at the house 120' in out
+    run(eng, 3.0)
+    out = eng.cmd_load('B', b, at='next_bar')
+    assert 'CUED' in out
+    run(eng, 4.5)
+    st = eng.cmd_status()
+    assert 'deck A: on air' in st and 'deck B: CUE' in st and 'on decks' in st
+    d = eng.cmd_listen_dump(bars=1, deck='B')                    # the cued deck is audible to the agent only
+    import soundfile as sf
+    yb, _ = sf.read(d['path'])
+    assert np.max(np.abs(yb)) > 0.01
+    with pytest.raises(LiveError, match='on air and playing'):
+        eng.cmd_load('A', b)
+    out = eng.cmd_transition('B', at='next_bar', bars=2, style='blend')
+    assert 'from deck A to deck B' in out and 'goes on air' in out and 'stop' in out
+    run(eng, 7.0)
+    st = eng.cmd_status()
+    assert 'deck B: on air' in st and 'deck A: on air | fader off' in st
+    assert not any(eng.tl.playing(k, eng.beat(eng.pos)) for k, t in eng.tracks.items() if t['deck'] == 'A')
+
+
+def test_deck_transpose_and_errors(eng, tmp_path):
+    a = make_song(str(tmp_path / 'songA'), 'Song A', 'A4')
+    eng.cmd_load('A', a, at='next_bar')
+    out = eng.cmd_deck('A', transpose=12, at='next_bar')
+    assert 'transpose +12' in out
+    run(eng, 6.0)
+    keys = [k for k in eng.cache if k[0] in {c.id for c in eng.tl.clips.values() if c.track == 'A.lead'}]
+    assert any(k[2] == 12 for k in keys)                          # events after the change render transposed
+    with pytest.raises(LiveError, match='no deck'):
+        eng.cmd_transition('Z')
+    eng.cmd_deck('C')
+    with pytest.raises(LiveError, match='nothing queued'):
+        eng.cmd_transition('C', from_deck='A')
+    with pytest.raises(LiveError, match='between'):
+        eng.cmd_deck('A', filter=2)

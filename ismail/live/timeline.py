@@ -5,6 +5,7 @@ Bar 1 starts at beat 0 when the engine starts. A clip is a block of notes `lengt
 replaces what that track would play from S on. Clips that start at or after S are removed; a clip still
 playing at S is cut at S (notes it started before S ring out). A stop is the same rule with nothing after.
 """
+import bisect
 import math
 
 from ..notation import fmt_num
@@ -56,6 +57,15 @@ class Timeline:
         self.clips = {}                  # id -> Clip (current and future; finished ones are pruned)
         self.stops = {}                  # track -> [beat]: explicit stops, for display
         self._n = 0
+
+    def copy(self):
+        """A copy to try a batch on: clips are copied shallowly (their note lists never change; only `cut` does)."""
+        import copy as _copy
+        t = Timeline(self.bpb)
+        t.clips = {k: _copy.copy(c) for k, c in self.clips.items()}
+        t.stops = {k: list(v) for k, v in self.stops.items()}
+        t._n = self._n
+        return t
 
     def track_clips(self, track):
         return sorted((c for c in self.clips.values() if c.track == track), key=lambda c: c.start)
@@ -167,14 +177,19 @@ class Timeline:
             return
         k0 = max(0, int(math.floor((lo - clip.start) / clip.length)))
         k1 = int(math.ceil((hi - clip.start) / clip.length))
+        if getattr(clip, '_ons_for', None) is not groups:     # groups are in onset order
+            clip._ons = [clip.notes[g[0]][0] for g in groups]
+            clip._ons_for = groups
+        ons = clip._ons
         for k in range(k0, k1 + 1):
             base = clip.start + k * clip.length
             if clip.loop is not None and k >= clip.loop:
                 break
-            for ei, g in enumerate(groups):
-                on = base + clip.notes[g[0]][0]
-                if lo - EPS <= on < hi - EPS:
-                    yield k, ei, on
+            for ei in range(bisect.bisect_left(ons, lo - EPS - base), len(ons)):
+                on = base + ons[ei]
+                if on >= hi - EPS:
+                    break
+                yield k, ei, on
 
     def last_change(self, now):
         """Beat of the last scheduled start/end after `now` (None if nothing is scheduled to change)."""

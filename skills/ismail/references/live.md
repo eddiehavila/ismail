@@ -32,6 +32,27 @@ Write the set as a script, `songs/<slug>/set.py`, like a `build.py`: rerunnable,
 readable later. `examples/disco_set.py` (in this skill) is a worked example (intro, groove, breakdown with a filter snap and
 sweep, drop, ending; 17 clips in one batch).
 
+## Decks: prepare the next part while this one plays
+
+A deck is a group of tracks with a DJ strip: fader, 3-band isolator (250 Hz / 2.5 kHz, a band at -40 dB or
+less is killed), a filter knob (-1 low-pass .. 0 off .. +1 high-pass) and transpose. A cued deck plays off the
+air; only you hear it, through `live_listen(deck=...)`.
+
+1. `live_load(deck='B', song=<ismail project folder>, bars=[a, b])` puts a song (or a section) on deck B: its
+   tracks, effects and buses come over as `B.<name>`, its notes play at the house tempo (re-rendered, not
+   stretched). It is cued while another deck is on air. The reply lists what did not come over (automation,
+   placed audio clips, effects whose source track was muted).
+2. Listen to deck B while deck A plays; fix it there (`live_deck` eq/transpose, `live_fx` on `B.<track>`).
+   Key-match with `live_deck(transpose=...)` (drums stay).
+3. `live_transition(to='B', style=..., bars=16, at='next_8')` queues the whole mix: `blend` (B up without bass,
+   bass swap half-way, A out), `bass_swap`, `filter`, `cut`. It starts at the first boundary after B is
+   playing, puts B on air, and stops A when it ends. The reply is the timeline; `live_status` shows each deck's
+   fader and eq as they move.
+4. Watch `live_status`'s mixer load: two full songs is about 50%; above ~70% risks dropouts.
+
+Put the swap where the incoming deck's bass plays: a 16-bar section whose loop restarts on a sparse bar leaves a
+hole at the bass swap. Pick `bars` so the section starts on its downbeat hit.
+
 ## Rules
 
 - **Runway before a slow job.** Before anything that takes time (`mimic_measure` 25 to 60 s, `instrument_fit` and
@@ -51,7 +72,8 @@ sweep, drop, ending; 17 clips in one batch).
 Live: every instrument type including mimic profiles, every effect (the same processors as offline renders,
 block for block), send buses, sidechain/duck/vocoder from live tracks, ramps on every automatable fx param.
 Not yet: master-bus effects (the safety chain is the master), vocoder modulators from sound-bank sounds,
-instrument-param automation (use fx params), tempo changes inside a run.
+instrument-param automation (use fx params), tempo changes inside a run, a song's automation and placed audio
+clips on a deck.
 
 ## Numbers worth knowing
 

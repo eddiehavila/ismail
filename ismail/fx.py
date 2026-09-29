@@ -228,18 +228,35 @@ class _Lag:
 
 
 class _Sos:
-    """sosfilt that remembers its state."""
+    """sosfilt that remembers its state (mono (n,) or stereo (2, n) input)."""
 
     def __init__(self, sos, channels=None):
-        self.sos = sos
-        self.zi = np.zeros((sos.shape[0], 2)) if channels is None else np.zeros((sos.shape[0], channels, 2))
+        self.sos = np.ascontiguousarray(sos, dtype=np.float64)
+        self.mono = channels is None
+        self.zi = np.zeros((self.sos.shape[0], 1 if self.mono else channels, 2))
 
     def __call__(self, x):
-        if self.zi.ndim == 3:
-            y, self.zi = signal.sosfilt(self.sos, x, axis=1, zi=self.zi)
-        else:
-            y, self.zi = signal.sosfilt(self.sos, x, zi=self.zi)
-        return y
+        x = np.asarray(x, dtype=np.float64)
+        if self.mono:
+            return dsp.sos_s(np.ascontiguousarray(x[None, :]), self.sos, self.zi)[0]
+        return dsp.sos_s(np.ascontiguousarray(x), self.sos, self.zi)
+
+
+class _Lfilter:
+    """lfilter(b, a) along the last axis of (2, n), remembering its state."""
+
+    def __init__(self, b, a, channels=2):
+        m = max(len(b), len(a))
+        self.b = np.zeros(m)
+        self.b[:len(b)] = b
+        self.a = np.zeros(m)
+        self.a[:len(a)] = a
+        self.b /= self.a[0]
+        self.a /= self.a[0]
+        self.zi = np.zeros((channels, m - 1))
+
+    def __call__(self, x):
+        return dsp.lfilter_s(np.ascontiguousarray(x, dtype=np.float64), self.b, self.a, self.zi)
 
 
 class Proc:
@@ -331,14 +348,13 @@ class _Distortion(Proc):
         if self.os > 1:
             half = 10 * self.os
             h = signal.firwin(2 * half + 1, 1.0 / self.os, window=('kaiser', 5.0))
-            self.h_up, self.h_dn = h * self.os, h
-            self.zu = np.zeros((2, len(h) - 1))
-            self.zd = np.zeros((2, len(h) - 1))
+            self.up = _Lfilter(h * self.os, [1.0])
+            self.down = _Lfilter(h, [1.0])
             self.latency = 20
             self.g_lag = _Lag(10)
         if mode == 'asym':      # DC from the asymmetric curve: a 10 Hz blocker at the oversampled rate
             R = 1 - 2 * np.pi * 10 / (self.sr * self.os)
-            self.dc = (np.array([1.0, -1.0]), np.array([1.0, -R]), np.zeros((2, 1)))
+            self.dc = _Lfilter([1.0, -1.0], [1.0, -R])
         if mode in ('bitcrush', 'downsample'):
             self.crush = _Crush(fx['bits'] if mode == 'bitcrush' else 24, fx['rate_hz'], self.sr)
         self.tone = _Sos(eq_sos([{"type": "highcut", "freq": fx['tone_hz']}], self.sr), 2) if fx['tone_hz'] else None
@@ -355,7 +371,7 @@ class _Distortion(Proc):
             if os_ > 1:
                 z = np.zeros((2, n * os_))
                 z[:, ::os_] = x
-                xi, self.zu = signal.lfilter(self.h_up, [1.0], z, axis=1, zi=self.zu)
+                xi = self.up(z)
                 gl = self.g_lag(g, n) if not np.isscalar(g) else g
                 gi = np.repeat(gl, os_) if not np.isscalar(gl) else gl
             else:
@@ -369,14 +385,11 @@ class _Distortion(Proc):
             elif mode == 'asym':
                 zz = xi * gi
                 y = np.where(zz > 0, np.tanh(zz), np.tanh(zz * 0.5) * 1.2)
-                b, a, zi = self.dc
-                y, zi = signal.lfilter(b, a, y, axis=1, zi=zi)
-                self.dc = (b, a, zi)
+                y = self.dc(y)
             else:
                 y = np.abs(np.tanh(xi * gi)) * 2 - 0.5
             if os_ > 1:
-                y, self.zd = signal.lfilter(self.h_dn, [1.0], y, axis=1, zi=self.zd)
-                y = y[:, ::os_]
+                y = self.down(y)[:, ::os_]
         if self.tone is not None:
             y = self.tone(y)
         y = y * dsp.undb(fx['out_db'])
