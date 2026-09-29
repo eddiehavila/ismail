@@ -157,7 +157,13 @@ def measure_note(y, midi, sr=SR, vel=0.7, kind='auto'):
     for i, k in enumerate(kk):
         fc = k * stretch[i] * f0t
         bins = np.clip(np.round(fc / df).astype(int)[None, :] + offs[:, None], 0, nb - 1)
-        amp = M[bins, np.arange(nf)[None, :]].max(axis=0)
+        win_m = M[bins, np.arange(nf)[None, :]]
+        amp = win_m.max(axis=0)
+        if halfw >= 4:
+            # the window's loudest bin overstates a weak harmonic sitting on noise (it picks the noise's peaks),
+            # which made upper harmonics too strong ('trumpet'); take the noise floor out, in power
+            floor = np.median(win_m, axis=0)
+            amp = np.sqrt(np.maximum(amp ** 2 - floor ** 2, (0.1 * amp) ** 2))
         A_db[i] = 20 * np.log10(amp + 1e-9)
 
     # noise between partials: lower-half mean power per 1/3 octave, harmonic bins masked
@@ -204,6 +210,7 @@ def measure_note(y, midi, sr=SR, vel=0.7, kind='auto'):
 
     parts = []
     t_on = tf[0]
+    swell = 0.0
     # attack timing per band from SHORT windows: the long partial-tracking frames (90-190 ms) swallow the rise and
     # made every note start at full level ("hits the string" where the player eases in)
     b_atk, b_ov = _band_attack(y, kind, sr)
@@ -233,6 +240,12 @@ def measure_note(y, midi, sr=SR, vel=0.7, kind='auto'):
                'shimmer': [p[3] for p in parts], 'release': [p[4] for p in parts]}
         noise_sus = np.median(noise_db[:, sus], axis=1) - np.median(tot[sus])
         vib_frames = sus
+        # slow swells of the whole note (bow pressure, breath): the level's wander over ~0.3 s windows, trend removed
+        if len(sus) > 60:
+            ts = tot[sus]
+            sm = np.convolve(ts, np.ones(51) / 51, 'valid')
+            xs = np.arange(len(sm))
+            swell = float(np.std(sm - np.polyval(np.polyfit(xs, sm, 1), xs)))
     else:
         for i in range(kmax):
             a = A_db[i]
@@ -302,7 +315,7 @@ def measure_note(y, midi, sr=SR, vel=0.7, kind='auto'):
             'dur': float(dur), 'partials': len(level), 'level': [round(float(x), 2) for x in level],
             **{k: [round(float(x), 4) for x in v] for k, v in arr.items()},
             'noise_sus': [round(float(x), 2) for x in noise_sus], 'noise_atk': [round(float(x), 2) for x in noise_atk],
-            **{k: round(v, 4) for k, v in vib.items()}, 'drift': drift}
+            **{k: round(v, 4) for k, v in vib.items()}, 'drift': drift, 'swell': round(swell, 3)}
 
 
 def _body_fit(notes, iters=10, smooth=5):
@@ -535,6 +548,18 @@ def profile_from_notes(notes, name='mimic', source=None, body_smooth=1):
         n['slope'], n['gain'], n['resid'] = round(float(si), 3), round(float(gi), 2), r
     # play the loudest measured note at about -12 dBFS, keeping the recorded balance between registers
     norm = -12.0 - max(n['peak_db'] for n in notes)
+    # the recordings' room: after the bow or breath stops, every strong harmonic dies at about the same rate
+    # whatever its frequency (~0.4-0.6 s in a hall); a string alone would stop faster and unevenly
+    room_rt = 0.0
+    if kind == 'sustained':
+        rts = []
+        for n in notes:
+            lv, rl = np.array(n['level']), np.array(n['release'])
+            strong = lv > lv.max() - 30
+            if strong.any():
+                rts.append(float(np.median(rl[strong])))
+        if rts:
+            room_rt = float(np.clip(np.median(rts), 0.2, 2.5))
     # the part of the harmonic skirts that carries over between notes: a smooth curve over frequency (median per
     # 1/3 octave across all notes, smoothed over an octave); each note's own spikes stay with that note
     sm_hz = 2 ** np.arange(np.log2(50), np.log2(20000), 1 / 3)
@@ -552,7 +577,7 @@ def profile_from_notes(notes, name='mimic', source=None, body_smooth=1):
         smear_curve = np.interp(np.log2(sm_hz), np.log2(sm_hz[have]), med[have])
         smear_curve = np.convolve(np.pad(smear_curve, 1, mode='edge'), np.ones(3) / 3, 'valid')
     return {'mimic': 1, 'name': name, 'kind': kind, 'source': source, 'norm_db': round(float(norm), 2),
-            'smear_hz': [round(float(x), 1) for x in sm_hz], 'smear_curve': [round(float(x), 3) for x in smear_curve], 'body_hz': [round(float(x), 2) for x in BODY_HZ],
+            'room_rt': round(room_rt, 3), 'smear_hz': [round(float(x), 1) for x in sm_hz], 'smear_curve': [round(float(x), 3) for x in smear_curve], 'body_hz': [round(float(x), 2) for x in BODY_HZ],
             'body_db': [round(float(x), 2) for x in body], 'noise_hz': [round(float(x), 1) for x in NOISE_HZ],
             'notes': notes}
 
@@ -579,7 +604,9 @@ DEFAULT_PARAMS = {
     'detail': 1.0,        # 0..1: how much of each measured note's own partial pattern to keep (vs the smooth model)
     'variation': 1.0,     # per-note random variation (level, brightness, timing of partials)
     'seed': None,
-    'room': 0.0,          # reverb time (RT60, s) of a synthetic room around the instrument; 0 = dry
+    'swell': 1.0,         # scale on the measured slow swells of a sustained note (bow pressure, breath)
+    'room': None,         # reverb time (RT60, s) of a room around the instrument; None = the room measured from
+                          # the recordings' release tails (sustained kinds), 0 = dry
     'room_mix': -10.0,    # room level against the dry sound, dB
     'ring': None,         # dB: body modes as ringing resonators (peaks of the measured body); None = off
     'ring_q': 25.0,       # their sharpness
@@ -636,14 +663,19 @@ def _blend(a, b, w, key, f, log=False):
 
 
 def _vibrato(rng, tc, delay, rate, depth, rate_sd, depth_sd, onset):
-    """Cycle by cycle: each cycle draws its own rate and depth around the measured ones, joined smoothly; depth
-    builds up over `onset` seconds as a player's does."""
+    """Cycle by cycle, around the measured rate and depth. Most of the variation WANDERS (a slow random curve over
+    about a second: 'fast, then slightly slow, then fast again'), a little is new every cycle; depth builds up
+    over `onset` seconds as a player's does."""
     t_end = tc[-1] + 1.0
+    grid = np.arange(0, t_end + 2.0, 0.05)
+    slow_r = _smooth_noise(rng, len(grid), 0.9, 20.0)            # ~1 s wander, unit std
+    slow_d = _smooth_noise(rng, len(grid), 0.7, 20.0)
     knots_t, knots_r, knots_d = [], [], []
     t = 0.0
     while t < t_end:
-        r = max(2.5, rate * (1 + rate_sd * rng.standard_normal()))
-        d = max(0.0, depth * (1 + depth_sd * rng.standard_normal()))
+        wr, wd = np.interp(t, grid, slow_r), np.interp(t, grid, slow_d)
+        r = max(2.5, rate * (1 + rate_sd * (0.85 * wr + 0.5 * rng.standard_normal())))
+        d = max(0.0, depth * (1 + depth_sd * (0.85 * wd + 0.5 * rng.standard_normal())))
         knots_t.append(t)
         knots_r.append(r)
         knots_d.append(d)
@@ -758,14 +790,18 @@ def render(profile, freq, t, vel, gate, sr=SR, **params):
         yl = np.zeros(n)
         yr = np.zeros(n)
         tot_env = np.zeros(ncs)
+        # the whole note swells and dips slowly (bow pressure, breath), fading in after the attack
+        swell_db = (mix('swell') * p['swell'] * _smooth_noise(prng, ncs, 0.8, sr_c) *
+                    np.clip(te / 0.4, 0, 1)) if kind == 'sustained' else 0.0
         for i, k in enumerate(kk):
             # body at the partial's current frequency: vibrato moves it across the resonances
             fi = k * stretch[i] * f0c
             lvl = base[i] + np.interp(np.log2(fi), body_hz, body_db)
             if kind == 'sustained':
-                up = np.clip(te / atk[i], 0, 1) ** 1.5
+                x = np.clip(te / atk[i], 0, 1)
+                up = x * x * (3 - 2 * x)                 # an S-shaped rise: the player eases in, no corner
                 env_db = 20 * np.log10(up + 1e-4) + ov[i] * np.exp(-np.maximum(te - atk[i], 0) / 0.08) * (te >= atk[i] * 0.5)
-                env_db += shim[i] * p['variation'] * _smooth_noise(prng, ncs, 6.0, sr_c)
+                env_db += shim[i] * p['variation'] * _smooth_noise(prng, ncs, 6.0, sr_c) + swell_db
                 after = np.maximum(te - gate, 0)
                 env_db -= 60 * after / rel[i]
             else:
@@ -789,7 +825,9 @@ def render(profile, freq, t, vel, gate, sr=SR, **params):
                 # a second unison string, detuned by the measured beat rate: the partial swells and dips
                 g = 10 ** (bdb[i] / 20)
                 m = (g - 1) / (g + 1)
-                th2 = th + 2 * np.pi * bhz[i] * np.arange(n) / sr + prng.uniform(0, 2 * np.pi)
+                # struck together, the strings start in phase: the first cancellation comes 1/(2*beat) s later,
+                # the dip a listener hears as the note "fading out in the middle"
+                th2 = th + 2 * np.pi * bhz[i] * np.arange(n) / sr
                 yl += amp * (np.sin(th) + m * np.sin(th2)) / np.sqrt(1 + m * m) * dl
                 yr += amp * (np.sin(th + dphi) + m * np.sin(th2 + dphi * 1.3)) / np.sqrt(1 + m * m) / dl
             else:
@@ -942,9 +980,10 @@ def _post(out, profile, p, sr, seed):
         r = _resonators(mono, fs, ts, np.array(gs) * 10 ** (p['sympathy'] / 20), sr)
         add += np.stack([r * 0.8, r])
     out = out + add
-    if p['room'] and p['room'] > 0:
+    room = p['room'] if p['room'] is not None else profile.get('room_rt', 0.0)
+    if room and room > 0:
         from scipy.signal import fftconvolve
-        ir = _room_ir(p['room'], sr, rng)
+        ir = _room_ir(room, sr, rng)
         wet = np.stack([fftconvolve(out[0], ir[0])[:n], fftconvolve(out[1], ir[1])[:n]])
         out = out + wet * 10 ** (p['room_mix'] / 20)
     return out
