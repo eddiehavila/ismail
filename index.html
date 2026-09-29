@@ -271,6 +271,7 @@ function charWidth(pre) {
     const mapText = d.map.split('\n').slice(1).join('\n');
     const el = document.createElement('article');
     el.className = 'track';
+    el.id = slug;
     el.innerHTML = `
       <div class="track-head">
         <h3>${esc(d.title)}${TAG[slug] ? `<span class="tag">${TAG[slug]}</span>` : ''}</h3>
@@ -287,6 +288,7 @@ function charWidth(pre) {
         <div class="scroll"><pre>${esc(d.roll)}</pre></div>
       </details>`;
     host.appendChild(el);
+    if (location.hash === '#' + slug) requestAnimationFrame(() => el.scrollIntoView());
 
     const audio = el.querySelector('audio');
     const pre = el.querySelector('.map');
