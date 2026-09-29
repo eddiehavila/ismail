@@ -1,0 +1,331 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ismail: a DAW for AI agents</title>
+<meta name="description" content="A DAW built for AI agents: the agent writes music as text and reads the audio back as text. Listen to songs an agent made with it.">
+<meta property="og:title" content="ismail: a DAW for AI agents">
+<meta property="og:description" content="The agent can't hear, so it reads: levels per bar, drum lanes, piano rolls, song structure. Songs made that way, with the text the agent saw.">
+<meta property="og:image" content="https://newsbubbles.github.io/ismail/social.png">
+<meta property="og:url" content="https://newsbubbles.github.io/ismail/">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #0d0e10;
+  --panel: #15171a;
+  --panel-2: #1b1e22;
+  --line: #2a2e34;
+  --text: #e9e6df;
+  --dim: #9aa0a6;
+  --faint: #5d636a;
+  --accent: #ffb547;
+  --accent-ink: #1a1305;
+  --mono: 'IBM Plex Mono', ui-monospace, Consolas, monospace;
+  --sans: 'IBM Plex Sans', system-ui, sans-serif;
+}
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #f6f4ef; --panel: #ffffff; --panel-2: #efece5; --line: #dcd7cd;
+    --text: #1b1c1e; --dim: #585e65; --faint: #8b9097; --accent: #b86e00; --accent-ink: #ffffff;
+  }
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.55 var(--sans); }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+.wrap { max-width: 1040px; margin: 0 auto; padding: 0 20px; }
+code, pre { font-family: var(--mono); }
+
+header.hero { padding: 72px 0 40px; border-bottom: 1px solid var(--line); }
+.brand { font: 500 14px/1 var(--mono); color: var(--dim); letter-spacing: .08em; }
+h1 { font-size: clamp(34px, 6vw, 58px); line-height: 1.05; margin: 14px 0 18px; font-weight: 600; letter-spacing: -.02em; }
+h1 em { font-style: normal; color: var(--accent); }
+.lead { font-size: 19px; color: var(--dim); max-width: 700px; margin: 0 0 28px; }
+.lead b { color: var(--text); font-weight: 500; }
+.cta { display: flex; gap: 12px; flex-wrap: wrap; }
+.btn { display: inline-flex; align-items: center; gap: 8px; padding: 11px 18px; border-radius: 8px; font-weight: 500;
+  border: 1px solid var(--line); color: var(--text); background: var(--panel); }
+.btn:hover { text-decoration: none; border-color: var(--faint); }
+.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.btn svg { width: 18px; height: 18px; fill: currentColor; }
+
+/* the demo strip under the hero: text in, text out */
+.io { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 40px; }
+.io > div { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; min-width: 0; }
+.io h3 { margin: 0 0 8px; font: 500 12px/1 var(--mono); color: var(--faint); letter-spacing: .08em; text-transform: uppercase; }
+.io pre { margin: 0; font-size: 12.5px; line-height: 1.5; color: var(--text); white-space: pre; overflow-x: auto; }
+.io pre .c { color: var(--faint); }
+@media (max-width: 820px) { .io { grid-template-columns: 1fr; } }
+
+section { padding: 56px 0; border-bottom: 1px solid var(--line); }
+h2 { font-size: 28px; margin: 0 0 8px; letter-spacing: -.01em; }
+.sub { color: var(--dim); margin: 0 0 28px; max-width: 720px; }
+
+.track { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 18px 18px 14px; margin-bottom: 16px; }
+.track-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.track h3 { margin: 0; font-size: 20px; }
+.meta { font: 13px var(--mono); color: var(--faint); }
+.desc { color: var(--dim); margin: 6px 0 12px; }
+.track audio { width: 100%; height: 40px; }
+.tag { font: 500 11px var(--mono); color: var(--accent); border: 1px solid var(--accent); border-radius: 4px; padding: 1px 6px; margin-left: 8px; vertical-align: 2px; }
+
+.seen { margin-top: 12px; }
+.seen summary { cursor: pointer; color: var(--dim); font: 500 13px var(--mono); list-style: none; padding: 6px 0; }
+.seen summary::-webkit-details-marker { display: none; }
+.seen summary::before { content: '+ '; color: var(--accent); }
+.seen[open] summary::before { content: '- '; }
+.seen .hint { font-size: 13px; color: var(--faint); margin: 2px 0 10px; }
+.scroll { position: relative; overflow-x: auto; background: var(--panel-2); border-radius: 8px; padding: 12px 14px; margin-bottom: 10px; }
+.scroll pre { margin: 0; font-size: 12px; line-height: 1.45; white-space: pre; position: relative; }
+.map { cursor: crosshair; }
+.playhead { position: absolute; top: 0; bottom: 0; width: 1ch; background: var(--accent); opacity: .28; pointer-events: none; display: none; }
+.label { font: 500 11px var(--mono); color: var(--faint); letter-spacing: .08em; text-transform: uppercase; margin: 12px 0 6px; }
+
+.videos { display: grid; grid-template-columns: 1fr; gap: 16px; }
+.yt { position: relative; aspect-ratio: 16 / 9; border-radius: 12px; overflow: hidden; background: #000; border: 1px solid var(--line); }
+.yt button { all: unset; cursor: pointer; position: absolute; inset: 0; display: grid; place-items: center; }
+.yt img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: .85; }
+.yt .play { position: relative; width: 72px; height: 50px; background: rgba(0,0,0,.72); border-radius: 12px; display: grid; place-items: center; }
+.yt .play::after { content: ''; border-left: 20px solid #fff; border-top: 12px solid transparent; border-bottom: 12px solid transparent; margin-left: 5px; }
+.yt iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+.caption { color: var(--dim); font-size: 14px; margin-top: 8px; }
+
+.steps { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
+.steps > div { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; min-width: 0; }
+.steps h3 { margin: 0 0 8px; font-size: 16px; }
+.steps pre { background: var(--panel-2); border-radius: 6px; padding: 10px 12px; font-size: 12.5px; overflow-x: auto; margin: 8px 0 0; }
+.steps p { margin: 0; color: var(--dim); font-size: 15px; }
+@media (max-width: 820px) { .steps { grid-template-columns: 1fr; } }
+
+footer { padding: 36px 0 60px; color: var(--faint); font-size: 14px; }
+footer p { margin: 6px 0; }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <div class="brand">ISMAIL</div>
+    <h1>A DAW for AI agents.<br>It can't hear, <em>so it reads.</em></h1>
+    <p class="lead">The agent writes notes, instruments and effects as text, renders, and reads the audio back as text: <b>levels per bar, drum lanes, piano rolls, chords, song structure</b>. Every song on this page was composed, sound-designed and mixed by an AI agent through ismail's tools, with a human listening and giving notes.</p>
+    <div class="cta">
+      <a class="btn primary" href="https://github.com/newsbubbles/ismail"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 .25a.75.75 0 0 1 .673.418l1.882 3.815 4.21.612a.75.75 0 0 1 .416 1.279l-3.046 2.97.719 4.192a.75.75 0 0 1-1.088.791L8 12.347l-3.766 1.98a.75.75 0 0 1-1.088-.79l.72-4.194L.818 6.374a.75.75 0 0 1 .416-1.28l4.21-.611L7.327.668A.75.75 0 0 1 8 .25Z"/></svg>Star on GitHub</a>
+      <a class="btn" href="#listen">Listen</a>
+      <a class="btn" href="#start">Get started</a>
+    </div>
+
+    <div class="io">
+      <div>
+        <h3>1. write</h3>
+<pre><span class="c"># beat, pitch, length, velocity</span>
+notes_write track=bass bar=17 repeat=8
+  notes="0 A1 0.5 110; 0.75 A1 0.25 90"
+<span class="c"># a drum lane as 16th steps</span>
+pattern_write track=kick bar=17
+  lanes='{"C1": "X...x.....X.x..."}'</pre>
+      </div>
+      <div>
+        <h3>2. render</h3>
+<pre>render out=final mp3=also
+<span class="c">rendered 78.8s -> renders/final.mp3
+master: -11.8 LUFS, peak -0.3 dBFS
+  kick   peak  -2.4 rms -20.0 dB
+  bass   peak  -2.6 rms -16.3 dB
+  pad    peak  -9.6 rms -25.4 dB
+  master fx 0: max gain reduction -5.9 dB</span></pre>
+      </div>
+      <div>
+        <h3>3. read it back</h3>
+<pre id="io-read"></pre>
+      </div>
+    </div>
+  </div>
+</header>
+
+<section id="listen">
+  <div class="wrap">
+    <h2>Listen</h2>
+    <p class="sub">Under each song is the text the agent used to judge it: the arrangement map (one character per bar, 9 = loudest, rows per frequency band, the bass note and the sections it found) and a piano roll of one part. Press play and the playhead runs across the map; click the map to jump to a bar.</p>
+    <div id="tracks"></div>
+  </div>
+</section>
+
+<section id="video">
+  <div class="wrap">
+    <h2>On YouTube</h2>
+    <p class="sub">Luigi Manson: the Luigi's Mansion theme as dubstep, made with ismail. One bass voice plays the hook, and the note velocity picks each hit's articulation: a vowel sweep, a wub, a screech, a talk word ("Mario?").</p>
+    <div class="videos">
+      <div>
+        <div class="yt" id="yt">
+          <button type="button" aria-label="Play Luigi Manson on YouTube">
+            <img src="https://i.ytimg.com/vi/ZzT1T9GUoRo/hqdefault.jpg" alt="" loading="lazy">
+            <span class="play"></span>
+          </button>
+        </div>
+        <div class="caption">Luigi Manson (fan remix). <a href="https://www.youtube.com/watch?v=ZzT1T9GUoRo">Open on YouTube</a></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="how">
+  <div class="wrap">
+    <h2>How it works</h2>
+    <p class="sub">About 70 tools behind one MCP server (or a CLI). The agent never needs ears; it needs readings it can trust.</p>
+    <div class="steps">
+      <div>
+        <h3>Everything goes in as text</h3>
+        <p>Notes, drum patterns, synth patches, effect chains, buses, automation. Instruments range from subtractive synths and drum synths to samplers and voices written as Python (the piano on this page is one: measured partials, no samples).</p>
+      </div>
+      <div>
+        <h3>Everything comes back as text</h3>
+        <p>Tempo and grid, arrangement maps, levels and bands per bar, drum lanes as step strings, piano rolls, chords, timbre, vowels of a voice. A spectrogram PNG exists, but nothing needs it.</p>
+      </div>
+      <div>
+        <h3>It can match a reference</h3>
+        <p>Give it a recording: it finds the grid, separates stems, transcribes only notes that repeat (echoes and bleed drop out), fits instruments to extracted sounds, and scores every draft against the reference's own variation, with drill-down to a single bar.</p>
+      </div>
+      <div>
+        <h3>It comes with a skill</h3>
+        <p>An agent skill teaches the workflow: plan the piece before writing notes, check every render with the analysis tools, and trust baseline-scored comparisons over a hunch.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="start">
+  <div class="wrap">
+    <h2>Get started</h2>
+    <p class="sub">Python 3.10+. Works with Claude Code, Cursor or any MCP client, or straight from the shell.</p>
+    <div class="steps">
+      <div>
+        <h3>Install and connect</h3>
+<pre>pip install git+https://github.com/newsbubbles/ismail
+claude mcp add -s user ismail -- python -m ismail.mcp_server</pre>
+      </div>
+      <div>
+        <h3>Ask for a song</h3>
+<pre>"make a 16 bar lo-fi loop in D minor
+ in songs/demo and render an mp3"</pre>
+        <p style="margin-top:10px">Skill install, Cursor setup and the full tool list: <a href="https://github.com/newsbubbles/ismail#readme">README</a>.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <p>ismail is MIT licensed. <a href="https://github.com/newsbubbles/ismail">github.com/newsbubbles/ismail</a></p>
+    <p>Bass of Storms and Luigi Manson are non-commercial fan remixes: Song of Storms and the Luigi's Mansion theme belong to Nintendo. Fantaisie-Impromptu is played from the public-domain Mutopia Project score. The other songs are originals.</p>
+  </div>
+</footer>
+
+<script>
+window.SONGS = [{"slug": "fantaisie", "title": "Fantaisie-Impromptu, Op. 66", "info": "Fantaisie-Impromptu (Horowitz style): 60 BPM, 4/4, 90 bars, bar 1 at 0.0s, song 360.0s", "doc": "Fantaisie-Impromptu, Op. 66 (Chopin): a performance on the grand_piano voice.", "duration": 350, "tracks": 3, "map": "ARRANGEMENT MAP (one char per bar; 9 = that row's loudest bar, each step down = 4 dB, '.' = silent; root = lowest steady note, lowercase = sharp)\n                   1         2         3         4         5         6         7         8       \n      bar 123456789012345678901234567890123456789012345678901234567890123456789012345678901234567\n      mix 757787888655789984435555664665665675444456557644343433067888897567899876555445534302...\n     ~sub 6435566764123489844123333323043424522111322352100.01...35466775234589765332..14.62.2...\n    ~bass 865677788634568985533535554535554564323344456422202211056678887445789875434324536312...\n  ~lowmid 7577778886456798843355566546556637764444555576442334130677888875568899866554555343.2...\n     ~mid 547787788655789873225553662664665574445456556543440443.688878975689987664443333222.1...\n   ~himid 40475557745346965...212234022234156321.123235310.0.0...475556842547975431110100........\n     ~air 3.455557841246974...333354034255266311213333631.00.1...46666795135698642...............\n     root ggcggEAAABcggcgggggggcgfdgggcfaccgggfccfaccggdfgcddaccccgcgEAgAcggcgggggggagfdggggggg..\n  section A--------|A-----|B----------------|B---------|C-------|A------|A-------|D--------|C---|", "sections": "A   bars   1-10  (10)  level    6.6 dB  pcs: G# C# D# A  low x.xXxxxxx.xxxXXx  snare xxXxXXXXxxxxxxxX  hat XxXxxxxXxxxxxxXX\nA'  bars  11-17  ( 7)  level    6.5 dB  pcs: G# C# D# E  low xx.....xxx......  snare XXXXxXXXxXxXxxXX  hat x.x..xxxxx...Xxx\nB   bars  18-35  (18)  level   -1.0 dB  pcs: G# C# D# F  low .....x..xx......  hat ...........x....\nB'  bars  36-46  (11)  level   -1.9 dB  pcs: G# D# C# A#  low ...x......x..x..  hat ...x...x........\nC   bars  47-55  ( 9)  level   -9.4 dB  pcs: G# D# A# C#\nA'  bars  56-63  ( 8)  level    8.4 dB  pcs: C# D# G# A  low XXxxx.xXXxxxxxxX  snare XXXXXXXXXXXXXXXX  hat XXxXXXXXXXXXXXXX", "roll": "rh bars 5-6 (one char per 0.25 beat; # = note start, = = held)\n  E6 ..........#.....|................\n D#6 ...........#....|................\n C#6 ...........#....|................\n  B5 .........#.#..#.|................\n A#5 .........#..##..|................\n G#5 .#.....#..#.##.#|...#..........#.\n  G5 ..........#.#...|................\n F#5 ................|.....#..#.......\n  F5 ................|.......#........\n  E5 #...#.##......#.|.............#.#\n D#5 ....##.##......#|.#.........#....\n  D5 ........#.....#.|................\n C#5 ...####.........|#...#.##.##.....\n  C5 ......#.........|....##.#.#......\n  B4 ................|#.............##\n A#4 ..#............#|.#..............\n  A4 ................|..........#.#...\n G#4 .###............|..##.........##.\n  G4 ..#.............|.##.............\n F#4 ................|.....#..#.#.#...\n  F4 ................|......#.........\n  E4 ................|............#...\n D#4 ................|...........#....\n C#4 ................|.........#......", "roll_track": "rh"}, {"slug": "tears", "title": "Two Kinds of Tears", "info": "Two Kinds of Tears: 60 BPM, 4/4, 61 bars, bar 1 at 0.0s, song 244.0s", "doc": "Two Kinds of Tears: solo grand piano. A sad theme in A minor comes back, after a dark bridge, as the", "duration": 230, "tracks": 4, "map": "ARRANGEMENT MAP (one char per bar; 9 = that row's loudest bar, each step down = 4 dB, '.' = silent; root = lowest steady note, lowercase = sharp)\n                   1         2         3         4         5       \n      bar 123456789012345678901234567890123456789012345678901234567\n      mix 66667767777787877888888887778888899999999999999985666641.\n     ~sub 45454455556876757787868876779778888879778779888894444741.\n    ~bass 55666566566676766787777776667888788788888889988985555641.\n  ~lowmid 66767868688887878877777787778888998988998988998884566630.\n     ~mid 4555777677777778888888887788888888999999999999988466763..\n   ~himid .213241433434244442323533325355455556556468465993.3332...\n     ~air 111456565666666676564756655465578888988888988988411121111\n     root AGFEGFEAAGEAFEEAGGFEEAGEEAaAGEEEgfEAEAEEffEfEEAEEAAgFAAA.\n  section A--|B------------|C-----|D--|E------------------|A------|", "sections": "A   bars   1-4   ( 4)  level   -4.1 dB  pcs: E A B C  low .xXXx.xXx..xxxXx\nB   bars   5-18  (14)  level    1.0 dB  pcs: A E C B  low xxxxxxxxxxXxxxxx  snare ...x............  hat ...x............\nC   bars  19-25  ( 7)  level    3.2 dB  pcs: D B G A  low XxXXXxxxXXXXXXXX\nD   bars  26-29  ( 4)  level    1.7 dB  pcs: A F C D  low .x....Xx...X.xXX  snare ....x...........  hat ...........x....\nE   bars  30-49  (20)  level    6.7 dB  pcs: E A B C#  low XXXxXXXxxXXxxXXX  snare xxxXxx.xxxxxxxxx  hat ....x..x...x....\nA'  bars  50-57  ( 8)  level  -12.2 dB  pcs: A E G# C  snare .......x........", "roll": "melody bars 2-3 (one char per 0.25 beat; # = note start, = = held)\n  C6 ................|#====...........\n  B5 ................|.....#=======...\n  A5 ................|.......#=======.", "roll_track": "melody"}, {"slug": "lettre", "title": "La lettre jamais envoyée", "info": "La lettre jamais envoyee: 60 BPM, 4/4, 54 bars, bar 1 at 0.0s, song 216.0s", "doc": "La lettre jamais envoyee: solo piano, lent et triste. Rebuilds the project from scratch.", "duration": 218, "tracks": 4, "map": "ARRANGEMENT MAP (one char per bar; 9 = that row's loudest bar, each step down = 4 dB, '.' = silent; root = lowest steady note, lowercase = sharp)\n                   1         2         3         4         5    \n      bar 123456789012345678901234567890123456789012345678901234\n      mix 656577776777777776647678889899998776676776656665571...\n     ~sub 605.655542336745643.5277777877897655445333555350.4....\n    ~bass 6364776666667776763.6587888899998776566656666563061...\n  ~lowmid 666676886666766868726778889999999884775565555566161...\n     ~mid 44347767578777677554757878888998867767677673663557....\n   ~himid 34255666355775667554535956999998955565344571442367....\n     ~air ....656747576656753.4255477559895.545536546.33...7....\n     root aaaafdaaffFdFFdffFaCggcFfgFfFdffFFafaaffFaffffaaaFc...\n  section A--|B--|C--|B----|D--|B-----------|C------|A-----|E--|", "sections": "A   bars   1-4   ( 4)  level   -9.1 dB  pcs: A# F F# G#  snare ..x.............\nB   bars   5-8   ( 4)  level   -1.5 dB  pcs: A# C# F# D#  low ..xxxx......x.xx  snare ..............x.\nC   bars   9-12  ( 4)  level   -3.1 dB  pcs: F# D# A# F  low .X.xXXx.........  snare .X..............  hat ..........x.....\nB'  bars  13-18  ( 6)  level   -2.2 dB  pcs: A# F C# D#  low XXXXXXXXXXXXxxXX  snare ..x....x.......x  hat ..x.............\nD   bars  19-22  ( 4)  level   -8.7 dB  pcs: G# C D# A#  snare ....x...........\nB'  bars  23-35  (13)  level    2.6 dB  pcs: F D# C# C  low XXXXXXXXXXXXXXXX  snare xx.xXxXx.XXx.xxx", "roll": "melody bars 4-5 (one char per 0.25 beat; # = note start, = = held)\n  C6 ..............#=|=======.........\n  F5 ................|............#===\n C#5 ................|.........#==....\n A#4 ................|.......#====....", "roll_track": "melody"}, {"slug": "poppycock", "title": "Poppycock", "info": "Poppycock: 150 BPM, 4/4, 136 bars, bar 1 at 0.0s, song 217.6s", "doc": "Poppycock: Skrillex-style dubstep, 150 BPM half-time, F minor. Rebuilds the project from scratch.", "duration": 220, "tracks": 17, "map": "ARRANGEMENT MAP (one char per bar; 9 = that row's loudest bar, each step down = 4 dB, '.' = silent; root = lowest steady note, lowercase = sharp)\n                   1         2         3         4         5         6         7         8         9         0         1         2         3       \n      bar 12345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567\n      mix 45556667777777766767787778788997999999999999999998999999999999988888888888888888767777787888889899999999899999999999999999999998888642...\n     ~sub .......0777777776666676766678881999999998999899998999889989998989999999999999999666666767777888298999999989889999999999998999998998653...\n    ~bass ....121533334344777878787888999699999999899989999999999999998998444544466777777777777888888999969999999989998999999999998999999888860....\n  ~lowmid .0006658665686844746475758686787888888898888888987888788888888896658675966686654445858586868668788888788888778888888888887988798885521...\n     ~mid 5556666866678685474556575868787988878888888788888798888887988898555855586668666655575858586877798887888878888888888888888888888788551....\n   ~himid 66667777777777764444444456778996778877887788888878887878788878875555666666666666444444556778899678878978797998788888888879787975665320...\n     ~air 5566666777777765333332334456789577777778777777787877777877777776444555555555555533333333456788957777777867787778777777787878687455431....\n     root FFFFaaCFFFFFFFFF.A.C.F.E.F.FG..FFccccFcGcFcGFfcGCCfEcCdEFCfEcFfEFFcGFFcGFFcGFFcG...E.E.E.E.EG.DFFFcGFFfEFFcEFFfEFfcgFfcgFFfEEFfEFFFFFF...\n  section A-----|B------|C----------|D---|E------------------------------|F--------------|C-------|D-----|E-----------------------------|G---|H---|", "sections": "A   bars   1-7   ( 7)  level    2.2 dB  pcs: F C A# C#  snare .x.x..x..x..x..x  hat ...x..x.........\nB   bars   8-15  ( 8)  level    9.3 dB  pcs: F G# A# C  snare .xx.xx.xx.x..xx.  hat ..........xx.xx.\nC   bars  16-27  (12)  level    8.9 dB  pcs: F A E C  low X.....x...X.....  snare ........x.......  hat .........x......\nD   bars  28-32  ( 5)  level   13.7 dB  pcs: F A# C G  low X...x...X...x...\nE   bars  33-64  (32)  level   16.3 dB  pcs: C# F E C  low X.....x...x...x.  snare xxxX.xxxX...x.x.  hat ...x....X.....x.\nF   bars  65-80  (16)  level   12.5 dB  pcs: F C# G G#  low x...............", "roll": "growl bars 33-34 (one char per 0.25 beat; # = note start, = = held)\n  F4 .........#......|................\n  C4 ................|.....#..........\n  F3 ................|..............#=\n G#2 ............#=..|................\n F#2 ................|...........#=...\n  F2 #=.#=.#==......#|=.#==...#=......", "roll_track": "growl"}, {"slug": "astrasmb", "title": "AstraSMB", "info": "AstraSMB: 174 BPM, 4/4, 144 bars, bar 1 at 0.0s, song 198.6s", "doc": "AstraSMB: melodramatic DnB with 8-bit leads. Rebuilds the project from scratch.", "duration": 201, "tracks": 15, "map": "ARRANGEMENT MAP (one char per bar; 9 = that row's loudest bar, each step down = 4 dB, '.' = silent; root = lowest steady note, lowercase = sharp)\n                   1         2         3         4         5         6         7         8         9         0         1         2         3         4     \n      bar 1234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345\n      mix 4555555678777777888888888989997799999999999999999999999999999998777777777877777799999999999999879999999999999999999999999999999999999999777532...\n     ~sub .......166666666666666668898996199999987999999879999998799999987...............199999987999999619999998799999986998999769989997699899976665420...\n    ~bass 3333343578777777777877777777777688887889788888897888888978888888333333323333323588888889777777768888788988888889788878998888889988888899777532...\n  ~lowmid 77777888888888888898888888888876898889888888888888888888888888888998888889998899888889998888888689989889898899988989889988888898898889998875420..\n     ~mid 3444555565656556888888888888888889998888886588888999888889998888777777778888888865656666888888888999989989778989999988999999888976666676666420...\n   ~himid 222222226666666787778888877788888888898888668889888888888888898899999888999999996555555587878888888788888876988988878898888788886666666644420....\n     ~air 222233347777777888878888888888898888888888778888888888888888888965645666666566786667667788888889878788888877888888888888888888887777777744421....\n     root FFddFFFEFfdfFfFEFfdfFfFcFFFFFFFEFcgdFcafFcgdFcafFcgdFcafccgdFcafFFddFFFEFFddgFFEFcgdFcaCFcgdccFFccgdFcfCFcgddcfDGdfFGdCDGdaFddCDGdaFGdCfGGFF.....\n  section A------|B------|C--------------|C------------------------------|D--------------|E------|C------|C------------------------------|E------|F--|A---|", "sections": "A   bars   1-8   ( 8)  level    1.9 dB  pcs: G# F C D#\nB   bars   9-16  ( 8)  level   11.2 dB  pcs: G# F C C#  low X.x.......X.....  snare ....X.......X...  hat ....X.......X...\nC   bars  17-32  (16)  level   14.1 dB  pcs: F G# A# C  low X.x.......X.....  snare x...X.x...x.x...  hat Xxx.X..X.xX.X...\nC'  bars  33-64  (32)  level   17.3 dB  pcs: F C# G# A#  low x.........X.....  snare X..xX.x...x.x...  hat X.x.X..x..x.X...\nD   bars  65-80  (16)  level   10.5 dB  pcs: F G# C D#  snare X..x..X...X.X...\nE   bars  81-88  ( 8)  level   16.3 dB  pcs: F C# D# G#  low ..........x.....  snare ........X.......  hat ........X.......", "roll": "lead bars 33-34 (one char per 0.25 beat; # = note start, = = held)\n C#6 ..........#=....|................\n  C6 ......#===..#===|................\n A#5 ................|..........#=....\n G#5 ...#==..........|#=====..#=..#=..\n  F5 #==.............|......#=......#=", "roll_track": "lead"}, {"slug": "clash", "title": "Clash", "info": "Clash: 150 BPM, 4/4, 96 bars, bar 1 at 0.0s, song 153.6s", "doc": "Clash: hybrid orchestral fight cue, wide dynamics. Rebuilds the project from scratch.", "duration": 156, "tracks": 20, "map": "ARRANGEMENT MAP (one char per bar; 9 = that row's loudest bar, each step down = 4 dB, '.' = silent; root = lowest steady note, lowercase = sharp)\n                   1         2         3         4         5         6         7         8         9       \n      bar 1234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567\n      mix 66666666777777788888888888888889998899888678556555555555777788899999999999999999897588766665421..\n     ~sub 8888888888888888989888788898887898988878845854545555545588988878989888588888885898639876555532...\n    ~bass 5555555566667778888888888888889999888898878852545453535367778898999999999999999989858752000......\n  ~lowmid ........5555555576666666887888898876996654556664565565655555888999888998998999998763777767765320.\n     ~mid 44444444555555567666777777777777877888886444555445555455566677779989989998899999776277766666421..\n   ~himid 1111222233334447777777777777777777787779545411111111111134455689877888888878888879656555656531...\n     ~air 22222222333333376667666766676667666766694234............222345897667666866676667584641112111.....\n     root DDDDDDDDDDDDDDDDDaGADaCADaGADaCADaGADaCAAADDDDaaGGAAaaAADaGADaCAdBgadBcadBgadBcadBdaddddddddddG..\n  section A-------------|B-----------------------|C--|D----------|E--|B------------------|F--|G--|H---|I--|", "sections": "A   bars   1-15  (15)  level    5.4 dB  pcs: D A B  low XXXX.....x......  snare x.......x...x.x.\nB   bars  16-40  (25)  level   12.0 dB  pcs: D A A# F  low xXXXxxXXXXXXxxxX  snare X..xX.X.X..XX.x.  hat x...X.x.X...X...\nC   bars  41-44  ( 4)  level    7.3 dB  pcs: D A F# E  low X.X...xxxxx.....  snare x.....x.........  hat x.....x.........\nD   bars  45-56  (12)  level   -0.7 dB  pcs: A D A# F  low x.x.............\nE   bars  57-60  ( 4)  level    8.1 dB  pcs: D A G A#  low .X.x..xXXXXx....  snare X.....X.X.......\nB'  bars  61-80  (20)  level   13.9 dB  pcs: D# A# D B  low xXXxXXXXXXXXXXxX  snare X..XX.XxX..XX.Xx  hat ....X...x...X...", "roll": "horns bars 25-26 (one char per 0.25 beat; # = note start, = = held)\n  F4 ............#===|#==.............\n  E4 ...........#....|...#............\n  D4 #=====..#==.....|....#===........\n A#3 ................|........#=======\n  A3 ......#=........|................", "roll_track": "horns"}, {"slug": "bassofstorms", "title": "Bass of Storms", "info": "Bass of Storms: 150 BPM, 4/4, 139 bars, bar 1 at 0.0s, song 222.4s", "doc": "Bass of Storms: Ocarina of Time's Song of Storms as psychotic dubstep, series kit.", "duration": 224, "tracks": 20, "map": "ARRANGEMENT MAP (one char per bar; 9 = that row's loudest bar, each step down = 4 dB, '.' = silent; root = lowest steady note, lowercase = sharp)\n                   1         2         3         4         5         6         7         8         9         0         1         2         3         4\n      bar 12345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890\n      mix 65664457666766666667676777778887888888888888888888888888888888876777787877787767777777777777886888888888888888888888888888888889866667662...\n     ~sub .......07777777756666667666677819989899989899889899889899889889777777777777777776666666666667718988989998989998998898998888988898777771.....\n    ~bass ....2333332333336666676766777774788888888888788888888888788878876666666666666666777777777777874788888878888878878888887778877879833333......\n  ~lowmid ....5557666959666767676769896669889889777777889879888788888889776766666769676967788888888888876788888898888887778888878888988979855555763...\n     ~mid 87876678776777776777677788887778777777777777777877666667788878774889898988898868555566666777778788788877778777777788888897789776888888784...\n   ~himid 33385437434334335544545566778997787877787877787877787778777777773848494874587548555555667788895888888878777888888888888888788776444433272...\n     ~air ...51..2........322222224456789567777778677767787778788867677766252535345334533533344444566788697777776877787778888888787778777732211..4....\n     root FCFCGGCFFFFFFFFFFGcFGGDACGGGCG.CFGgGGFFGCFGFFGggGFFGgFGFFGgGGFFAFFFFFFFFFFFFFFFFFcFcFcFcFcFcgGgCcGCFGFFcgcGccGcFFfgFGFFGFGgGGF.cDFFFFFgcc...\n  section A--|A--|B------|C-------|D-----|E-----------------------------|F----|G---------|H----------|D--|E-----------------------------|B-----|A----|", "sections": "A   bars   1-4   ( 4)  level    6.4 dB  pcs: F G# C G\nA'  bars   5-8   ( 4)  level    4.3 dB  pcs: F G C G#\nB   bars   9-16  ( 8)  level    8.2 dB  pcs: F G C D#  low XXxXxx.Xxx.xxXxx\nC   bars  17-25  ( 9)  level    9.7 dB  pcs: F C G G#  low X.....x...X.....  snare ........X.......\nD   bars  26-32  ( 7)  level   13.9 dB  pcs: C G D D#  low X...x...X...x...  snare ......x...x.x..x\nE   bars  33-63  (31)  level   16.6 dB  pcs: G F C# G#  low X.xxx.x.x.X.X.x.  snare x.xxx.x.X...Xxx.  hat ......x.X...x.x.", "roll": "ocarina bars 67-68 (one char per 0.25 beat; # = note start, = = held)\n G#6 ...............#|.#..............\n  G6 ............#=..|#.#.............\n  F6 ..#===..#===....|................\n D#6 ................|...#............\n  C6 ................|....#===#=....#=\n A#5 ................|.............#..\n G#5 .#.....#........|............#...\n  F5 #.....#.........|..........#=....", "roll_track": "ocarina"}];
+</script>
+<script>
+const ORDER = ['poppycock', 'fantaisie', 'astrasmb', 'clash', 'tears', 'bassofstorms', 'lettre'];
+const DESC = {
+  poppycock: 'Dubstep, 150 BPM half-time, F minor. One bass voice plays most of the drop, and each note\'s velocity picks its articulation.',
+  fantaisie: 'Chopin, from the public-domain score, played on ismail\'s grand piano voice (synthesized from measured notes, no samples). The rubato, dynamics and voicing are the agent\'s interpretation.',
+  astrasmb: 'Drum and bass at 174 BPM: reese bass, choir, 8-bit arpeggios and leads.',
+  clash: 'A hybrid orchestral fight cue: taiko, strings, horns, trombones, trumpets, choir and braams, every one a synthesized instrument.',
+  tears: 'Solo piano. A sad theme in A minor comes back, after a dark bridge, as the same melody in A major.',
+  bassofstorms: 'Fan remix: Song of Storms (Zelda: Ocarina of Time) as dubstep, with a synthesized ocarina and a fairy that talks.',
+  lettre: 'Solo piano, slow and sad, played with a rubato tempo map.'
+};
+const TAG = { bassofstorms: 'fan remix' };
+const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const fmt = s => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}`;
+
+function charWidth(pre) {
+  const probe = document.createElement('span');
+  probe.textContent = '0'.repeat(100);
+  probe.style.visibility = 'hidden';
+  pre.appendChild(probe);
+  const w = probe.getBoundingClientRect().width / 100;
+  probe.remove();
+  return w;
+}
+
+(data => {
+  const bySlug = Object.fromEntries(data.map(d => [d.slug, d]));
+  const host = document.getElementById('tracks');
+  const audios = [];
+  // the hero's "read it back" panel: the start of Poppycock's section list
+  document.getElementById('io-read').textContent =
+    'analyze_structure\n' + bySlug.poppycock.sections.split('\n').slice(0, 5)
+      .map(l => l.replace(/\s+pcs:.*?(?=\s{2}|$)/, '').replace(/\s{2,}/g, '  ')).join('\n');
+
+  for (const slug of ORDER) {
+    const d = bySlug[slug];
+    if (!d) continue;
+    const m = /([\d.]+) BPM, (\d+)\/4.*?bar 1 at ([-\d.]+)s/.exec(d.info);
+    const bpm = +m[1], beats = +m[2], off = +m[3];
+    const barSec = beats * 60 / bpm;
+    const mapText = d.map.split('\n').slice(1).join('\n');
+    const el = document.createElement('article');
+    el.className = 'track';
+    el.innerHTML = `
+      <div class="track-head">
+        <h3>${esc(d.title)}${TAG[slug] ? `<span class="tag">${TAG[slug]}</span>` : ''}</h3>
+        <span class="meta">${fmt(d.duration)} · ${d.tracks} tracks</span>
+      </div>
+      <p class="desc">${esc(DESC[slug] || d.doc)}</p>
+      <audio controls preload="none" src="audio/${slug}.mp3"></audio>
+      <details class="seen">
+        <summary>what the agent saw</summary>
+        <p class="hint">analyze_structure: one character per bar. Click a bar to jump there.</p>
+        <div class="scroll"><pre class="map">${esc(mapText)}<div class="playhead"></div></pre></div>
+        ${d.sections ? `<div class="label">sections it found</div><div class="scroll"><pre>${esc(d.sections)}</pre></div>` : ''}
+        <div class="label">notes_read view=roll (${esc(d.roll_track)})</div>
+        <div class="scroll"><pre>${esc(d.roll)}</pre></div>
+      </details>`;
+    host.appendChild(el);
+
+    const audio = el.querySelector('audio');
+    const pre = el.querySelector('.map');
+    const head = el.querySelector('.playhead');
+    audios.push(audio);
+    let cw = 0, raf = 0;
+    const PREFIX = 10; // "      bar " before the first bar column
+    const place = () => {
+      if (!cw) cw = charWidth(pre);
+      const bar = Math.floor((audio.currentTime - off) / barSec);
+      head.style.display = bar >= 0 ? 'block' : 'none';
+      head.style.left = `${(PREFIX + bar) * cw}px`;
+    };
+    const loop = () => { place(); raf = requestAnimationFrame(loop); };
+    audio.addEventListener('play', () => {
+      audios.forEach(a => { if (a !== audio) a.pause(); });
+      cancelAnimationFrame(raf); loop();
+    });
+    audio.addEventListener('pause', () => { cancelAnimationFrame(raf); place(); });
+    audio.addEventListener('seeked', place);
+    pre.addEventListener('click', e => {
+      if (!cw) cw = charWidth(pre);
+      const x = e.clientX - pre.getBoundingClientRect().left;
+      const bar = Math.floor(x / cw) - PREFIX;
+      if (bar < 0) return;
+      audio.currentTime = off + bar * barSec;
+      audio.play();
+    });
+  }
+})(window.SONGS);
+
+document.querySelector('#yt button').addEventListener('click', e => {
+  const f = document.createElement('iframe');
+  f.src = 'https://www.youtube-nocookie.com/embed/ZzT1T9GUoRo?autoplay=1';
+  f.title = 'Luigi Manson';
+  f.allow = 'autoplay; encrypted-media; picture-in-picture';
+  f.allowFullscreen = true;
+  e.currentTarget.replaceWith(f);
+});
+</script>
+</body>
+</html>
