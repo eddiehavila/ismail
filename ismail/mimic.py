@@ -1,0 +1,514 @@
+"""mimic: an instrument measured from recordings and played back as harmonics + noise + body.
+
+measure() reads a few recorded notes of one instrument and writes a profile: per note, every partial's level and
+envelope (attack, sustain or two-stage decay, release), the noise between the partials (attack burst and
+sustained), vibrato and pitch drift, inharmonicity. Across notes it splits the partial levels into a body curve
+fixed in frequency (resonances, formants) plus a per-note source slope, so an unmeasured pitch keeps the body in
+place instead of stretching it.
+
+render() plays one note from a profile. Every partial reads the body at its current frequency (vibrato flutters
+through the resonances), temporal parameters are blended between the two nearest measured notes at the same
+absolute frequency, noise is shaped white noise in the measured band levels, and small per-note random variation
+keeps repeated notes from being identical.
+"""
+import json
+import os
+
+import numpy as np
+
+SR = 44100
+HOP = 256
+CTRL = 64                      # control-rate hop for synthesis envelopes
+BODY_HZ = 2 ** np.arange(np.log2(30), np.log2(18000), 1 / 12)
+NOISE_HZ = 2 ** np.arange(np.log2(50), np.log2(18000), 1 / 3)
+LOWER_HALF_MEAN = 0.3069       # mean of the lower half of an exponential(1) variable: noise power calibration
+
+
+# ------------------------------------------------------------------ analysis
+
+def _midi(f):
+    return 69 + 12 * np.log2(f / 440.0)
+
+
+def _hz(m):
+    return 440.0 * 2 ** ((m - 69) / 12)
+
+
+def _load(path, sr=SR):
+    import librosa
+    import soundfile as sf
+    try:
+        y, s = sf.read(path, always_2d=True)
+        y = y.mean(axis=1)
+    except Exception:
+        y, s = librosa.load(path, sr=None, mono=True)
+    if s != sr:
+        y = librosa.resample(y, orig_sr=s, target_sr=sr)
+    return y.astype(np.float64)
+
+
+def _fit_decay(t, db):
+    """Least-squares slope of dB over time -> T60 (s); inf when not decaying."""
+    if len(t) < 3:
+        return float('inf')
+    a = np.polyfit(t, db, 1)[0]
+    return float(-60.0 / a) if a < -1e-3 else float('inf')
+
+
+def measure_note(y, midi, sr=SR, vel=0.7, kind='auto'):
+    import librosa
+    f_nom = _hz(midi)
+    env = np.sqrt(np.convolve(y ** 2, np.ones(220) / 220, 'same'))
+    pk = env.max()
+    if pk <= 0:
+        raise ValueError('silent recording')
+    on = int(np.argmax(env > 0.02 * pk))
+    y = y[max(0, on - int(0.005 * sr)):]
+    nfft = 8192 if f_nom < 160 else 4096
+    win = np.hanning(nfft)
+    X = librosa.stft(y, n_fft=nfft, hop_length=HOP, window=win, center=False)
+    P = np.abs(X) ** 2
+    M = np.abs(X) * 2 / win.sum()                    # sinusoid amplitude scale
+    nb, nf = M.shape
+    fr = np.fft.rfftfreq(nfft, 1 / sr)
+    tf = (np.arange(nf) * HOP + nfft / 2) / sr        # frame centre times
+
+    f0, vflag, _ = librosa.pyin(y, fmin=f_nom * 0.85, fmax=f_nom * 1.18, sr=sr, frame_length=max(2048, nfft // 2),
+                                hop_length=HOP, center=False)
+    f0t = np.full(nf, np.nan)
+    m = min(nf, len(f0))
+    f0t[:m] = np.where(vflag[:m], f0[:m], np.nan)
+    good = np.isfinite(f0t)
+    f_ref = float(np.nanmedian(f0t)) if good.sum() > 5 else f_nom
+    f0t = np.where(good, f0t, f_ref)
+
+    # inharmonicity from strong peaks in the loudest frames
+    lvl = M.sum(axis=0)
+    jloud = np.argsort(lvl)[-12:]
+    ks, fk = [], []
+    for k in range(1, 40):
+        target = k * f_ref
+        if target > min(sr / 2 * 0.9, 12000):
+            break
+        lo, hi = np.searchsorted(fr, [target * (1 - 0.3 / k), target * (1 + 0.3 / k + 0.02)])
+        if hi - lo < 2:
+            continue
+        spec = M[lo:hi, jloud].mean(axis=1)
+        i = int(np.argmax(spec))
+        if 0 < i < len(spec) - 1 and spec[i] > 1e-5 * M[:, jloud].max():
+            a, b, c = np.log(spec[i - 1:i + 2] + 1e-12)
+            d = 0.5 * (a - c) / (a - 2 * b + c) if (a - 2 * b + c) != 0 else 0.0
+            ks.append(k)
+            fk.append(fr[lo + i] + d * (fr[1] - fr[0]))
+    B = 0.0
+    if len(ks) >= 6:
+        ks_, fk_ = np.array(ks, float), np.array(fk)
+        A = np.stack([np.ones_like(ks_), ks_ ** 2], 1)
+        sol = np.linalg.lstsq(A, (fk_ / ks_) ** 2, rcond=None)[0]
+        if sol[0] > 0:
+            B = float(np.clip(sol[1] / sol[0], 0, 2e-3))
+            f_ref = float(np.sqrt(sol[0]))
+
+    # partial tracks
+    kmax = int(min(sr / 2 * 0.95, 16000) / f_ref)
+    kmax = max(1, min(kmax, 200))
+    kk = np.arange(1, kmax + 1)
+    stretch = np.sqrt(1 + B * kk ** 2)
+    df = fr[1] - fr[0]
+    halfw = max(2, int(0.25 * f_ref / df))
+    offs = np.arange(-halfw, halfw + 1)
+    A_db = np.full((kmax, nf), -120.0)
+    for i, k in enumerate(kk):
+        fc = k * stretch[i] * f0t
+        bins = np.clip(np.round(fc / df).astype(int)[None, :] + offs[:, None], 0, nb - 1)
+        amp = M[bins, np.arange(nf)[None, :]].max(axis=0)
+        A_db[i] = 20 * np.log10(amp + 1e-9)
+
+    # noise between partials: lower-half mean power per 1/3 octave, harmonic bins masked
+    mask = np.ones((nb, nf), bool)
+    for i, k in enumerate(kk):
+        fc = k * stretch[i] * f0t
+        for o in range(-halfw - 1, halfw + 2):
+            b = np.clip(np.round(fc / df).astype(int) + o, 0, nb - 1)
+            mask[b, np.arange(nf)] = False
+    edges = np.sqrt(NOISE_HZ[:-1] * NOISE_HZ[1:])
+    edges = np.concatenate([[NOISE_HZ[0] / 2 ** (1 / 6)], edges, [NOISE_HZ[-1] * 2 ** (1 / 6)]])
+    noise_db = np.full((len(NOISE_HZ), nf), -150.0)
+    wss = (win ** 2).sum()
+    for bi in range(len(NOISE_HZ)):
+        lo, hi = np.searchsorted(fr, [edges[bi], edges[bi + 1]])
+        if hi - lo < 2 or edges[bi] > sr / 2:
+            continue
+        Pb = np.where(mask[lo:hi], P[lo:hi], np.nan)
+        med = np.nanmedian(Pb, axis=0)
+        lowhalf = np.nanmean(np.where(Pb <= med[None, :], Pb, np.nan), axis=0)
+        var = lowhalf / LOWER_HALF_MEAN / wss       # white-noise variance density that would give this power
+        noise_db[bi] = np.where(np.isfinite(var), 10 * np.log10(np.maximum(var, 1e-15)), np.nan)
+    # bands with no free bins (inside a partial's mask) read their neighbours, per frame
+    lb = np.log2(NOISE_HZ)
+    inband = NOISE_HZ < sr / 2
+    for j in range(nf):
+        col = noise_db[:, j]
+        ok = np.isfinite(col) & (col > -149) & inband
+        if ok.sum() >= 2:
+            noise_db[:, j] = np.where(ok | ~inband, col, np.interp(lb, lb[ok], col[ok]))
+    noise_db = np.nan_to_num(noise_db, nan=-150.0)
+
+    # note shape
+    tot = 10 * np.log10((10 ** (A_db / 10)).sum(axis=0) + 1e-15)
+    jpk = int(np.argmax(tot))
+    peak_db = float(tot[jpk])
+    alive = np.where(tot > peak_db - 50)[0]
+    jend = int(alive[-1]) if len(alive) else nf - 1
+    dur = tf[jend]
+    if kind == 'auto':
+        # sustained if the level half way through the note is within 10 dB of its peak
+        jm = jpk + (jend - jpk) // 2
+        kind = 'sustained' if tot[jm] > peak_db - 10 and dur > 0.6 else 'decaying'
+
+    parts = []
+    t_on = tf[0]
+    if kind == 'sustained':
+        # release starts where the level falls 6 dB under the sustain median for good
+        sus_lvl = np.median(tot[jpk:jend + 1])
+        above = np.where(tot[jpk:jend + 1] > sus_lvl - 6)[0]
+        jrel = jpk + int(above[-1]) if len(above) else jend
+        jatk_end = jpk
+        sus = np.arange(min(jatk_end + int(0.15 * sr / HOP), jrel), jrel)
+        if len(sus) < 4:
+            sus = np.arange(jpk, max(jpk + 4, jrel))
+        for i in range(kmax):
+            a = A_db[i]
+            s_lvl = float(np.median(a[sus]))
+            reach = np.where(a[:jrel] >= s_lvl - 3.0)[0]   # within 3 dB: a slow creep to full level is sustain
+            atk = float(min(tf[reach[0]] - t_on, 0.8)) if len(reach) else 0.05
+            ov = float(max(0.0, a[:jatk_end + int(0.3 * sr / HOP)].max() - s_lvl))
+            fl = float(np.std(a[sus] - np.convolve(a[sus], np.ones(9) / 9, 'same')[:len(sus)])) if len(sus) > 12 else 0.5
+            rel = a[jrel:jrel + int(1.5 * sr / HOP)]
+            rt = tf[jrel:jrel + len(rel)] - tf[jrel]
+            live = rel > s_lvl - 45
+            t60 = _fit_decay(rt[live], rel[live]) if live.sum() > 3 else 0.3
+            parts.append((s_lvl, atk, ov, fl, min(t60, 8.0)))
+        level = np.array([p[0] for p in parts])
+        arr = {'attack': [p[1] for p in parts], 'overshoot': [p[2] for p in parts],
+               'shimmer': [p[3] for p in parts], 'release': [p[4] for p in parts]}
+        noise_sus = np.median(noise_db[:, sus], axis=1) - np.median(tot[sus])
+        vib_frames = sus
+    else:
+        for i in range(kmax):
+            a = A_db[i]
+            jp = int(np.argmax(a[:jpk + int(0.2 * sr / HOP)]))
+            lp = float(a[jp])
+            tt = tf[jp:jend + 1] - tf[jp]
+            aa = a[jp:jend + 1]
+            live = aa > lp - 50
+            tt, aa = tt[live], aa[live]
+            # two-stage: prompt over the first 20 dB, then the rest
+            cut = np.where(aa < lp - 20)[0]
+            c = int(cut[0]) if len(cut) else len(aa)
+            t1 = _fit_decay(tt[:c], aa[:c]) if c > 3 else _fit_decay(tt, aa)
+            t2 = _fit_decay(tt[c:], aa[c:]) if len(aa) - c > 3 else t1
+            parts.append((lp, float(tf[jp] - t_on), min(t1, 60.0), min(t2, 60.0)))
+        level = np.array([p[0] for p in parts])
+        arr = {'attack': [p[1] for p in parts], 't60_prompt': [p[2] for p in parts],
+               't60_after': [p[3] for p in parts]}
+        noise_sus = np.median(noise_db[:, jpk:jpk + max(4, int(0.3 * sr / HOP))], axis=1) - peak_db
+        vib_frames = np.arange(jpk, min(jend, jpk + int(1.0 * sr / HOP)))
+    atk_frames = np.arange(0, max(1, jpk + 1))
+    noise_atk = noise_db[:, atk_frames].max(axis=1) - peak_db
+
+    # vibrato and drift (cents) over the chosen frames
+    fv = f0t[vib_frames]
+    gv = good[vib_frames]
+    vib_rate, vib_depth, drift = 0.0, 0.0, 0.0
+    if gv.sum() > 30:
+        c = 1200 * np.log2(fv[gv] / f_ref)
+        trend = np.convolve(c, np.ones(31) / 31, 'same')
+        dev = c - trend
+        spec = np.abs(np.fft.rfft(dev * np.hanning(len(dev))))
+        ff = np.fft.rfftfreq(len(dev), HOP / sr)
+        band = (ff > 3) & (ff < 9)
+        if band.any() and spec[band].max() > 3 * np.median(spec[1:] + 1e-9):
+            vib_rate = float(ff[band][np.argmax(spec[band])])
+            vib_depth = float(np.std(dev) * np.sqrt(2))
+        drift = float(np.std(trend))
+
+    return {'midi': float(_midi(f_ref)), 'f0': f_ref, 'vel': vel, 'kind': kind, 'B': B, 'peak_db': peak_db,
+            'dur': float(dur), 'partials': len(level), 'level': [round(float(x), 2) for x in level],
+            **{k: [round(float(x), 4) for x in v] for k, v in arr.items()},
+            'noise_sus': [round(float(x), 2) for x in noise_sus], 'noise_atk': [round(float(x), 2) for x in noise_atk],
+            'vib_rate': vib_rate, 'vib_depth': vib_depth, 'drift': drift}
+
+
+def _body_fit(notes, iters=10):
+    """L[n,k] ~ body(f_nk) + s_n*log2(k) + g_n. Returns body (dB on BODY_HZ), slopes, gains, residuals."""
+    rows = []
+    for n in notes:
+        k = np.arange(1, n['partials'] + 1)
+        f = k * n['f0'] * np.sqrt(1 + n['B'] * k ** 2)
+        lv = np.array(n['level'])
+        top = lv.max()
+        ok = lv > top - 60                         # ignore partials lost in the floor
+        rows.append((k[ok], f[ok], lv[ok]))
+    s = np.zeros(len(rows))
+    g = np.array([r[2].max() for r in rows])
+    body = np.zeros(len(BODY_HZ))
+    lb = np.log2(BODY_HZ)
+    for _ in range(iters):
+        acc = np.zeros(len(BODY_HZ))
+        cnt = np.zeros(len(BODY_HZ))
+        for (k, f, lv), si, gi in zip(rows, s, g):
+            r = lv - si * np.log2(k) - gi
+            idx = np.clip(np.round((np.log2(f) - lb[0]) * 12).astype(int), 0, len(BODY_HZ) - 1)
+            np.add.at(acc, idx, r)
+            np.add.at(cnt, idx, 1)
+        have = cnt > 0
+        body = np.interp(lb, lb[have], acc[have] / cnt[have]) if have.any() else body
+        body = np.convolve(np.pad(body, 2, mode='edge'), np.ones(5) / 5, 'valid')
+        body -= body[have].mean() if have.any() else 0
+        for j, (k, f, lv) in enumerate(rows):
+            r = lv - np.interp(np.log2(f), lb, body)
+            A = np.stack([np.log2(k), np.ones_like(k, dtype=float)], 1)
+            s[j], g[j] = np.linalg.lstsq(A, r, rcond=None)[0]
+    resid = []
+    for n, si, gi in zip(notes, s, g):
+        k = np.arange(1, n['partials'] + 1)
+        f = k * n['f0'] * np.sqrt(1 + n['B'] * k ** 2)
+        resid.append([round(float(x), 2) for x in np.array(n['level']) - np.interp(np.log2(f), lb, body)
+                      - si * np.log2(k) - gi])
+    return body, s, g, resid
+
+
+def measure_notes(items, kind='auto'):
+    """items: [(path_or_array, midi, vel)] one recorded note each -> measured notes, all of one kind."""
+    ys = [(_load(src) if isinstance(src, str) else np.asarray(src, float), src, midi, vel) for src, midi, vel in items]
+    notes = [measure_note(y, midi, vel=vel, kind=kind) for y, _, midi, vel in ys]
+    kinds = [n['kind'] for n in notes]
+    kind = max(set(kinds), key=kinds.count)
+    for i, (y, src, midi, vel) in enumerate(ys):
+        if notes[i]['kind'] != kind:       # one instrument, one kind: re-measure the odd ones out
+            notes[i] = measure_note(y, midi, vel=vel, kind=kind)
+        notes[i]['file'] = os.path.basename(src) if isinstance(src, str) else None
+    return notes
+
+
+def measure(items, name='mimic', kind='auto', source=None):
+    """items: [(path_or_array, midi, vel)] one recorded note each. Returns a profile dict."""
+    return profile_from_notes(measure_notes(items, kind), name, source)
+
+
+def profile_from_notes(notes, name='mimic', source=None):
+    import copy
+    notes = sorted(copy.deepcopy(notes), key=lambda n: n['midi'])
+    kind = notes[0]['kind']
+    body, s, g, resid = _body_fit(notes)
+    for n, si, gi, r in zip(notes, s, g, resid):
+        n['slope'], n['gain'], n['resid'] = round(float(si), 3), round(float(gi), 2), r
+    # play the loudest measured note at about -12 dBFS, keeping the recorded balance between registers
+    norm = -12.0 - max(n['peak_db'] for n in notes)
+    return {'mimic': 1, 'name': name, 'kind': kind, 'source': source, 'norm_db': round(float(norm), 2), 'body_hz': [round(float(x), 2) for x in BODY_HZ],
+            'body_db': [round(float(x), 2) for x in body], 'noise_hz': [round(float(x), 1) for x in NOISE_HZ],
+            'notes': notes}
+
+
+# ------------------------------------------------------------------ synthesis
+
+DEFAULT_PARAMS = {
+    'vib': None,          # vibrato depth in cents (None = as measured)
+    'vib_rate': None,     # Hz (None = as measured)
+    'vib_delay': 0.25,    # s before vibrato reaches full depth
+    'players': 1,         # a section: detuned copies with their own vibrato, timing and shimmer
+    'detune': 8.0,        # cents spread between players
+    'width': 0.5,         # 0 mono .. 1 wide (per-partial phase and level between channels)
+    'noise': 0.0,         # dB offset on the measured noise
+    'bright': 0.0,        # dB per octave of partial number, added
+    'vel_bright': 6.0,    # dB per octave of partial number per unit of velocity above the measured one
+    'attack': 1.0,        # scale on measured attack times
+    'release': 1.0,       # scale on measured release times (sustained) / damper time (decaying)
+    'damp': 0.25,         # decaying kinds: seconds to die after the key is released (None = ring on)
+    'detail': 1.0,        # 0..1: how much of each measured note's own partial pattern to keep (vs the smooth model)
+    'variation': 1.0,     # per-note random variation (level, brightness, timing of partials)
+    'seed': None,
+}
+
+_PROFILES = {}
+
+
+def load_profile(name, root=None):
+    from . import voices
+    for _, d in voices.search_path(root):
+        p = os.path.join(d, name + '.mimic.json')
+        if os.path.isfile(p):
+            key = (p, os.path.getmtime(p))
+            if key not in _PROFILES:
+                _PROFILES[key] = json.load(open(p, encoding='utf-8'))
+            return _PROFILES[key]
+    have = sorted({f[:-11] for _, d in voices.search_path(root) if os.path.isdir(d)
+                   for f in os.listdir(d) if f.endswith('.mimic.json')})
+    raise ValueError(f"no mimic profile {name!r}; available: {', '.join(have) or 'none'} (make one with mimic_measure)")
+
+
+def _neighbours(notes, midi):
+    ms = np.array([n['midi'] for n in notes])
+    if midi <= ms[0]:
+        return notes[0], notes[0], 0.0
+    if midi >= ms[-1]:
+        return notes[-1], notes[-1], 0.0
+    j = int(np.searchsorted(ms, midi))
+    a, b = notes[j - 1], notes[j]
+    return a, b, float((midi - a['midi']) / (b['midi'] - a['midi']))
+
+
+def _curve(n, key, f):
+    """A per-partial array of note n, read at absolute frequencies f (log-frequency interpolation)."""
+    k = np.arange(1, n['partials'] + 1)
+    fk = k * n['f0'] * np.sqrt(1 + n['B'] * k ** 2)
+    v = np.asarray(n[key], float)
+    return np.interp(np.log2(f), np.log2(fk), v)
+
+
+def _blend(a, b, w, key, f, log=False):
+    va, vb = _curve(a, key, f), _curve(b, key, f)
+    if log:
+        va, vb = np.log(np.maximum(va, 1e-4)), np.log(np.maximum(vb, 1e-4))
+        return np.exp(va * (1 - w) + vb * w)
+    return va * (1 - w) + vb * w
+
+
+def _smooth_noise(rng, n, rate_hz, sr_ctrl):
+    """Band-limited random walk-ish signal, unit std, at control rate."""
+    x = rng.standard_normal(n + 64)
+    k = max(1, int(sr_ctrl / max(rate_hz, 0.1)))
+    x = np.convolve(x, np.hanning(2 * k + 1), 'same')[32:32 + n]
+    return x / (x.std() + 1e-9)
+
+
+def render(profile, freq, t, vel, gate, sr=SR, **params):
+    """One note -> (2, len(t)) array."""
+    p = dict(DEFAULT_PARAMS)
+    p.update({k: v for k, v in params.items() if v is not None or k in ('damp',)})
+    unknown = set(params) - set(DEFAULT_PARAMS)
+    if unknown:
+        raise ValueError(f"unknown mimic params {sorted(unknown)}; valid: {sorted(DEFAULT_PARAMS)}")
+    n = len(t)
+    out = np.zeros((2, n))
+    if n == 0:
+        return out
+    notes = profile['notes']
+    midi = float(_midi(freq))
+    a, b, w = _neighbours(notes, midi)
+    seed = p['seed'] if p['seed'] is not None else int(freq * 1000 + vel * 7919 + gate * 131) % (2 ** 31)
+    rng = np.random.default_rng(seed)
+    body_hz, body_db = np.log2(np.array(profile['body_hz'])), np.array(profile['body_db'])
+    kind = profile['kind']
+    B = a['B'] * (1 - w) + b['B'] * w
+    slope = a['slope'] * (1 - w) + b['slope'] * w
+    gain = a['gain'] * (1 - w) + b['gain'] * w
+    vel_ref = a['vel'] * (1 - w) + b['vel'] * w
+    vib_d = p['vib'] if p['vib'] is not None else a['vib_depth'] * (1 - w) + b['vib_depth'] * w
+    vib_r = p['vib_rate'] if p['vib_rate'] is not None else (a['vib_rate'] * (1 - w) + b['vib_rate'] * w) or 5.5
+    drift = a['drift'] * (1 - w) + b['drift'] * w
+    nyq = min(sr / 2 * 0.95, 16000)
+    kmax = max(1, min(int(nyq / freq), 200))
+    kk = np.arange(1, kmax + 1)
+    stretch = np.sqrt(1 + B * kk ** 2)
+    fk = kk * stretch * freq
+    keep = fk < nyq
+    kk, stretch, fk = kk[keep], stretch[keep], fk[keep]
+    lk = np.log2(kk)
+
+    # static level per partial: smooth model + measured detail (by partial number, blended)
+    ra = np.asarray(a['resid']); rb = np.asarray(b['resid'])
+    det = (np.interp(kk, np.arange(1, len(ra) + 1), ra) * (1 - w) + np.interp(kk, np.arange(1, len(rb) + 1), rb) * w)
+    det = np.where(kk <= min(len(ra), len(rb)), det, 0.0)
+    dv = vel - vel_ref
+    base = slope * lk + gain + p['detail'] * det + (p['bright'] + p['vel_bright'] * dv) * lk
+    base += 20 * np.log10(max(vel, 1e-3) / max(vel_ref, 1e-3)) + profile.get('norm_db', 0.0)
+    base += p['variation'] * rng.normal(0, 0.7, len(kk))
+
+    tc = np.arange(0, n + CTRL, CTRL) / sr                # control times
+    ncs = len(tc)
+    sr_c = sr / CTRL
+    atk = _blend(a, b, w, 'attack', fk) * p['attack'] * (1 + p['variation'] * rng.normal(0, 0.08, len(kk)))
+    atk = np.maximum(atk, 0.002)
+    if kind == 'sustained':
+        ov = _blend(a, b, w, 'overshoot', fk)
+        shim = _blend(a, b, w, 'shimmer', fk)
+        rel = np.maximum(_blend(a, b, w, 'release', fk, log=True) * p['release'], 0.02)
+    else:
+        t1 = np.maximum(_blend(a, b, w, 't60_prompt', fk, log=True), 0.05)
+        t2 = np.maximum(_blend(a, b, w, 't60_after', fk, log=True), 0.05)
+
+    players = max(1, int(p['players']))
+    phi_c = None
+    for pl in range(players):
+        prng = np.random.default_rng(seed + 7919 * (pl + 1))
+        cents = 0.0 if players == 1 else prng.uniform(-1, 1) * p['detune']
+        delay = 0.0 if players == 1 else abs(prng.normal(0, 0.012))
+        vr = vib_r * (1 + (prng.uniform(-0.08, 0.08) if players > 1 else 0))
+        ramp = np.clip((tc - delay) / max(p['vib_delay'], 1e-3), 0, 1) if vib_d > 0 else np.zeros(ncs)
+        vib = vib_d * ramp * np.sin(2 * np.pi * vr * tc + prng.uniform(0, 2 * np.pi))
+        vib += drift * _smooth_noise(prng, ncs, 1.5, sr_c)
+        f0c = freq * 2 ** ((cents + vib) / 1200)
+        f0s = np.interp(np.arange(n) / sr, tc, f0c)
+        phase = 2 * np.pi * np.cumsum(f0s) / sr
+        pan = 0.0 if players == 1 else prng.uniform(-0.6, 0.6)
+        te = np.maximum(tc - delay, 0)
+        yl = np.zeros(n)
+        yr = np.zeros(n)
+        tot_env = np.zeros(ncs)
+        for i, k in enumerate(kk):
+            # body at the partial's current frequency: vibrato moves it across the resonances
+            fi = k * stretch[i] * f0c
+            lvl = base[i] + np.interp(np.log2(fi), body_hz, body_db)
+            if kind == 'sustained':
+                up = np.clip(te / atk[i], 0, 1) ** 1.5
+                env_db = 20 * np.log10(up + 1e-4) + ov[i] * np.exp(-np.maximum(te - atk[i], 0) / 0.08) * (te >= atk[i] * 0.5)
+                env_db += shim[i] * p['variation'] * _smooth_noise(prng, ncs, 6.0, sr_c)
+                after = np.maximum(te - gate, 0)
+                env_db -= 60 * after / rel[i]
+            else:
+                up = np.clip(te / atk[i], 0, 1)
+                d = np.maximum(te - atk[i], 0)
+                tb = t1[i] / 3.0                           # 20 dB into the prompt decay
+                env_db = 20 * np.log10(up + 1e-4) - np.where(d < tb, 60 * d / t1[i], 20 + 60 * (d - tb) / t2[i])
+                if p['damp'] is not None:
+                    after = np.maximum(te - gate, 0)
+                    env_db -= 60 * after / max(p['damp'] * p['release'] * (1 + 200 / fk[i]), 0.01)
+            amp_c = 10 ** ((lvl + env_db) / 20)
+            if amp_c.max() < 1e-5:
+                continue
+            tot_env += amp_c ** 2
+            amp = np.interp(np.arange(n) / sr, tc, amp_c)
+            ph0 = prng.uniform(0, 2 * np.pi)
+            dphi = p['width'] * prng.uniform(-np.pi / 2, np.pi / 2) if k > 1 else 0.0
+            dl = 1 + p['width'] * prng.uniform(-0.12, 0.12)
+            yl += amp * np.sin(k * stretch[i] * phase + ph0) * dl
+            yr += amp * np.sin(k * stretch[i] * phase + ph0 + dphi) / dl
+        gl, gr = np.sqrt(0.5 * (1 - pan)), np.sqrt(0.5 * (1 + pan))
+        out[0] += yl * gl * np.sqrt(2)
+        out[1] += yr * gr * np.sqrt(2)
+        phi_c = tot_env if phi_c is None else phi_c + tot_env
+
+    # noise: sustained part follows the harmonic envelope, attack part is a burst at the onset
+    nz_hz = np.log2(np.array(profile['noise_hz']))
+    ns = np.array(a['noise_sus']) * (1 - w) + np.array(b['noise_sus']) * w + p['noise']
+    na = np.array(a['noise_atk']) * (1 - w) + np.array(b['noise_atk']) * w + p['noise']
+    harm_db = 10 * np.log10(phi_c / players + 1e-15)
+    ref_db = harm_db.max()
+    if kind == 'sustained':
+        sus_env = 10 ** ((harm_db - ref_db) / 20)
+    else:
+        sus_env = 10 ** ((harm_db - ref_db) / 20)
+    atk_t = max(float(np.mean(atk[:3])), 0.01)
+    atk_env = np.exp(-np.maximum(tc, 0) / (0.5 * atk_t + 0.015))
+    fr = np.fft.rfftfreq(n, 1 / sr)
+    lf = np.log2(np.maximum(fr, 1.0))
+    for spec_db, envc, level_ref in ((ns, sus_env, ref_db), (na, atk_env, ref_db)):
+        g = 10 ** ((np.interp(lf, nz_hz, spec_db, left=-150, right=-150) + level_ref) / 20)
+        g[fr < 20] = 0
+        for ch in range(2):
+            wn = rng.standard_normal(n)
+            shaped = np.fft.irfft(np.fft.rfft(wn) * g, n)
+            out[ch] += shaped * np.interp(np.arange(n) / sr, tc, envc)
+    return out / players ** 0.5

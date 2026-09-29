@@ -1,6 +1,7 @@
 """Sound-design ops: compare two sounds, fit an instrument's parameters to a target sound."""
 import json
 import math
+import os
 
 import numpy as np
 import soundfile as sf
@@ -366,3 +367,106 @@ def eq_match(project: str, track: str, bars: list, max_db: float = 12.0, apply: 
         P.save()
         lines.append(f"  applied: eq as fx 0, fader now {tr.get('volume_db')} dB (render + cmp_run to confirm)")
     return '\n'.join(lines)
+
+
+def _pitch_of(name):
+    import librosa
+    base = os.path.basename(name).rsplit('.', 1)[0]
+    base = base.replace('s', '#') if len(base) <= 4 else base
+    return int(round(librosa.note_to_midi(base)))
+
+
+@op(mutates=True)
+def mimic_measure(project: str, name: str, notes: list = None, folder: str = None, kind: str = 'auto',
+                  vel: float = 0.7, check: bool = True) -> str:
+    """Measure an instrument from recorded notes into a mimic profile (<project>/voices/<name>.mimic.json), then
+    use it as {"type": "mimic", "profile": "<name>"}. notes: [[source, pitch], ...] or [[source, pitch, vel,
+    [t0, t1]]] where source is 'sound:<name>', 'ref', 'ref:<stem>' or a path, pitch like 'A4', vel 0..1 (how hard
+    it was played; default `vel`), [t0, t1] seconds to cut one note out of a longer file. folder: a directory of
+    one-note files named by pitch (A4.wav, Fs3.mp3, C#5.flac) instead of notes. One note per file or window,
+    isolated, a few across the range; two dynamics of the same pitch teach velocity. kind: auto | sustained
+    (bowed, blown, sung) | decaying (plucked, struck). check=True rebuilds every measured note from the OTHER
+    notes and reports how close it lands (leave-one-out), the honest estimate for pitches you did not record."""
+    import glob as _glob
+    import librosa
+    from . import mimic
+    P = _load(project)
+    items = []
+    if folder:
+        fd = folder if os.path.isabs(folder) else os.path.join(P.root, folder)
+        files = sorted(f for ext in ('wav', 'flac', 'mp3', 'ogg', 'aif', 'aiff')
+                       for f in _glob.glob(os.path.join(fd, '*.' + ext)))
+        if not files:
+            raise OpError(f"no audio files in {fd}; name them by pitch (A4.wav, Fs3.mp3) or pass notes=[[source, pitch]]")
+        for f in files:
+            try:
+                items.append((f, _pitch_of(f), vel, None))
+            except Exception:
+                raise OpError(f"can't read a pitch from file name {os.path.basename(f)!r}; name files like A4.wav, "
+                              f"Fs3.wav, C#5.wav, or pass notes=[[source, pitch]]")
+    for it in notes or []:
+        if not isinstance(it, (list, tuple)) or len(it) < 2:
+            raise OpError("each note is [source, pitch] or [source, pitch, vel, [t0, t1]], e.g. ['sound:vln_a4', 'A4']")
+        src, pitch = it[0], it[1]
+        items.append((src, int(round(librosa.note_to_midi(pitch))) if isinstance(pitch, str) else int(pitch),
+                      float(it[2]) if len(it) > 2 and it[2] is not None else vel, it[3] if len(it) > 3 else None))
+    if not items:
+        raise OpError("give notes=[[source, pitch], ...] or folder=<directory of pitch-named files>")
+    ys = []
+    for src, midi, v, win in items:
+        if isinstance(src, str) and os.path.isfile(src) and not win:
+            ys.append((mimic._load(src), midi, v))
+        else:
+            ys.append((_audio(P, src, win).mean(axis=0), midi, v))
+    try:
+        measured = mimic.measure_notes(ys, kind=kind)
+    except Exception as e:
+        raise OpError(f"measuring failed: {e}")
+    for n, (src, _, _, _) in zip(measured, items):
+        n['file'] = os.path.basename(src) if isinstance(src, str) else None
+    source = folder or ', '.join(sorted({str(i[0]).split(':')[0] if str(i[0]).startswith('sound:') else
+                                         os.path.basename(str(i[0])) for i in items}))[:200]
+    prof = mimic.profile_from_notes(measured, name, source)
+    vd = os.path.join(P.root, 'voices')
+    os.makedirs(vd, exist_ok=True)
+    out = os.path.join(vd, name + '.mimic.json')
+    with open(out, 'w', encoding='utf-8') as f:
+        json.dump(prof, f)
+    from .voices import _note_name
+    L = [f"mimic profile {name!r} -> {out}", f"kind {prof['kind']}, {len(measured)} notes"]
+    L.append(f"{'note':>5} {'partials':>8} {'B':>8} {'vib Hz':>6} {'cents':>5} {'attack':>6}  noise (sustain, dB under harmonics)")
+    for n in prof['notes']:
+        ns = np.array(n['noise_sus'])
+        L.append(f"{_note_name(n['midi']):>5} {n['partials']:>8} {n['B']:8.1e} {n['vib_rate']:6.1f} {n['vib_depth']:5.1f} "
+                 f"{n['attack'][0]:6.3f}  {np.median(ns[ns > -140]):.0f}")
+    body = np.array(prof['body_db'])
+    hz = np.array(prof['body_hz'])
+    pk = [i for i in range(1, len(body) - 1) if body[i] >= body[i - 1] and body[i] >= body[i + 1] and body[i] > 3]
+    pk = sorted(pk, key=lambda i: -body[i])[:5]
+    if pk:
+        L.append("body resonances: " + ', '.join(f"{hz[i]:.0f} Hz +{body[i]:.0f} dB" for i in sorted(pk)))
+    if check and len(measured) >= 3:
+        rows = []
+        for i, n in enumerate(prof['notes']):
+            rest = mimic.profile_from_notes([m for j, m in enumerate(prof['notes']) if j != i], name)
+            y = _audio_note(ys, measured, n)
+            gate = min(max(n['dur'] - 0.3, 0.3), 3.0) if prof['kind'] == 'sustained' else 3.0
+            z = mimic.render(rest, mimic._hz(n['midi']), np.arange(int((gate + 1.0) * SD.SR)) / SD.SR, n['vel'], gate)
+            d, parts = SD.distance(SD.descriptor(np.stack([y[:len(z[0])]] * 2)), SD.descriptor(z))
+            rows.append((n, d, parts))
+        L.append("leave-one-out (each note rebuilt from the others; distance as sound_compare, lower is closer; "
+                 "about 5-10 is close, 20+ means that region needs its own recording):")
+        L.append("  " + ', '.join(f"{_note_name(n['midi'])} {d:.1f}" for n, d, _ in rows) +
+                 f"  | mean {np.mean([d for _, d, _ in rows]):.1f}")
+    L.append(f"use: instrument={{'type': 'mimic', 'profile': '{name}', 'params': {{}}, 'tail': 1.0}} "
+             f"(instrument_help(type='mimic') for params)")
+    return '\n'.join(L)
+
+
+def _audio_note(ys, measured, n):
+    for (y, midi, v), m in zip(ys, measured):
+        if m is n or (abs(m['midi'] - n['midi']) < 0.01 and m['vel'] == n['vel']):
+            env = np.sqrt(np.convolve(y ** 2, np.ones(220) / 220, 'same'))
+            on = int(np.argmax(env > 0.02 * env.max()))
+            return y[max(0, on - 220):]
+    return ys[0][0]

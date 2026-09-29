@@ -445,15 +445,21 @@ def _voice_root(project):
 
 @op()
 def voices_list(project: str = None) -> str:
-    """List voice modules (code instruments kept as Python files): the song's own (<project>/voices/), those on
-    $ISMAIL_VOICES, and the built-ins. Use one as {"type": "code", "voice": "<name>"} or its preset; voice_help(name)
+    """List voice modules (code instruments kept as Python files) and mimic profiles (instruments measured from
+    recordings): the song's own (<project>/voices/), those on $ISMAIL_VOICES, and the built-ins. Use one as {"type": "code", "voice": "<name>"} or its preset; voice_help(name)
     shows its velocity mapping, functions and parameters."""
     from . import voices
     rows = voices.available(_voice_root(project))
-    if not rows:
+    prof = voices.mimic_profiles(_voice_root(project))
+    if not rows and not prof:
         return '(no voices)'
-    return '\n'.join(f"{n:<16} {o:<9} {s}" for n, o, s in rows) + \
-        "\nuse: instrument={'type': 'code', 'voice': '<name>', 'fn': 'voice', 'params': {}, 'tail': <seconds>}"
+    L = [f"{n:<16} {o:<9} {s}" for n, o, s in rows]
+    L.append("use: instrument={'type': 'code', 'voice': '<name>', 'fn': 'voice', 'params': {}, 'tail': <seconds>}")
+    if prof:
+        L += [''] + [f"{n:<16} {o:<9} {s}" for n, o, s in prof]
+        L.append("use: instrument={'type': 'mimic', 'profile': '<name>', 'params': {}, 'tail': <seconds>} "
+                 "(instrument_help(type='mimic') lists the params)")
+    return '\n'.join(L)
 
 
 @op()
@@ -474,7 +480,7 @@ def voice_help(project: str = None, name: str = 'grand_piano') -> str:
 
 @op()
 def instrument_help(project: str = None, type: str = 'synth') -> str:
-    """Full parameter reference (with defaults) for an instrument type: synth, sampler, kit, code, kick, snare, hat, clap, tom, noise_hit."""
+    """Full parameter reference (with defaults) for an instrument type: synth, sampler, kit, code, mimic, kick, snare, hat, clap, tom, noise_hit."""
     if type == 'synth':
         return ("synth params (defaults):\n" + json.dumps(inst_mod.SYNTH_DEFAULT, indent=1) +
                 "\nosc params (defaults):\n" + json.dumps(inst_mod.OSC_DEFAULT, indent=1) +
@@ -499,6 +505,15 @@ def instrument_help(project: str = None, type: str = 'synth') -> str:
                 '{"type":"code","code":"def voice(freq, t, vel, gate, sr):\\n    return np.sin(2*np.pi*freq*t)*np.exp(-t*4)",'
                 ' "tail":0.3}. t is a time array (s) covering gate+tail, vel 0..1; return mono or (2,n); np and dsp '
                 'are available inline. Prefer a voice module for anything you will reuse.')
+    if type == 'mimic':
+        from . import mimic
+        return ('mimic: {"type":"mimic","profile":"<name>","params":{},"tail":1.0} plays an instrument measured from '
+                'recordings (mimic_measure makes <project>/voices/<name>.mimic.json; voices_list shows the profiles). '
+                'Partials with their own envelopes read a body curve at their current frequency, plus measured noise; '
+                'unmeasured pitches blend the two nearest measured notes. params (defaults): ' +
+                json.dumps(mimic.DEFAULT_PARAMS) + '. Velocity 0..1 against the measured velocity: louder and brighter '
+                '(vel_bright dB per octave of partial number). For sustained kinds the note length is the bow/breath '
+                'length; decaying kinds ring and are damped `damp` s after the note ends (null = let ring).')
     if type in inst_mod.DRUM_DEFAULTS:
         return f"{type} params (defaults): " + json.dumps(inst_mod.DRUM_DEFAULTS[type]) + \
             " (times in s, freqs in Hz, drive in dB). A drum synth ignores note pitch (any pitch triggers it; put" \

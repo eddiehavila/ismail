@@ -50,7 +50,7 @@ SAMPLER_DEFAULT = {"type": "sampler", "sound": None, "root": "C4", "start": 0.0,
                    "transpose": 0.0, "amp_env": {"a": 0.001, "d": 0.0, "s": 1.0, "r": 0.02},
                    "filter": None, "velocity_sens": 0.5, "gain_db": 0.0, "pan": 0.0}
 
-INSTRUMENT_TYPES = ('synth', 'sampler', 'kit', 'code') + tuple(DRUM_DEFAULTS)
+INSTRUMENT_TYPES = ('synth', 'sampler', 'kit', 'code', 'mimic') + tuple(DRUM_DEFAULTS)
 # output calibration: one synth voice peaks near -9 dBFS, one drum hit near -6 dBFS at full velocity, so a few
 # tracks at 0 dB faders sum without clipping
 SYNTH_GAIN = 0.35
@@ -112,6 +112,18 @@ def normalize(inst):
             raise InstrumentError("code instrument needs 'voice': '<name>' (a voice module, see voices_list) or 'code' "
                                   "defining voice(freq, t, vel, gate, sr) -> array")
         return dict({"tail": 0.3, "gain_db": 0.0, "pan": 0.0, "fn": "voice", "params": {}}, **inst)
+    if t == 'mimic':
+        from . import mimic
+        if not inst.get('profile'):
+            raise InstrumentError("mimic needs 'profile': '<name>' (a <name>.mimic.json made by mimic_measure; "
+                                  "voices_list shows the ones available)")
+        bad = set(inst.get('params') or {}) - set(mimic.DEFAULT_PARAMS)
+        if bad:
+            raise InstrumentError(f"unknown mimic params {sorted(bad)}; valid: {sorted(mimic.DEFAULT_PARAMS)}")
+        unknown = set(inst) - {'type', 'profile', 'params', 'tail', 'gain_db', 'pan', 'fx'}
+        if unknown:
+            raise InstrumentError(f"unknown mimic keys {sorted(unknown)}; valid: profile, params, tail, gain_db, pan")
+        return dict({"tail": 1.0, "gain_db": 0.0, "pan": 0.0, "params": {}}, **inst)
     raise InstrumentError(f"unknown instrument type {t!r}; use one of {', '.join(INSTRUMENT_TYPES)}")
 
 
@@ -485,6 +497,23 @@ def render_code(p, notes, total_n, sr, bpm=120.0, root=None):
     return out
 
 
+def render_mimic(p, notes, total_n, sr, root=None):
+    from . import mimic
+    try:
+        prof = mimic.load_profile(p['profile'], root)
+    except ValueError as e:
+        raise InstrumentError(str(e))
+    out = np.zeros((2, total_n))
+    for st, m, d, v in notes:
+        s0 = int(round(st * sr))
+        n = min(int((d + p['tail']) * sr), total_n - s0)
+        if n <= 0:
+            continue
+        y = mimic.render(prof, midi_to_hz(m), np.arange(n) / sr, v / 127, d, sr, **(p.get('params') or {}))
+        out[:, s0:s0 + y.shape[1]] += y[:, :n]
+    return out
+
+
 # ------------------------------------------------------------------ entry point
 
 def render_instrument(inst, notes, total_n, auto=None, bpm=120.0, sr=SR, root=None):
@@ -498,6 +527,8 @@ def render_instrument(inst, notes, total_n, auto=None, bpm=120.0, sr=SR, root=No
         out = render_sampler(inst, notes, total_n, auto, sr)
     elif t == 'code':
         out = render_code(inst, notes, total_n, sr, bpm, root)
+    elif t == 'mimic':
+        out = render_mimic(inst, notes, total_n, sr, root)
     elif t == 'kit':
         out = np.zeros((2, total_n))
         by = {}

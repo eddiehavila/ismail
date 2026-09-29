@@ -218,3 +218,30 @@ def test_sound_speak_on_this_os():
         assert "sound 'hi'" in out and 'hi' in OPS['sound_list'](p)
     finally:
         shutil.rmtree(d, ignore_errors=True)
+
+
+def test_mimic_measures_and_rebuilds_a_known_tone():
+    from ismail import mimic, instruments
+    sr = 44100
+    t = np.arange(int(2.5 * sr)) / sr
+    rng = np.random.default_rng(0)
+    notes = []
+    for midi in (57, 64, 69, 76):
+        f = 440.0 * 2 ** ((midi - 69) / 12)
+        y = sum(a * np.sin(2 * np.pi * k * f * t) for k, a in ((1, 0.3), (2, 0.15), (3, 0.08)) if k * f < 16000)
+        y = y + 0.002 * rng.standard_normal(len(t))
+        y[:441] *= np.linspace(0, 1, 441)
+        y[-4410:] *= np.linspace(1, 0, 4410)
+        notes.append((y, midi, 0.7))
+    prof = mimic.measure(notes, name='test')
+    assert prof['kind'] == 'sustained'
+    n = prof['notes'][2]
+    assert abs(n['level'][0] - 20 * np.log10(0.3)) < 1.0 and abs(n['level'][1] - 20 * np.log10(0.15)) < 1.0
+    z = mimic.render(prof, 440.0, t, 0.7, 2.0, variation=0.0, width=0.0)[0]
+    back = mimic.measure_note(z, 69, kind='sustained')
+    # partial balance survives the round trip (absolute level is normalized by the profile)
+    assert abs((back['level'][0] - back['level'][1]) - (n['level'][0] - n['level'][1])) < 1.5
+    inst = instruments.normalize({'type': 'mimic', 'profile': 'x'})
+    assert inst['tail'] == 1.0
+    with pytest.raises(instruments.InstrumentError):
+        instruments.normalize({'type': 'mimic', 'profile': 'x', 'params': {'nope': 1}})

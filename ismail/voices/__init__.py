@@ -95,11 +95,14 @@ def call(f, freq, t, vel, gate, sr, bpm, params):
 def fingerprint(inst, root=None):
     """Hash of every voice file (and its sibling data files) an instrument uses, for the render cache."""
     names = set()
+    profiles = set()
 
     def walk(i):
         if isinstance(i, dict):
             if i.get('type') == 'code' and i.get('voice'):
                 names.add(i['voice'])
+            if i.get('type') == 'mimic' and i.get('profile'):
+                profiles.add(i['profile'])
             for v in (i.get('map') or {}).values():
                 walk(v)
     walk(inst)
@@ -117,7 +120,16 @@ def fingerprint(inst, root=None):
                 if os.path.isfile(fp):
                     with open(fp, 'rb') as fh:
                         h.update(fh.read())
-    return h.hexdigest()[:12] if names else ''
+    for n in sorted(profiles):
+        for _, d in search_path(root):
+            fp = os.path.join(d, n + '.mimic.json')
+            if os.path.isfile(fp):
+                with open(fp, 'rb') as fh:
+                    h.update(fh.read())
+                break
+        else:
+            h.update(n.encode())
+    return h.hexdigest()[:12] if names or profiles else ''
 
 
 def info(name, root=None):
@@ -144,3 +156,31 @@ def available(root=None):
             except Exception as e:  # a broken song voice should not hide the others
                 out.append((n, origin, f"(fails to load: {e})"))
     return out
+
+
+def mimic_profiles(root=None):
+    """[(name, origin, summary)] for every <name>.mimic.json on the search path (song first)."""
+    import json
+    seen, out = set(), []
+    for origin, d in search_path(root):
+        if not os.path.isdir(d):
+            continue
+        for f in sorted(os.listdir(d)):
+            if not f.endswith('.mimic.json') or f[:-11] in seen:
+                continue
+            seen.add(f[:-11])
+            try:
+                p = json.load(open(os.path.join(d, f), encoding='utf-8'))
+                ms = [n['midi'] for n in p['notes']]
+                lo, hi = (_note_name(min(ms)), _note_name(max(ms)))
+                out.append((f[:-11], origin, f"mimic, {p['kind']}, {len(ms)} notes measured {lo}-{hi}"
+                                            + (f", from {p['source']}" if p.get('source') else '')))
+            except Exception as e:
+                out.append((f[:-11], origin, f"(unreadable mimic profile: {e})"))
+    return out
+
+
+def _note_name(m):
+    names = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
+    m = int(round(m))
+    return f"{names[m % 12]}{m // 12 - 1}"
