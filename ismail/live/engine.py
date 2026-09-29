@@ -33,10 +33,10 @@ from .timeline import EPS, QueueError, Timeline, fmt_bar
 
 BLOCK = 512
 AHEAD_S = 0.3           # finished audio kept ahead of the device
-HORIZON_S = 4.0         # how far ahead events are sent to render
+HORIZON_S = 8.0         # how far ahead events are sent to render (slow voices need the head start)
 AIR_S = 120.0           # output history kept for live_listen
 MARGIN_S = 0.5          # render estimate safety margin (quantized launches make this inaudible)
-DEFAULT_EVENT_S = 0.3   # per-event render time before a track has measured one
+DEFAULT_RATE = 0.5      # render seconds per second of audio, before a track has measured its own
 DUCK_LOOKBACK = 4 * SR  # onsets this far back still shape a duck's release
 
 
@@ -49,6 +49,16 @@ class Seg:
 
     def __init__(self, start, y, track, cid, on):
         self.start, self.y, self.track, self.cid, self.on, self.dead = start, y, track, cid, on, False
+
+
+def _tail_s(inst):
+    """Seconds a note rings after its gate, for render estimates."""
+    t = inst.get('type')
+    if t in ('code', 'mimic'):
+        return float(inst.get('tail', 1.0))
+    if t in ('synth', 'sampler'):
+        return float((inst.get('amp_env') or {}).get('r', 0.3))
+    return 0.5
 
 
 def _mono_groups(notes, inst):
@@ -80,6 +90,9 @@ class Engine:
         self.swaps = []                 # heap of (sample, seq, fn): chain changes due at a bar line
         self.meta = {}                  # clip id -> {'groups', 'placed'}
         self.cache = {}                 # (clip id, event) -> array | 'pending' | 'error'
+        self.renders = {}               # content key -> array | 'pending': identical notes render once
+        self.rwait = {}                 # content key -> [(clip id, event)] waiting for that render
+        self._rbytes = 0
         self.waiting = collections.defaultdict(list)    # (clip id, event) -> [onset beat]
         self.jobs = {}                  # job id -> (clip id, event, track, submitted time)
         self.pending = []               # heap of (start, seq, Seg)
@@ -100,6 +113,7 @@ class Engine:
         self.running = True
         self.stopped = threading.Event()
         self.n_workers = int(workers)
+        self.ready = {}                 # worker id -> seconds it took to warm itself
         self._jid = 0
         self._procs = []
         self._fifo = collections.deque()
@@ -110,10 +124,11 @@ class Engine:
             import multiprocessing as mp
             ctx = mp.get_context('spawn')
             self._results = ctx.Queue()
-            self._tasks = []
-            for _ in range(self.n_workers):
+            self._shared = ctx.Queue()          # render jobs: whichever worker is free takes the next one
+            self._tasks = []                    # per-worker queues, for warm-ups every worker must run
+            for wi in range(self.n_workers):
                 q = ctx.Queue()
-                p = ctx.Process(target=worker.main, args=(q, self._results, self.root), daemon=True)
+                p = ctx.Process(target=worker.main, args=(q, self._shared, self._results, self.root, wi), daemon=True)
                 p.start()
                 self._tasks.append(q)
                 self._procs.append({'p': p, 'out': 0})
@@ -134,7 +149,9 @@ class Engine:
         inst = tr['inst']
         self._jid += 1
         jid = self._jid
-        self.jobs[jid] = {'key': key, 'track': track, 'warm': warm, 'wi': None, 'gen': tr['gen']}
+        audio_s = max(s + d for s, _, d, _ in notes_s) + _tail_s(inst)
+        self.jobs[jid] = {'key': key, 'track': track, 'warm': warm, 'wi': None, 'gen': tr['gen'], 'audio_s': audio_s,
+                          'est_s': (tr['est'] or DEFAULT_RATE) * audio_s}
         if self.n_workers == 0:
             t0 = time.time()
             try:
@@ -144,26 +161,28 @@ class Engine:
                 y, err = None, f"{type(e).__name__}: {e}"
             self._result(jid, None if err else y, time.time() - t0, err)
             return
-        wi = min(range(self.n_workers), key=lambda i: self._procs[i]['out'])
-        self._procs[wi]['out'] += 1
-        self.jobs[jid]['wi'] = wi
-        self._tasks[wi].put((jid, inst, notes_s, lead_s, self.bpm))
+        self._shared.put((jid, inst, notes_s, lead_s, self.bpm))
 
     def _warm(self, track):
-        """Render one throwaway note on every worker so first-use compilation happens off the air."""
-        inst = self.tracks[track]['inst']
+        """A short throwaway note on every worker (first-use compilation happens off the air), then one 1 s note
+        on whichever worker is free to measure what a second of this instrument costs to render."""
+        tr = self.tracks[track]
+        inst = tr['inst']
         pitch = int(next(iter(inst['map']))) if inst.get('type') == 'kit' else 60
-        n = max(1, self.n_workers)
-        self.tracks[track]['warming'] += 2 * n
-        for i in [k for k in range(n) for _ in range(2)]:
-            if self.n_workers == 0:
-                self._submit(('warm', track), track, [(0.0, pitch, 0.25, 100)], 0.0, warm=True)
-            else:
-                self._jid += 1
-                self.jobs[self._jid] = {'key': ('warm', track), 'track': track, 'warm': True, 'wi': i,
-                                        'gen': self.tracks[track]['gen']}
-                self._procs[i]['out'] += 1
-                self._tasks[i].put((self._jid, inst, [(0.0, pitch, 0.25, 100)], 0.0, self.bpm))
+        short, full = [(0.0, pitch, 0.1, 100)], [(0.0, pitch, 1.0, 100)]
+        guess = tr['est'] or DEFAULT_RATE
+        if self.n_workers == 0:
+            tr['warming'] += 1
+            self._submit(('warm', track), track, full, 0.0, warm=True)
+            return
+        tr['warming'] += self.n_workers + 1
+        for i in range(self.n_workers):
+            self._jid += 1
+            self.jobs[self._jid] = {'key': ('warm', track), 'track': track, 'warm': True, 'wi': i, 'gen': tr['gen'],
+                                    'audio_s': 0.1 + _tail_s(inst), 'est_s': guess * (0.1 + _tail_s(inst))}
+            self._procs[i]['out'] += 1
+            self._tasks[i].put((self._jid, inst, short, 0.0, self.bpm))
+        self._submit(('warm', track), track, full, 0.0, warm='measure')
 
     def _result(self, jid, y, secs, err):
         with self.lock:
@@ -175,39 +194,63 @@ class Engine:
                 self._procs[job['wi']]['out'] -= 1
             tr = self.tracks.get(track)
             if tr is None or job['gen'] != tr['gen']:      # rendered with an instrument the track no longer has
+                if not warm:
+                    self.renders.pop(key, None)
+                    self.rwait.pop(key, None)
                 return
             if warm:
                 if tr:
                     tr['warming'] = max(0, tr['warming'] - 1)
                     tr['warm_s'] = round(secs, 2)
-                    if tr['est'] is None or tr['warming'] < max(1, self.n_workers):
-                        tr['est'] = secs              # the later warm-ups run compiled: the steady cost
+                    if warm == 'measure' or self.n_workers == 0:
+                        tr['est'] = secs / job['audio_s']
                     if err:
                         tr['errors'].append(f"warm-up: {err}")
                 return
             if tr is not None:
-                tr['est'] = secs if tr['est'] is None else 0.7 * tr['est'] + 0.3 * secs
-            if key not in self.cache:          # clip was replaced or its instrument changed meanwhile
-                self.waiting.pop(key, None)
-                return
+                r = secs / max(job['audio_s'], 0.05)
+                tr['est'] = r if tr['est'] is None else 0.7 * tr['est'] + 0.3 * r
+            users = self.rwait.pop(key, [])
             if err:
-                self.cache[key] = 'error'
+                self.renders.pop(key, None)
                 self.stats['rejected'] += 1
                 if tr is not None:
                     tr['errors'] = (tr['errors'] + [err])[-3:]
-                self.waiting.pop(key, None)
+                for k in users:
+                    if k in self.cache:
+                        self.cache[k] = 'error'
+                    self.waiting.pop(k, None)
                 return
-            self.cache[key] = y
-            for on in self.waiting.pop(key, []):
-                self._place(key[0], track, on, y)
+            self._keep_render(key, y)
+            for k in users:
+                if k not in self.cache:        # clip was replaced or its instrument changed meanwhile
+                    self.waiting.pop(k, None)
+                    continue
+                self.cache[k] = y
+                for on in self.waiting.pop(k, []):
+                    self._place(k[0], track, on, y)
+
+    def _keep_render(self, key, y, cap=600 * 2 ** 20):
+        self.renders[key] = y
+        self._rbytes += y.nbytes
+        for k in list(self.renders):
+            if self._rbytes <= cap:
+                break
+            v = self.renders[k]
+            if isinstance(v, np.ndarray) and k != key:
+                self._rbytes -= v.nbytes
+                del self.renders[k]
 
     def _collect(self):
         while self.running:
             try:
-                jid, y, secs, err = self._results.get(timeout=0.2)
+                msg = self._results.get(timeout=0.2)
             except Exception:
                 continue
-            self._result(jid, y, secs, err)
+            if msg[0] == 'ready':
+                self.ready[msg[1]] = round(msg[2], 1)
+                continue
+            self._result(*msg)
 
     def _place(self, cid, track, on, y):
         c = self.tl.clips.get(cid)
@@ -256,7 +299,22 @@ class Engine:
                         t0 = c.notes[g[0]][0]
                         notes_s = [((c.notes[j][0] - t0) * self.spb, c.notes[j][1], c.notes[j][2] * self.spb,
                                     c.notes[j][3]) for j in g]
-                        self._submit(key, c.track, notes_s, (t0 % self.bpb) * self.spb)
+                        tr = self.tracks[c.track]
+                        # code and mimic voices do not depend on where the note sits in the bar
+                        lead = 0.0 if tr['inst']['type'] in ('code', 'mimic') else (t0 % self.bpb) * self.spb
+                        ck = (c.track, tr['gen'], round(lead, 6),
+                              tuple((round(a, 6), m, round(d, 6), v) for a, m, d, v in notes_s))
+                        r = self.renders.get(ck)
+                        if isinstance(r, np.ndarray):
+                            self.cache[key] = r
+                            for o in self.waiting.pop(key, []):
+                                self._place(c.id, c.track, o, r)
+                        elif r == 'pending':
+                            self.rwait[ck].append(key)
+                        else:
+                            self.renders[ck] = 'pending'
+                            self.rwait[ck] = [key]
+                            self._submit(ck, c.track, notes_s, lead)
 
     def _schedule_loop(self):
         while self.running:
@@ -409,6 +467,13 @@ class Engine:
                 self._pull(want)
                 done += want
             time.sleep(0.005)
+
+    def wait_ready(self, timeout=120.0):
+        """Block until every render worker has warmed itself (or timeout); returns the seconds waited."""
+        t0 = time.time()
+        while self.n_workers and len(self.ready) < self.n_workers and time.time() - t0 < timeout:
+            time.sleep(0.1)
+        return time.time() - t0
 
     def start(self):
         threads = [self._schedule_loop, self._mix_loop]
@@ -632,8 +697,8 @@ class Engine:
                 tr['warming'] = 0
                 if old is not None:
                     # the new sound takes over at `at`: drop events from there on and render them again
-                    onsets = sorted({c.notes[g[0]][0] for c in self.tl.track_clips(track) for g in _mono_groups(c.notes, inst)})
-                    beat, _ = self.tl.resolve_at(at, now, now + self._lead_beats(track, onsets[:8]))
+                    evs = sorted(e for c in self.tl.track_clips(track) for e in self._events_of(c.notes, inst))
+                    beat, _ = self.tl.resolve_at(at, now, now + self._lead_beats(track, evs[:8]))
                     for s in self.active + [p[2] for p in self.pending]:
                         if s.track == track and s.on >= beat - EPS:
                             s.dead = True
@@ -758,19 +823,30 @@ class Engine:
         start = 'now' if at in (None, 'now') else fmt_bar(self.beat(s0), self.bpb)
         return f"{target} fx[{index}] {f['type']} ({start}): " + '; '.join(msg)
 
-    def _lead_beats(self, track, onsets, extra=0):
-        """Beats a new clip on `track` must start after now so that each event (sorted onsets, in beats from the
-        clip start) is rendered before it sounds; events render in onset order across the workers."""
+    def _event_s(self, track, dur_beats):
+        """Estimated render seconds for one event of `dur_beats` on `track` (cost grows with the audio length)."""
         tr = self.tracks[track]
-        per = tr['est'] if tr['est'] is not None else DEFAULT_EVENT_S
+        return (tr['est'] if tr['est'] is not None else DEFAULT_RATE) * (dur_beats * self.spb + _tail_s(tr['inst']))
+
+    def _lead_beats(self, track, events, extra_s=0.0):
+        """Beats a new clip on `track` must start after now so that each event ((onset, dur) in beats from the clip
+        start, sorted) is rendered before it sounds; events render in onset order across the workers, behind the
+        render seconds already queued (extra_s: earlier clips of the same batch)."""
+        tr = self.tracks[track]
         w = max(1, self.n_workers)
-        backlog = sum(1 for j in self.jobs.values() if not j['warm']) + extra
-        warm = (tr['warm_s'] or 2.0) if tr['warming'] else 0.0
-        need = 0.0
-        for i, on in enumerate(onsets[:64]):
-            done_s = MARGIN_S + warm + (backlog + i + 1) * per / w
+        queued = sum(j['est_s'] for j in self.jobs.values()) + extra_s     # warm-ups occupy workers too
+        warm = 1.0 if tr['warming'] else 0.0                                # compile time not in est_s
+        need, acc = 0.0, 0.0
+        for on, d in events[:64]:
+            acc += self._event_s(track, d)
+            done_s = MARGIN_S + warm + (queued + acc) / w
             need = max(need, done_s / self.spb - on)
         return need
+
+    def _events_of(self, notes, inst):
+        """(onset, duration) in beats of each render event (a note, or a mono phrase)."""
+        return [(notes[g[0]][0], max(notes[j][0] + notes[j][2] for j in g) - notes[g[0]][0])
+                for g in _mono_groups(sorted(notes), inst)]
 
     def _parse_clip(self, i, it):
         if not isinstance(it, dict) or 'track' not in it:
@@ -829,7 +905,7 @@ class Engine:
             now = self.beat(self.pos)
             tl = copy.deepcopy(self.tl)
             claims, lines, added = [], [], []
-            extra = 0                        # events of earlier clips in this batch, rendered alongside
+            extra = 0.0                      # render seconds of earlier clips in this batch
             batch_ids = {}                   # batch index -> clip id, for at='after:#<index>'
             for i, (track, notes, length, loop, at) in enumerate(parsed):
                 if at.startswith('after:#'):
@@ -842,9 +918,9 @@ class Engine:
                                         f"(stops have no end). Nothing was queued.")
                     at = 'after:' + batch_ids[k]
                 inst = self.tracks[track]['inst']
-                onsets = [notes[g[0]][0] for g in _mono_groups(sorted(notes), inst)] if notes else []
-                ready = now + self._lead_beats(track, onsets, extra)
-                extra += len(onsets)
+                evs = self._events_of(notes, inst) if notes else []
+                ready = now + self._lead_beats(track, evs, extra)
+                extra += sum(self._event_s(track, d) for _, d in evs)
                 try:
                     beat, note = tl.resolve_at(at, now, ready if notes else now)
                 except QueueError as e:
@@ -936,7 +1012,7 @@ class Engine:
                 stops = self.tl.stops.get(name)
                 if stops:
                     seg += f", stop at {fmt_bar(stops[0], self.bpb)}"
-                est = f"{t['est']:.2f} s/event" if t['est'] is not None else "no renders yet"
+                est = f"renders {1 / max(t['est'], 1e-3):.0f}x realtime" if t['est'] is not None else "no renders yet"
                 lines.append(f"  {name:<10} {what:<22} vol {t['volume_db']:+g} pan {t['pan']:+g} "
                              f"level {lvl:6.1f} dBFS | {seg} | {est}" + (" | WARMING" if t['warming'] else ''))
                 ch = t['path'].chain
@@ -965,6 +1041,8 @@ class Engine:
                 lines.append("pending fx changes at: " + ', '.join(fmt_bar(self.beat(s[0]), self.bpb) for s in sorted(self.swaps)))
             lines.append(self._runway())
             backlog = sum(1 for j in self.jobs.values() if not j['warm'])
+            if self.n_workers and len(self.ready) < self.n_workers:
+                lines.append(f"workers warming up: {len(self.ready)}/{self.n_workers} ready")
             lines.append(f"render: {self.n_workers or 'inline'} workers, backlog {backlog}, late events "
                          f"{self.stats['late']}" + (f" (last: {self.last_late})" if self.last_late else '') +
                          f", rejected {self.stats['rejected']}, underruns {self.stats['underruns']}" +
@@ -1128,10 +1206,13 @@ def main():
     ap.add_argument('--port', type=int, default=0)
     a = ap.parse_args()
     import scipy.signal  # noqa: F401  (seconds to import: do it before audio starts, never mid-set)
+    from .. import mimic  # noqa: F401  (normalize() imports it for mimic tracks)
     warm_effects()
     eng = Engine(a.project, a.bpm, a.bpb, a.workers, a.device)
     httpd = serve(eng, a.port)
     eng.start()
+    waited = eng.wait_ready()           # engine.json appears (live_start returns) once the workers can render
+    print(f"workers ready after {waited:.1f} s: {eng.ready}", flush=True)
     d = os.path.join(eng.root, 'live')
     os.makedirs(d, exist_ok=True)
     info = os.path.join(d, 'engine.json')

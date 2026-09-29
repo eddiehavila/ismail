@@ -48,9 +48,8 @@ sweep, drop, ending; 17 clips in one batch).
 
 ## What is and is not live yet
 
-Live: every instrument type except mimic profiles in practice (they render 3 to 4x slower than real time per
-voice; the other session is finishing them), every effect (the same processors as offline renders, block for
-block), send buses, sidechain/duck/vocoder from live tracks, ramps on every automatable fx param.
+Live: every instrument type including mimic profiles, every effect (the same processors as offline renders,
+block for block), send buses, sidechain/duck/vocoder from live tracks, ramps on every automatable fx param.
 Not yet: master-bus effects (the safety chain is the master), vocoder modulators from sound-bank sounds,
 instrument-param automation (use fx params), tempo changes inside a run.
 
@@ -61,5 +60,11 @@ instrument-param automation (use fx params), tempo changes inside a run.
 - A chain may need at most 4096 samples of lookahead along track + bus (a hall is 1024, a limiter its
   lookahead, oversampled distortion 20). The error says which effect to drop.
 - A replaced chain rings out (its reverb tail keeps sounding) for up to 12 s.
-- Render cost per note (one core): grand_piano ~0.04 s, growl ~0.1 s, pad synth ~0.2 s, drums ~0.02 s. The
-  first launch after adding a slow voice may move a bar or two later; later launches reuse the rendered notes.
+- `live_status` shows each track's render speed ("renders 3x realtime"). Drums and code voices run 20 to 50x,
+  synths 4 to 7x, mimic 1 to 3x (low notes are the slowest: more harmonics). A clip's first pass waits for its
+  renders, so the reply moves slow first launches a bar or two later; every later pass reuses them, and
+  identical notes (a repeated chord) render once.
+- `live_start` takes ~20 to 30 s: the render workers warm up every instrument kind and every mimic profile in
+  the folder before it returns, so the first clips land on time.
+- Mimic profiles come out quiet next to synths and code voices (about 9 dB): check their level in
+  `live_status` and raise `volume_db` before judging the balance.

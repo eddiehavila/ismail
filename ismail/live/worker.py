@@ -70,11 +70,42 @@ def check(y):
     return None
 
 
-def main(tasks, results, root):
+def self_warm(root):
+    """Pay first-use costs before taking jobs: one note of each built-in instrument kind and of every mimic
+    profile the project can see (imports, numba loads, profile parsing)."""
+    import glob
+    from .. import mimic, voices
+    specs = [{'type': 'synth'}, {'type': 'kick'}, {'type': 'snare'}, {'type': 'hat'}, {'type': 'clap'},
+             {'type': 'code', 'voice': 'grand_piano'}]
+    for _, d in voices.search_path(root):
+        for f in sorted(glob.glob(os.path.join(d, '*.mimic.json'))):
+            specs.append({'type': 'mimic', 'profile': os.path.basename(f)[:-len('.mimic.json')]})
+    done = []
+    for spec in specs:
+        try:
+            render_event(instruments.normalize(spec), [(0.0, 60, 0.1, 100)], 0.0, 120.0, root)
+            done.append(spec.get('profile') or spec.get('voice') or spec['type'])
+        except Exception:
+            pass
+    return done
+
+
+def main(own, shared, results, root, wid=0):
+    """own: jobs for this worker only (warm-ups, the stop signal); shared: render jobs any free worker takes."""
+    import queue
     bank = SoundBank(root)
     instruments.set_resolvers(bank.sound, bank.table)
+    t0 = time.time()
+    warmed = self_warm(root)
+    results.put(('ready', wid, time.time() - t0, warmed))
     while True:
-        job = tasks.get()
+        try:
+            job = own.get_nowait()
+        except queue.Empty:
+            try:
+                job = shared.get(timeout=0.05)
+            except queue.Empty:
+                continue
         if job is None:
             return
         jid, inst, notes, lead_s, bpm = job

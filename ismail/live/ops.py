@@ -47,13 +47,15 @@ def _alive(project):
 
 
 @op()
-def live_start(project: str, bpm: float, beats_per_bar: int = 4, device: str = 'default', workers: int = 2) -> str:
+def live_start(project: str, bpm: float, beats_per_bar: int = 4, device: str = 'default', workers: int = None) -> str:
     """Start the live engine for `project` (any folder; a project.json there lends its sound bank, song voices and
     'track:<name>' instruments). It plays from bar 1 immediately, silent until you queue clips, and keeps playing
     between your calls: clips loop until replaced. Tempo is fixed for the run (live_stop, then start again to change
     it). device: 'default' (speakers), a device name/index, or 'none' (no audio out; for testing and listen-only
-    analysis). Output always passes a limiter and loudness cap you cannot raise. Next: live_track, then live_queue."""
+    analysis). workers: render processes (default: cores - 4, from 2 to 4; more for many mimic voices). Output always passes a limiter and loudness cap you cannot raise. Next: live_track, then live_queue."""
     root = os.path.abspath(project)
+    if workers is None:
+        workers = min(4, max(2, (os.cpu_count() or 4) - 4))
     if _alive(project):
         return "already running (live_stop first to change tempo or device)\n" + _call(project, 'status')
     os.makedirs(os.path.join(root, 'live'), exist_ok=True)
