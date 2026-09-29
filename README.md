@@ -159,10 +159,11 @@ A synth patch pretending to be a violin sounds like a 1990s game console playing
 
 - every harmonic's level and envelope (attack, sustain or two-stage decay, release), inharmonicity, and the beating between unison strings;
 - a body curve fixed in frequency (the resonances that color each note differently), separated from each note's source slope;
-- the noise between the harmonics and a short map of the attack (bow scrape, hammer knock), both calibrated by rebuilding the note and matching the recording;
-- vibrato cycle by cycle: rate, depth, how much each varies, and how it builds up.
+- the noise between the harmonics and a short map of the attack (bow scrape, hammer knock), both calibrated by rebuilding the note and matching the recording; attack timing from short windows, so a player easing into the string eases in;
+- vibrato cycle by cycle: rate, depth, how much each wanders over about a second, and how it builds up; the slow swells of a bowed or blown note;
+- the room the recordings were made in, from how every harmonic dies away after the bow stops.
 
-Then it plays any pitch: notes between measured ones blend their two neighbours, every harmonic reads the body at its current frequency (so vibrato moves the color the way a real instrument does), and each note varies a little. Optional: open strings ringing in sympathy, the body ringing, a room.
+Then it plays any pitch: notes between measured ones blend their two neighbours, every harmonic reads the body at its current frequency (so vibrato moves the color the way a real instrument does), unison strings start in phase and beat, and each note varies a little. Optional: open strings ringing in sympathy, the body ringing, noise skirts around the harmonics.
 
 ```bash
 python -m ismail -p song mimic_measure name=violin folder=samples/violin 'defaults={"strings": ["G3", "D4", "A4", "E5"]}'
@@ -171,7 +172,7 @@ python -m ismail -p song track_add name=fiddle 'instrument={"type": "mimic", "pr
 
 `folder` holds one note per file named by pitch (`A4.wav`, `Fs3.mp3`); `notes=[[source, pitch], ...]` takes sound-bank names, paths or windows of a longer file. The profile is written to `<project>/voices/violin.mimic.json` and found like a voice (`voices_list` shows it). `mimic_measure` rebuilds every measured note from the others and reports how close each lands, which is the honest estimate for pitches you did not record, and it uses that test to choose how sharp the body curve can be for your data. `instrument_help(type='mimic')` lists the playing parameters.
 
-Tested leave-one-out on violin, cello and double bass recordings, a mimic note rebuilt without ever hearing that note lands as close to the real one as a real neighbouring note repitched, or closer (violin 11.2 vs 14.6, cello 12.3 vs 13.0, double bass 12.1 vs 12.8 on `sound_compare`'s distance), and about three times closer than a hand-set sprite patch. Struck and plucked instruments (piano) are harder and still behind a sampler; the `grand_piano` voice remains the better piano. A few notes at one dynamic teach one dynamic: record soft and loud notes if velocity matters.
+Tested leave-one-out on violin, cello and double bass recordings, a mimic note rebuilt without ever hearing that note lands as close to the real one as a real neighbouring note repitched, or closer (violin 11.2 vs 14.6, cello 12.5 vs 13.0, double bass 10.9 vs 12.8 on `sound_compare`'s distance), and about three times closer than a hand-set sprite patch. The defaults were then tuned by ear over four rounds of blind A/B "eye exams" against the recordings (real note vs versions that each change one named thing); the current default won every note of the last round. Struck and plucked instruments (piano) are harder: with 12 notes across 7 octaves a piano's note-to-note colour can't be predicted and mimic stays behind a sampler there (16.3 vs 11.6); the `grand_piano` voice remains the better piano. A few notes at one dynamic teach one dynamic: record soft and loud notes if velocity matters, and more notes than you think for instruments whose colour changes from note to note.
 
 ## Hearing: audio as text
 
