@@ -183,3 +183,23 @@ def test_song_voice_overrides_builtin_and_invalidates_cache():
             api.track_add(p, 'bad', instrument={"type": "code", "voice": "nope"})
     finally:
         shutil.rmtree(d, ignore_errors=True)
+
+
+def test_gate_closes_on_rests():
+    from ismail import fx as fxmod
+
+    class Ctx:
+        sr, bpm = 48000, 120
+
+        def __init__(self, off):
+            self.offset_samples = off
+
+        def param(self, i, name, default):
+            return default
+
+    g = fxmod.normalize({"type": "gate", "pattern": "x.x.", "step": 0.25})
+    st = 6000                       # one 16th at 120 BPM
+    for off in (0, -48000 * 3):     # song start, and a window starting mid-song
+        y = fxmod.apply_fx(np.ones((2, 48000)), g, Ctx(off), 0)[0]
+        lv = [y[i * st + st // 2:(i + 1) * st].mean() for i in range(8)]
+        assert all(lv[i] > 0.7 for i in (0, 2, 4, 6)) and all(lv[i] < 0.1 for i in (1, 3, 5, 7))

@@ -50,6 +50,7 @@ Registers must not collide: at most one part per octave band doing sustained wor
 - `references/listening.md`: which analysis tool answers which question, how to read the text views (digits, rolls, zoom codes), and the Listening Report checks. Read before the first listen.
 - `references/recreate.md`: matching a reference recording: grid and alignment, separation, consensus transcription, comparisons, what the scores mean, and the traps that make a draft score better while sounding worse. Read whenever a reference track is involved.
 - `references/music-video.md`: music videos with `ismail.video`: the per-song `video/` folder, the CLI, the shot kit (units, floors, posing, mirrors, GPU budget), the cut list and note-driven glitches, contact-sheet review and the creative rules. Read before planning any video.
+- `references/LOCAL.md`, if it exists: an index of the user's private references kept on this machine only (never committed). Read it at the start of a task; it says which private file covers which kind of song.
 
 ## Non-negotiables
 

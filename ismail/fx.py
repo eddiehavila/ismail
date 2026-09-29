@@ -249,7 +249,7 @@ def apply_fx(x, fx, ctx, idx):
             for st, d, v in steps:
                 a = int(ctx.offset_samples + (k * total + st) * spb)
                 b = int(a + d * spb)
-                if a < n:
+                if a < n and b > 0:     # b <= 0 would slice from the end of tgt
                     tgt[max(a, 0):min(b, n)] = v / 127
         env = dsp.env_follow(tgt, fx['attack_ms'] / 1000, fx['release_ms'] / 1000, sr)
         depth = P('depth')
