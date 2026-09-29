@@ -1,0 +1,156 @@
+"""live_* ops: the agent's controls for the live engine (registered into api.OPS on import).
+
+Each op talks to the engine process of a project over local HTTP; live_start launches it."""
+import json
+import os
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.request
+
+from ..api import OpError, op
+from .. import analysis as A
+
+VIEWS = {'bars': A.bar_table, 'envelope': A.envelope, 'pitches': A.pitches, 'drums': A.drums, 'chords': A.chords}
+
+
+def _info_path(project):
+    return os.path.join(os.path.abspath(project), 'live', 'engine.json')
+
+
+def _call(project, name, timeout=30, **args):
+    try:
+        with open(_info_path(project), encoding='utf8') as f:
+            port = json.load(f)['port']
+    except (OSError, ValueError, KeyError):
+        raise OpError(f"no live engine for {project}; start one with live_start(project='{project}', bpm=...)")
+    req = urllib.request.Request(f"http://127.0.0.1:{port}/", data=json.dumps({'op': name, 'args': args}).encode(),
+                                 headers={'Content-Type': 'application/json'})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            res = json.loads(r.read())
+    except (urllib.error.URLError, ConnectionError, TimeoutError) as e:
+        raise OpError(f"the live engine for {project} does not answer ({e}); it may have stopped. live_start again "
+                      f"(its log is {os.path.join(os.path.abspath(project), 'live', 'engine.log')})")
+    if not res.get('ok'):
+        raise OpError(res.get('error', 'engine error'))
+    return res['result']
+
+
+def _alive(project):
+    try:
+        _call(project, 'status', timeout=3)
+        return True
+    except OpError:
+        return False
+
+
+@op()
+def live_start(project: str, bpm: float, beats_per_bar: int = 4, device: str = 'default', workers: int = 2) -> str:
+    """Start the live engine for `project` (any folder; a project.json there lends its sound bank, song voices and
+    'track:<name>' instruments). It plays from bar 1 immediately, silent until you queue clips, and keeps playing
+    between your calls: clips loop until replaced. Tempo is fixed for the run (live_stop, then start again to change
+    it). device: 'default' (speakers), a device name/index, or 'none' (no audio out; for testing and listen-only
+    analysis). Output always passes a limiter and loudness cap you cannot raise. Next: live_track, then live_queue."""
+    root = os.path.abspath(project)
+    if _alive(project):
+        return "already running (live_stop first to change tempo or device)\n" + _call(project, 'status')
+    os.makedirs(os.path.join(root, 'live'), exist_ok=True)
+    try:
+        os.remove(_info_path(project))
+    except OSError:
+        pass
+    pkg_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    env = dict(os.environ, PYTHONPATH=pkg_root + os.pathsep + os.environ.get('PYTHONPATH', ''))
+    log = open(os.path.join(root, 'live', 'engine.log'), 'w', encoding='utf8')
+    flags = 0
+    if os.name == 'nt':
+        flags = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
+    subprocess.Popen([sys.executable, '-m', 'ismail.live.engine', '--project', root, '--bpm', str(bpm),
+                      '--bpb', str(beats_per_bar), '--device', str(device), '--workers', str(workers)],
+                     cwd=pkg_root, env=env, stdout=log, stderr=subprocess.STDOUT, creationflags=flags)
+    t0 = time.time()
+    while time.time() - t0 < 60:
+        if os.path.exists(_info_path(project)) and _alive(project):
+            return f"live engine started ({time.time() - t0:.1f} s)\n" + _call(project, 'status')
+        time.sleep(0.3)
+    raise OpError(f"the live engine did not come up in 60 s; read {os.path.join(root, 'live', 'engine.log')}")
+
+
+@op()
+def live_stop(project: str, fade_sec: float = 1.0) -> str:
+    """Fade out and stop the live engine (closes any recording)."""
+    return _call(project, 'stop', fade_s=fade_sec)
+
+
+@op()
+def live_status(project: str) -> str:
+    """Where the live set is: bar heard, each track (instrument, fader, level, playing/next clip, render cost,
+    errors), the safety chain's gain reduction since the last status, runway (the last scheduled change and what
+    loops after it) and render health (backlog, late events, underruns)."""
+    return _call(project, 'status')
+
+
+@op()
+def live_track(project: str, track: str, instrument=None, volume_db: float = None, pan: float = None,
+               remove: bool = False, at: str = 'next_bar') -> str:
+    """Create or change a live track. instrument: a dict (instrument_help), 'preset:<name>' (presets_list),
+    {'type': 'code', 'voice': '<name>'} (voices_list) or 'track:<name>' (copy from the folder's project.json).
+    Changing the instrument of a playing track takes over at `at` (same values as live_queue). New instruments
+    warm up off the air first (live_status shows WARMING). volume_db <= +6. remove=True silences and deletes it now.
+    No effects on live tracks yet: shape the tone in the instrument."""
+    return _call(project, 'track', track=track, instrument=instrument, volume_db=volume_db, pan=pan, remove=remove,
+                 at=at)
+
+
+@op()
+def live_queue(project: str, clips: list) -> str:
+    """Queue clips (a batch; all or nothing). Each clip: {track, notes and/or lanes, bars, loop, at}.
+      notes: '<beat> <pitch> <dur_beats> [vel]; ...' with beats from the clip start (same as notes_write).
+      lanes: {pitch: 'x...x...'} step strings (same as pattern_write), step = beats per char (0.25).
+      bars (or beats, for odd lengths): clip length; default = whole bars covering the notes. It repeats every length.
+      loop: repeats before it ends (default 'forever': it plays until something replaces it).
+      at: next_bar (default) | next_beat | next_2 | next_4 | next_8 | next_16 (phrase boundaries counted from bar 1)
+          | asap | bar:<n> | after:<clip id> (when that clip ends; chain clips to pre-program an arc).
+    A clip on a track replaces whatever that track would play from its start (a playing clip is cut there; its
+    last notes ring out). {track, stop: true, at} silences a track. The reply gives each clip's id and the exact
+    bar it lands on (moved later when its first notes cannot render in time) and the runway: how long until the
+    queue stops changing. Before a long job (sound design, fitting), queue enough that the runway covers it."""
+    return _call(project, 'queue', clips=clips)
+
+
+@op()
+def live_cancel(project: str, clips: list) -> str:
+    """Remove clips that have not started yet (ids from live_queue / live_view). A playing clip cannot be
+    cancelled: queue {track, stop: true} or a replacement instead."""
+    return _call(project, 'cancel', clips=clips)
+
+
+@op()
+def live_view(project: str, bars: int = 8, clip: str = None) -> str:
+    """The queue ahead: which clip each track plays at each bar for the next `bars` bars (max 64), plus the
+    runway. clip='c3' shows that clip's notes and timing instead."""
+    return _call(project, 'view', bars=bars, clip=clip)
+
+
+@op()
+def live_listen(project: str, bars: int = 4, view: str = 'bars', band: str = None) -> str:
+    """Hear the live output: analyse the last `bars` complete bars (max 32; bar numbers are the live set's).
+    view: bars (level, bands, centroid, onsets, chord per bar) | envelope (level per 16th, max 8 bars; band=
+    sub|bass|lowmid|mid|himid|air) | pitches | drums | chords. This is the audio after the safety chain."""
+    if view not in VIEWS:
+        raise OpError(f"view={view!r}; use one of {', '.join(VIEWS)}")
+    d = _call(project, 'listen', bars=bars)
+    bar_sec = d['bpb'] * 60.0 / d['bpm']
+    g = A.Grid(d['bpm'], -(d['first'] - 1) * bar_sec, d['bpb'])
+    rng = [d['first'], d['last']]
+    kw = {'band': band} if view == 'envelope' else {}
+    txt = VIEWS[view](d['path'], g, rng, **kw)[1]
+    return f"live bars {d['first']}-{d['last']} ({view})\n" + txt
+
+
+@op()
+def live_record(project: str, on: bool = True) -> str:
+    """Record the live output (after the safety chain) to <project>/live/rec_<time>.wav; on=False stops it."""
+    return _call(project, 'record', on=on)

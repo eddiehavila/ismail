@@ -1,0 +1,141 @@
+"""Live engine: queue rules (pure) and a headless engine driven block by block (inline renders, no device)."""
+import numpy as np
+import pytest
+
+from ismail.dsp import SR
+from ismail.live.engine import BLOCK, Engine, LiveError
+from ismail.live.safety import Safety
+from ismail.live.timeline import QueueError, Timeline
+
+
+# ------------------------------------------------------------------ timeline
+
+def test_quantized_launch_and_bump():
+    tl = Timeline(4)
+    assert tl.resolve_at('next_bar', 5.0, 5.0) == (8.0, None)
+    assert tl.resolve_at('next_4', 5.0, 5.0)[0] == 16.0
+    assert tl.resolve_at('next_beat', 5.2, 5.2)[0] == 6.0
+    beat, note = tl.resolve_at('next_bar', 7.5, 9.0)      # render needs until beat 9: next bar is too soon
+    assert beat == 12.0 and 'moved' in note
+    with pytest.raises(QueueError, match='already played'):
+        tl.resolve_at('bar:2', 9.0, 9.0)
+
+
+def test_replace_rule_cuts_and_removes():
+    tl = Timeline(4)
+    a = tl.add('bass', [(0, 40, 1, 100)], 4, None, 0.0, 'next_bar')
+    b = tl.add('bass', [(0, 43, 1, 100)], 4, 2, 16.0, 'bar:5')
+    removed, cut = tl.claim('bass', 8.0)
+    assert removed == [b.id] and cut == [a.id] and a.end == 8.0
+
+
+def test_after_needs_finite_clip():
+    tl = Timeline(4)
+    a = tl.add('x', [(0, 60, 1, 100)], 4, None, 0.0, 'next_bar')
+    with pytest.raises(QueueError, match='forever'):
+        tl.resolve_at(f'after:{a.id}', 0.0, 0.0)
+    b = tl.add('y', [(0, 60, 1, 100)], 4, 3, 4.0, 'next_bar')
+    assert tl.resolve_at(f'after:{b.id}', 0.0, 0.0)[0] == 16.0
+
+
+def test_events_stop_at_cut():
+    tl = Timeline(4)
+    c = tl.add('x', [(0, 60, 1, 100), (2, 62, 1, 100)], 4, None, 4.0, 'next_bar')
+    c.cut = 10.0
+    ev = list(tl.events(c, 0.0, 100.0, [[0], [1]]))
+    assert [on for _, _, on in ev] == [4.0, 6.0, 8.0]
+
+
+# ------------------------------------------------------------------ safety
+
+def test_safety_holds_the_ceiling_and_caps_loudness():
+    s = Safety(SR)
+    x = np.random.default_rng(0).standard_normal((2, BLOCK * 400)) * 3.0     # far too hot
+    y = np.concatenate([s.process(x[:, i:i + BLOCK]) for i in range(0, x.shape[1], BLOCK)], axis=1)
+    assert np.max(np.abs(y)) <= 10 ** (s.ceiling_db / 20) + 1e-9
+    tail = y[:, -SR:]
+    assert 10 * np.log10(np.mean(tail ** 2)) < s.cap_db + 3
+    y2 = s.process(np.full((2, BLOCK), np.nan))
+    assert np.all(np.isfinite(y2)) and s.bad_blocks == 1
+
+
+# ------------------------------------------------------------------ headless engine
+
+def run(eng, seconds):
+    for _ in range(int(seconds * SR / BLOCK)):
+        eng.tick()
+        eng.mix_block()
+
+
+def onset_times(eng, thresh=0.02):
+    """Sample indices where the air log crosses up through `thresh` (first sample of each hit)."""
+    y = np.abs(eng.air[0, :eng.pos])
+    above = y > thresh
+    idx = np.nonzero(above[1:] & ~above[:-1])[0] + 1
+    keep = []
+    for i in idx:
+        if not keep or i - keep[-1] > SR * 0.3:
+            keep.append(i)
+    return keep
+
+
+@pytest.fixture
+def eng(tmp_path):
+    return Engine(str(tmp_path), bpm=120, bpb=4, workers=0, device='none')
+
+
+def test_clip_lands_on_the_grid_and_loops(eng):
+    eng.cmd_track('k', instrument={'type': 'kick'})
+    out = eng.cmd_queue([{'track': 'k', 'lanes': {'C1': 'x...x...x...x...'}, 'at': 'next_bar'}])
+    assert 'c1 k: bar 2' in out
+    run(eng, 6.0)                                  # bars 1-3 at 120 BPM (2 s per bar)
+    hits = onset_times(eng)
+    beat = 0.5 * SR
+    assert len(hits) >= 7
+    assert abs(hits[0] - 4 * beat) < 0.001 * SR    # bar 2 = beat 4, to the millisecond
+    assert all(abs((h - hits[0]) / beat - round((h - hits[0]) / beat)) < 0.02 for h in hits)
+
+
+def test_replace_and_stop(eng):
+    eng.cmd_track('k', instrument={'type': 'kick'})
+    eng.cmd_queue([{'track': 'k', 'lanes': {'C1': 'x...x...x...x...'}}])
+    run(eng, 2.5)
+    out = eng.cmd_queue([{'track': 'k', 'stop': True, 'at': 'next_bar'}])
+    assert 'stop k at bar 3' in out and 'cuts c1' in out
+    run(eng, 4.0)
+    y = eng.air[0, :eng.pos]
+    bar3 = int(4.0 * SR)
+    assert np.max(np.abs(y[bar3 + int(0.5 * SR):])) < 1e-3     # bar 3 on: only the last kick's tail, then silence
+
+
+def test_batch_is_atomic_and_errors_point_forward(eng):
+    eng.cmd_track('k', instrument={'type': 'kick'})
+    with pytest.raises(LiveError, match='live_track'):
+        eng.cmd_queue([{'track': 'nope', 'notes': '0 C4 1'}])
+    with pytest.raises(LiveError, match='Nothing was queued'):
+        eng.cmd_queue([{'track': 'k', 'lanes': {'C1': 'x...'}, 'loop': 2},
+                       {'track': 'k', 'lanes': {'C1': 'x.x.'}, 'at': 'after:c99'}])
+    assert not eng.tl.clips
+    with pytest.raises(LiveError, match='beats long'):
+        eng.cmd_queue([{'track': 'k', 'notes': '5 C1 1', 'bars': 1}])
+
+
+def test_arc_chain_and_runway(eng):
+    eng.cmd_track('p', instrument='preset:pluck')
+    out = eng.cmd_queue([{'track': 'p', 'notes': '0 C4 1; 1 E4 1; 2 G4 1', 'bars': 1, 'loop': 2},
+                         {'track': 'p', 'notes': '0 A3 2', 'bars': 1, 'loop': 1, 'at': 'after:c1'},
+                         {'track': 'p', 'notes': '0 F3 4', 'bars': 1, 'at': 'after:c2'}])
+    assert 'c2 p: bar 4' in out and 'c3 p: bar 5' in out
+    assert 'bar 5' in out.splitlines()[-1] and 'p c3 loop forever' in out
+    view = eng.cmd_view(bars=6)
+    assert 'c1' in view and 'c3' in view
+
+
+def test_status_and_listen(eng):
+    eng.cmd_track('k', instrument={'type': 'kick'}, volume_db=-3)
+    eng.cmd_queue([{'track': 'k', 'lanes': {'C1': 'x...x...x...x...'}}])
+    run(eng, 5.0)
+    st = eng.cmd_status()
+    assert 'playing c1' in st and 'limiter' in st
+    d = eng.cmd_listen_dump(bars=2)
+    assert d['first'] == 1 and d['last'] == 2
