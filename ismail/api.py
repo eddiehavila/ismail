@@ -480,9 +480,11 @@ def voice_help(project: str = None, name: str = 'grand_piano') -> str:
 
 @op()
 def instrument_help(project: str = None, type: str = 'synth') -> str:
-    """Full parameter reference (with defaults) for an instrument type: synth, sampler, kit, code, mimic, kick, snare, hat, clap, tom, noise_hit."""
-    if type == 'synth':
-        return ("synth params (defaults):\n" + json.dumps(inst_mod.SYNTH_DEFAULT, indent=1) +
+    """Full parameter reference (with defaults) for an instrument type: synth (= sprite), sampler, kit, code, mimic, kick, snare, hat, clap, tom, noise_hit."""
+    if type in ('synth', 'sprite'):
+        return ("sprite, the oscillator synth (type 'synth' or 'sprite'; right for synth sounds, not for acoustic "
+                "instruments: use mimic or a voice for those). params (defaults):\n" +
+                json.dumps(inst_mod.SYNTH_DEFAULT, indent=1) +
                 "\nosc params (defaults):\n" + json.dumps(inst_mod.OSC_DEFAULT, indent=1) +
                 "\nnotes: waves " + ', '.join(inst_mod.OSC_WAVES) +
                 "; fine/detune in cents; filter.type lp12 lp24 hp12 hp24 bp notch ladder; env_amount/keytrack/vel_amount"

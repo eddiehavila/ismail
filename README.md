@@ -124,7 +124,7 @@ Keep your projects under `songs/` (git-ignored) or anywhere else; a project is j
 - **Project**: a folder with `project.json` (tempo, grid offset, tracks, buses, master, sound bank, reference) plus `sounds/`, `renders/`, `cache/`, `history/` (undo snapshots) and `comparisons/`.
 - **Time**: bars are 1-indexed; note times are beats relative to the bar you write at. `offset_sec` is the time of bar 1, so a project can sit exactly on a reference recording's grid.
 - **Notes**: `'<beat> <pitch> <dur> [vel]'`, one per line or `;`-separated. Drum and step patterns: `pattern_write` with strings like `X...x...X...x...` (X 127, x 100, o 70, - 45, `_` ties).
-- **Instruments**: `synth` (saw, square, pulse, triangle, sine, additive, wavetable and noise oscillators, unison, FM, drive, SVF and ladder filters, envelopes, LFOs, mono glide), `sampler`, drum synths (`kick`, `snare`, `hat`, `clap`, `tom`, `noise_hit`), `kit` (pitch to instrument map) and `code` (a Python voice function for anything else). `presets_list` has starting points.
+- **Instruments**: two synth engines. **sprite** (`"type": "synth"` or `"sprite"`: saw, square, pulse, triangle, sine, additive, wavetable and noise oscillators, unison, FM, drive, SVF and ladder filters, envelopes, LFOs, mono glide) is right for synth sounds. **mimic** (`"type": "mimic"`) plays instruments measured from recordings (see below). Plus `sampler`, drum synths (`kick`, `snare`, `hat`, `clap`, `tom`, `noise_hit`), `kit` (pitch to instrument map) and `code` (a Python voice function for anything else). `presets_list` has starting points.
 - **Effects**: eq, filter, distortion, bitcrush, compressor (with sidechain), duck, gate, delay, reverb, chorus, flanger, phaser, tremolo/autopan, width, limiter, vocoder, formant. Tracks, buses and the master fader can be automated.
 - **Voices**: engineered instruments kept as Python modules, so a project stores a name instead of code (see below).
 - **Sound bank**: sounds made from any instrument and effect chain (`sound_make`), speech (`sound_speak`), imported files, and averaged events cut from a recording (`sound_extract`). Bank sounds work as sampler sources, wavetables, vocoder modulators and audio clips.
@@ -152,6 +152,26 @@ Voices are looked up in this order:
 A voice function may take extra keyword arguments: `bpm` is passed automatically, and the track's `"params"` dict is passed as keywords (`{"type": "code", "voice": "mine", "params": {"brightness": 0.3}}`). A module-level `INFO` dict documents it for `voice_help`; every key is optional: `summary` (one line for `voices_list`), `range`, `velocity` (what velocity does), `functions` (name to description), `params` (name to description) and `tail` (recommended tail). Data files sit next to the module (`grand_piano.json`) and are found through `__file__`. Editing a voice file invalidates the render cache for the tracks that use it.
 
 To add a voice to the library, move it from a song's `voices/` folder into `ismail/voices/`, give it an `INFO` dict, and add a line to the test that renders every built-in.
+
+## mimic: instruments measured from recordings
+
+A synth patch pretending to be a violin sounds like a 1990s game console playing a violin. mimic starts from recordings instead. Give it a few isolated notes of an instrument and it measures, per note:
+
+- every harmonic's level and envelope (attack, sustain or two-stage decay, release), inharmonicity, and the beating between unison strings;
+- a body curve fixed in frequency (the resonances that color each note differently), separated from each note's source slope;
+- the noise between the harmonics and a short map of the attack (bow scrape, hammer knock), both calibrated by rebuilding the note and matching the recording;
+- vibrato cycle by cycle: rate, depth, how much each varies, and how it builds up.
+
+Then it plays any pitch: notes between measured ones blend their two neighbours, every harmonic reads the body at its current frequency (so vibrato moves the color the way a real instrument does), and each note varies a little. Optional: open strings ringing in sympathy, the body ringing, a room.
+
+```bash
+python -m ismail -p song mimic_measure name=violin folder=samples/violin 'defaults={"strings": ["G3", "D4", "A4", "E5"]}'
+python -m ismail -p song track_add name=fiddle 'instrument={"type": "mimic", "profile": "violin", "tail": 1.0}'
+```
+
+`folder` holds one note per file named by pitch (`A4.wav`, `Fs3.mp3`); `notes=[[source, pitch], ...]` takes sound-bank names, paths or windows of a longer file. The profile is written to `<project>/voices/violin.mimic.json` and found like a voice (`voices_list` shows it). `mimic_measure` rebuilds every measured note from the others and reports how close each lands, which is the honest estimate for pitches you did not record, and it uses that test to choose how sharp the body curve can be for your data. `instrument_help(type='mimic')` lists the playing parameters.
+
+Tested leave-one-out on violin, cello and double bass recordings, a mimic note rebuilt without ever hearing that note lands as close to the real one as a real neighbouring note repitched, or closer (violin 11.2 vs 14.6, cello 12.3 vs 13.0, double bass 12.1 vs 12.8 on `sound_compare`'s distance), and about three times closer than a hand-set sprite patch. Struck and plucked instruments (piano) are harder and still behind a sampler; the `grand_piano` voice remains the better piano. A few notes at one dynamic teach one dynamic: record soft and loud notes if velocity matters.
 
 ## Hearing: audio as text
 

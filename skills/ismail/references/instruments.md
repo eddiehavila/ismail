@@ -17,21 +17,25 @@ Reference audio is for measuring. Never place it in the render.
 
 | route | when | how |
 |---|---|---|
-| library voice | `voices_list` has it (grand_piano, growl, sfx ...) | `voice_help(name)`; set params; done |
-| measured voice | an acoustic or electric instrument, voice, choir, crowd | write `<project>/voices/<name>.py` from the principles below, fit its params to the example |
+| library voice or profile | `voices_list` has it (grand_piano, growl, sfx, mimic profiles ...) | `voice_help(name)` / `instrument_help(type='mimic')`; set params; done |
+| mimic | you have a few isolated recorded notes of the instrument (bowed, blown, sung work best) | `mimic_measure(name, folder=...)` (one note per file, named by pitch), read its leave-one-out report, then `{"type": "mimic", "profile": name}`; pass the open strings as `defaults` for bowed strings |
+| measured voice | the instrument needs a mechanism mimic lacks (touch harmonics, articulations picked by velocity, a crowd, foley) | write `<project>/voices/<name>.py` from the principles below, fit its params to the example |
 | sampler | you have a clean recording of the exact sound and one pitch or a few pitches is enough (a hit, a stab, a vocal chop) | `sound_import`, then a `sampler` track (or a `kit` mapping pitches to samplers) |
-| synth | the sound is a synth | presets + `references/sound-design.md` |
+| sprite (`synth`) | the sound is a synth | presets + `references/sound-design.md` |
 
-The voices that sound best in this project (grand_piano, the bowed strings, the hum, the concert audience, the guitars) were all measured voices. Start from the closest one: copy it into the song's `voices/` and change it, rather than starting from a blank file.
+The voices that sound best in this project (grand_piano, the bowed strings, the hum, the concert audience, the guitars) were all measured voices. mimic does the measuring for you when you have recordings; for a hand-written voice, start from the closest existing one: copy it into the song's `voices/` and change it, rather than starting from a blank file.
 
 ## 3. What makes a measured voice sound real
 
 Each of these was the difference between "a synth imitating X" and X in at least one voice here:
 
 - **Every partial has its own envelope.** Highs die faster than lows on a string (a gong is the reverse: highs outlast lows). One amplitude envelope over a static spectrum is the console sound.
-- **A body, measured.** Read the instrument's resonance curve from the example (1/12 octave is enough) and let every partial read it at its current frequency, so vibrato makes harmonics flutter through the resonances (the bowed voice). A guitar body has modes near 100, 200 and 400 Hz; a pickup is a comb plus an LC resonance.
+- **A body, measured, and not smoothed away.** Read the instrument's resonance curve from the example and let every partial read it at its current frequency, so vibrato makes harmonics flutter through the resonances (the bowed voice). Body resonances are narrow: which harmonic lands on one is what gives each note its own colour ("a colour specific to that note", in a listener's words). Smooth only as much as your data forces; with few notes spread wide, test the choice leave-one-out (mimic_measure does). A guitar body has modes near 100, 200 and 400 Hz; a pickup is a comb plus an LC resonance.
+- **Vibrato that moves.** Real vibrato changes every cycle: on a violin note, rate 4.5-6.6 Hz and depth 5-25 cents from one cycle to the next, building up over the first fraction of a second. One steady sine reads as a machine.
+- **Sympathetic strings.** Open strings ring along when the played note shares their harmonics (a violin's open G and A kept ringing 3 s after the bow stopped). Listeners picked this as the closest lens on violin and cello.
+- **Unison strings beat.** A piano note is 2-3 strings a hair apart: every strong partial swells and dips 0.3-2.3 times a second by 5-16 dB. Without it the piano sounds "like a horn".
 - **Where it is excited.** A pluck or bow at 1/n of the string removes every n-th partial (pluck-position comb). A touch at the 1/node point is a natural harmonic: only multiples of the node survive (eharm).
-- **Noise between the harmonics.** Bow hair, breath, finger and hammer noise, measured as the level between partials. Without it a voice sounds like an organ.
+- **Noise between the harmonics, calibrated by synthesis.** Bow hair, breath, finger and hammer noise, measured as the level between partials. Estimating it directly reads 10-20 dB low when the noise is uneven within a band (bow noise is); rebuild the note and raise the noise until the energy between the harmonics matches the recording. Missing air is heard as "not crisp, no breathiness". Without it a voice sounds like an organ.
 - **Inharmonicity and stretch.** Stiff strings (piano, low guitar strings) run sharp up the series.
 - **More than one of it.** Two string polarizations, 1-3 detuned strings per piano note, a section of detuned players each with their own vibrato and timing. Static unison detune is the cheap version.
 - **Velocity changes colour, not just level.** Harder is brighter, with a faster attack and more noise; for guitars, very soft can mean a harmonic or a tap.
@@ -61,6 +65,8 @@ You cannot hear; the user can. Every time you give them an mp3 (`render(mp3='als
 - Say what you measured, so they can tell you where the numbers and their ears disagree.
 - Write their answer down in the song folder (`notes/feedback.md`: date, draft, what they said, what you changed). The ear wins over any metric: when it disagrees with a score, the score is missing something, and that is worth a line in the notes.
 - When a lesson holds across songs, it belongs in this skill (or the voice's INFO), not only in one song's notes.
+
+**When the numbers plateau, give an eye exam.** Put the real sound next to "lenses", versions that each change exactly ONE named thing (body colour, wood ring, room, open strings, bow noise, brightness, attack, vibrato, evenness), all at the same loudness and long enough to include the release. Ask the user to pick the closest and say what is still off in those words ("E, but the vibrato starts slower, more air"). A local HTML page with players, a radio per sound and a "copy my answers" button works well. One round of this found three things no metric had shown (moving vibrato, missing air, sympathetic strings); the metrics were blind to them because they average over time and stop at the release.
 
 ## Genre palettes
 

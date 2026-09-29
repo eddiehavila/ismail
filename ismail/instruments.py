@@ -50,7 +50,9 @@ SAMPLER_DEFAULT = {"type": "sampler", "sound": None, "root": "C4", "start": 0.0,
                    "transpose": 0.0, "amp_env": {"a": 0.001, "d": 0.0, "s": 1.0, "r": 0.02},
                    "filter": None, "velocity_sens": 0.5, "gain_db": 0.0, "pan": 0.0}
 
-INSTRUMENT_TYPES = ('synth', 'sampler', 'kit', 'code', 'mimic') + tuple(DRUM_DEFAULTS)
+INSTRUMENT_TYPES = ('synth', 'sprite', 'sampler', 'kit', 'code', 'mimic') + tuple(DRUM_DEFAULTS)
+# the two synth engines: sprite (type 'synth' or 'sprite': oscillators, filter, envelopes; right for synth sounds)
+# and mimic (instruments measured from recordings)
 # output calibration: one synth voice peaks near -9 dBFS, one drum hit near -6 dBFS at full velocity, so a few
 # tracks at 0 dB faders sum without clipping
 SYNTH_GAIN = 0.35
@@ -76,6 +78,8 @@ def normalize(inst):
     if not isinstance(inst, dict) or 'type' not in inst:
         raise InstrumentError(f"instrument needs a 'type': one of {', '.join(INSTRUMENT_TYPES)}")
     t = inst['type']
+    if t == 'sprite':
+        inst, t = dict(inst, type='synth'), 'synth'
     if t == 'synth':
         full = deep_merge(SYNTH_DEFAULT, inst)
         full['oscs'] = [deep_merge(OSC_DEFAULT, o) for o in full['oscs']]

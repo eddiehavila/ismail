@@ -378,7 +378,7 @@ def _pitch_of(name):
 
 @op(mutates=True)
 def mimic_measure(project: str, name: str, notes: list = None, folder: str = None, kind: str = 'auto',
-                  vel: float = 0.7, check: bool = True) -> str:
+                  vel: float = 0.7, check: bool = True, defaults: dict = None) -> str:
     """Measure an instrument from recorded notes into a mimic profile (<project>/voices/<name>.mimic.json), then
     use it as {"type": "mimic", "profile": "<name>"}. notes: [[source, pitch], ...] or [[source, pitch, vel,
     [t0, t1]]] where source is 'sound:<name>', 'ref', 'ref:<stem>' or a path, pitch like 'A4', vel 0..1 (how hard
@@ -386,7 +386,9 @@ def mimic_measure(project: str, name: str, notes: list = None, folder: str = Non
     one-note files named by pitch (A4.wav, Fs3.mp3, C#5.flac) instead of notes. One note per file or window,
     isolated, a few across the range; two dynamics of the same pitch teach velocity. kind: auto | sustained
     (bowed, blown, sung) | decaying (plucked, struck). check=True rebuilds every measured note from the OTHER
-    notes and reports how close it lands (leave-one-out), the honest estimate for pitches you did not record."""
+    notes and reports how close it lands (leave-one-out), the honest estimate for pitches you did not record.
+    defaults: mimic params stored in the profile and used unless a track overrides them, e.g. the open strings of a
+    bowed instrument {"strings": ["G3", "D4", "A4", "E5"]} (instrument_help(type='mimic') lists them)."""
     import glob as _glob
     import librosa
     from . import mimic
@@ -426,7 +428,30 @@ def mimic_measure(project: str, name: str, notes: list = None, folder: str = Non
         n['file'] = os.path.basename(src) if isinstance(src, str) else None
     source = folder or ', '.join(sorted({str(i[0]).split(':')[0] if str(i[0]).startswith('sound:') else
                                          os.path.basename(str(i[0])) for i in items}))[:200]
-    prof = mimic.profile_from_notes(measured, name, source)
+    # leave-one-out: rebuild each note from the others; also picks how sharp the body curve can be for this data
+    loo = {}
+    if check and len(measured) >= 3:
+        for smooth in (1, 3, 5, 9):
+            rows = []
+            for i, n in enumerate(sorted(measured, key=lambda m: m['midi'])):
+                rest = mimic.profile_from_notes([m for m in measured if m is not n], name, body_smooth=smooth)
+                y = _audio_note(ys, measured, n)
+                gate = min(max(n['dur'] - 0.3, 0.3), 3.0) if n['kind'] == 'sustained' else 3.0
+                z = mimic.render(rest, mimic._hz(n['midi']), np.arange(int((gate + 1.0) * SD.SR)) / SD.SR,
+                                 n['vel'], gate).mean(axis=0)
+                y = y[:len(z)]
+                z = z * np.sqrt(np.mean(y ** 2) / (np.mean(z ** 2) + 1e-15))       # compare timbre, not level
+                d, _ = SD.distance(SD.descriptor(np.stack([y, y])), SD.descriptor(np.stack([z, z])))
+                rows.append((n, d))
+            loo[smooth] = rows
+    smooth = min(loo, key=lambda k: np.mean([d for _, d in loo[k]])) if loo else 1
+    prof = mimic.profile_from_notes(measured, name, source, body_smooth=smooth)
+    prof['body_smooth'] = smooth
+    if defaults:
+        bad = set(defaults) - set(mimic.DEFAULT_PARAMS)
+        if bad:
+            raise OpError(f"unknown mimic params in defaults {sorted(bad)}; valid: {sorted(mimic.DEFAULT_PARAMS)}")
+        prof['defaults'] = defaults
     vd = os.path.join(P.root, 'voices')
     os.makedirs(vd, exist_ok=True)
     out = os.path.join(vd, name + '.mimic.json')
@@ -445,19 +470,12 @@ def mimic_measure(project: str, name: str, notes: list = None, folder: str = Non
     pk = sorted(pk, key=lambda i: -body[i])[:5]
     if pk:
         L.append("body resonances: " + ', '.join(f"{hz[i]:.0f} Hz +{body[i]:.0f} dB" for i in sorted(pk)))
-    if check and len(measured) >= 3:
-        rows = []
-        for i, n in enumerate(prof['notes']):
-            rest = mimic.profile_from_notes([m for j, m in enumerate(prof['notes']) if j != i], name)
-            y = _audio_note(ys, measured, n)
-            gate = min(max(n['dur'] - 0.3, 0.3), 3.0) if prof['kind'] == 'sustained' else 3.0
-            z = mimic.render(rest, mimic._hz(n['midi']), np.arange(int((gate + 1.0) * SD.SR)) / SD.SR, n['vel'], gate)
-            d, parts = SD.distance(SD.descriptor(np.stack([y[:len(z[0])]] * 2)), SD.descriptor(z))
-            rows.append((n, d, parts))
-        L.append("leave-one-out (each note rebuilt from the others; distance as sound_compare, lower is closer; "
-                 "about 5-10 is close, 20+ means that region needs its own recording):")
-        L.append("  " + ', '.join(f"{_note_name(n['midi'])} {d:.1f}" for n, d, _ in rows) +
-                 f"  | mean {np.mean([d for _, d, _ in rows]):.1f}")
+    if loo:
+        L.append("leave-one-out (each note rebuilt from the others, loudness matched; distance as sound_compare, lower "
+                 "is closer; about 5-10 is close, 20+ means that region needs its own recording):")
+        L.append(f"  body sharpness tried (bins of 1/12 octave smoothed): " +
+                 ', '.join(f"{k}: {np.mean([d for _, d in v]):.1f}" for k, v in loo.items()) + f" -> kept {smooth}")
+        L.append("  " + ', '.join(f"{_note_name(n['midi'])} {d:.1f}" for n, d in loo[smooth]))
     L.append(f"use: instrument={{'type': 'mimic', 'profile': '{name}', 'params': {{}}, 'tail': 1.0}} "
              f"(instrument_help(type='mimic') for params)")
     return '\n'.join(L)

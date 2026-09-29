@@ -245,3 +245,20 @@ def test_mimic_measures_and_rebuilds_a_known_tone():
     assert inst['tail'] == 1.0
     with pytest.raises(instruments.InstrumentError):
         instruments.normalize({'type': 'mimic', 'profile': 'x', 'params': {'nope': 1}})
+
+
+def test_sprite_is_the_synth_and_mimic_profiles_carry_defaults():
+    from ismail import mimic, instruments
+    a = instruments.normalize({'type': 'sprite', 'oscs': [{'wave': 'saw'}]})
+    b = instruments.normalize({'type': 'synth', 'oscs': [{'wave': 'saw'}]})
+    assert a == b and a['type'] == 'synth'
+    sr = 44100
+    t = np.arange(int(1.5 * sr)) / sr
+    notes = [(0.3 * np.sin(2 * np.pi * 440.0 * 2 ** ((m - 69) / 12) * t) * np.minimum(1, t / 0.01), m, 0.7)
+             for m in (60, 67, 74)]
+    prof = mimic.profile_from_notes(mimic.measure_notes(notes, calibrate=False))
+    plain = mimic.render(prof, 440.0, t, 0.7, 1.0, variation=0.0, seed=1)
+    prof['defaults'] = {'bright': 12.0}
+    bright = mimic.render(prof, 440.0, t, 0.7, 1.0, variation=0.0, seed=1)
+    assert not np.allclose(plain, bright)
+    assert np.allclose(mimic.render(prof, 440.0, t, 0.7, 1.0, variation=0.0, seed=1, bright=0.0), plain)

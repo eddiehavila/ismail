@@ -14,7 +14,7 @@ ismail is a DAW you drive with text: notes, patches, effects and automation go i
 1. **Writing before planning.** Block chords on beat 1 of every bar, the same 8 bars pasted 12 times, every part in the same register.
 2. **Not listening.** Rendering once and declaring it done, with a clipping master, a bass that masks the kick, or a part that is silent.
 3. **Believing one number.** Matching notes while the result sounds nothing like the target; transcribing noise as notes; buying a better score with loudness.
-4. **The console sound.** Every part a basic `synth`, so a cowboy song sounds like a 1990s game console playing one. Acoustic and electric instruments need measured voices, modeled on an example.
+4. **The console sound.** Every part a basic sprite patch (the `synth` type), so a cowboy song sounds like a 1990s game console playing one. Acoustic and electric instruments need a mimic profile or a measured voice, modeled on an example.
 
 ## The loop (every piece, every time)
 
@@ -52,7 +52,7 @@ Registers must not collide: at most one part per octave band doing sustained wor
 ## Where things are
 
 - `references/composition.md`: arranging and writing with ismail's notation: rhythm cells as step strings, harmony voicing, motif and answer, 8-bar variation, transitions, energy curves. Read when writing notes.
-- `references/instruments.md`: making acoustic and electric instruments sound real: getting an example first, choosing between library voice, measured voice, sampler and synth, what makes a measured voice convincing, matching an instrument chunk by chunk, asking the user, genre palettes. Read before choosing sounds for any non-electronic part.
+- `references/instruments.md`: making acoustic and electric instruments sound real: getting an example first, choosing between library voice, mimic (measured from recordings), hand-written measured voice, sampler and sprite, what makes a measured voice convincing, matching an instrument chunk by chunk, asking the user, genre palettes. Read before choosing sounds for any non-electronic part.
 - `references/mastering.md`: the master pass: loudness targets by genre or reference, the master chain, and checks. Read before calling a song finished.
 - `references/sound-design.md`: recipes per role with parameter ranges, gain staging, when and how to use `instrument_fit`, `track_fit`, `sound_extract`, formant and vocoder voices. Read when choosing or designing sounds.
 - `references/listening.md`: which analysis tool answers which question, how to read the text views (digits, rolls, zoom codes), and the Listening Report checks. Read before the first listen.
@@ -67,6 +67,6 @@ Registers must not collide: at most one part per octave band doing sustained wor
 - After writing notes for a part, read them back (`notes_read view='roll'` for a bar or two) before rendering. Most note bugs are visible there.
 - When matching a reference: never transcribe with raw `notes_from_audio` over a whole loop section; use `notes_from_audio_loop` (consensus). Never raise a track's level to improve a perceptual score. Never call a match done while `cmp_summary` shows a WARNING line or the mix perceptual group is far under its ceiling.
 - Reference audio is for analysis only. Do not place slices of the reference in the render; make the sounds.
-- No acoustic or electric instrument as a bare `synth` patch: use a library voice, build a measured voice, or use a sampler, and name the example it is modeled on.
+- No acoustic or electric instrument as a bare sprite (`synth`) patch: use a library voice, measure it with `mimic_measure`, build a measured voice, or use a sampler, and name the example it is modeled on.
 - When recreating a song, match each important instrument on a short exposed chunk first (`references/instruments.md` section 4) before arranging the whole song around it.
 - Every mp3 you hand the user comes with a question about what they hear, and their answer goes in `notes/feedback.md`.

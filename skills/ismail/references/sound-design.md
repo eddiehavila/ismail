@@ -1,6 +1,6 @@
 # Sound design in ismail
 
-For acoustic and electric instruments (guitar, strings, piano, brass, voice, crowd) read `references/instruments.md` first: this file is mostly about synth and drum-synth patches.
+For acoustic and electric instruments (guitar, strings, piano, brass, voice, crowd) read `references/instruments.md` first: this file is mostly about sprite (the `synth` type) and drum-synth patches.
 
 `instrument_help(type)` and `fx_help()` list every parameter with defaults. Start from a preset (`presets_list`) and change three or four things; a full patch from scratch is rarely better.
 
