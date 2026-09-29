@@ -19,6 +19,18 @@
 
 *Luigi Manson, made with ismail (fan remix of the Luigi's Mansion theme).*
 
+## Not a music generator
+
+ismail is not a model that turns a prompt into audio, like Suno. It is a set of tools your own agent uses to write the song as notes, sounds and code, render it, read back what came out, and edit it. That changes what you get:
+
+- **Iterative, precise edits.** Change one note, one patch, one bar or one fader and re-render; nothing else moves.
+- **Songs are code.** A project file and a build script: git history, diffs, branches and code review work on a track.
+- **Any sound.** Synths, drum synths, samplers, voices written in Python and speech; any sound can become an instrument.
+- **Local and open.** MIT licensed, runs on your machine, no content filter and no music subscription (you bring the agent).
+- **It improves with your model.** The music is the agent's own work, so a stronger model with the same prompt should write a better song.
+
+Suno is still better at realistic sung vocals, a polished song from one sentence in under a minute, and genre sound learned from recorded music. And why not Ableton or FL Studio? They were built for a person with ears and a mouse; an agent can press their buttons through bridges but still can't hear what it did. ismail puts everything an agent needs to write and to perceive into compact text, and if something is missing, your agent can add it. More on the [showcase page](https://newsbubbles.github.io/ismail/#compare).
+
 ## What it is
 
 A DAW built to be operated by an AI agent. Everything goes in as text (notes, instrument patches, effect chains, automation) and everything comes back as text: levels, spectra, drum patterns, piano rolls, chords, vowels, song structure, and structured comparisons against a reference track. The agent never needs ears or images to work (a spectrogram PNG is there if you want one).
