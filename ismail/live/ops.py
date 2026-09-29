@@ -68,7 +68,8 @@ def live_start(project: str, bpm: float, beats_per_bar: int = 4, device: str = '
     log = open(os.path.join(root, 'live', 'engine.log'), 'w', encoding='utf8')
     flags = 0
     if os.name == 'nt':
-        flags = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
+        # a hidden console, not none: the render workers inherit it instead of each opening a window
+        flags = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
     subprocess.Popen([sys.executable, '-m', 'ismail.live.engine', '--project', root, '--bpm', str(bpm),
                       '--bpb', str(beats_per_bar), '--device', str(device), '--workers', str(workers)],
                      cwd=pkg_root, env=env, stdout=log, stderr=subprocess.STDOUT, creationflags=flags)
