@@ -2,6 +2,8 @@
 
 **A DAW for AI agents. It can't hear, so it reads.**
 
+[![tests](https://github.com/newsbubbles/ismail/actions/workflows/tests.yml/badge.svg)](https://github.com/newsbubbles/ismail/actions/workflows/tests.yml)
+
 [![ismail: a DAW for AI agents](https://newsbubbles.github.io/ismail/social.png)](https://newsbubbles.github.io/ismail/)
 
 **[Listen to songs an agent made with it](https://newsbubbles.github.io/ismail/)**, each shown with the text the agent read while making it. The playhead runs across that text as the song plays.
@@ -56,6 +58,14 @@ pip install -e ".[separate]"          # optional: demucs stem separation for ref
 If `demucs` fights your torch install, use `pip install --no-deps demucs` and then `pip install dora-search einops julius lameenc openunmix`.
 
 MP3 previews need `ffmpeg` on your PATH (or set `ISMAIL_FFMPEG` to the binary).
+
+Runs on Windows, macOS and Linux; CI tests all three on every push. The one OS-specific op is `sound_speak` (text to speech for vocal samples), which uses the engine the OS already has:
+
+| OS | Engine | Voices |
+|---|---|---|
+| Windows | SAPI via PowerShell | `David`, `Zira`, any installed |
+| macOS | `say` | `Samantha`, `Alex`, anything in `say -v ?` |
+| Linux | `espeak-ng` or `espeak` | `en-us`, `en+f3` ... (`sudo apt install espeak-ng`) |
 
 ## Use it with Claude Code
 
@@ -201,7 +211,7 @@ Shots are Blender scripts built on a small kit (rooms, rigged characters from JS
 python -m pytest tests -q
 ```
 
-Round trips: write known material, render it, read it back through the analysis tools.
+Round trips: write known material, render it, read it back through the analysis tools. [.github/workflows/tests.yml](.github/workflows/tests.yml) runs them on Ubuntu, macOS and Windows.
 
 ## Layout
 

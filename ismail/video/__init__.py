@@ -53,7 +53,8 @@ def master_wav(song):
 def blender_exe(song=None):
     c = config(song) if song else DEFAULTS
     for cand in (c.get('blender'), os.environ.get('ISMAIL_BLENDER'),
-                 r'C:\Program Files\Blender Foundation\Blender 5.1\blender.exe', 'blender'):
+                 r'C:\Program Files\Blender Foundation\Blender 5.1\blender.exe',
+                 '/Applications/Blender.app/Contents/MacOS/Blender', 'blender'):
         if cand and (cand == 'blender' or os.path.exists(cand)):
             return cand
     return 'blender'

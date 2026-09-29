@@ -169,27 +169,55 @@ def sound_extract(project: str, name: str, source: str, bars: list, step: int, s
             f"centroid {d['centroid']:.0f} Hz, width {d['width']:.2f}")
 
 
-@op(mutates=True)
-def sound_speak(project: str, name: str, text: str, voice: str = 'David', rate: int = 0, normalize: bool = True) -> str:
-    """Text-to-speech into the sound bank (Windows SAPI voices, e.g. David, Zira). rate -10..10. Use as a vocoder
-    modulator (vocoder fx, modulator='sound:<name>' or a muted track holding it as audio clips), a sampler source,
-    or an audio clip."""
+def _tts(text, voice, rate, tmp_base):
+    """Speak text into an audio file with the OS's own engine: Windows SAPI, macOS `say`, Linux espeak-ng/espeak.
+    A voice the engine doesn't have falls back to its default voice. Returns (path, voice actually used)."""
+    import shutil
     import subprocess
     import sys
+    if sys.platform == 'win32':
+        tmp = tmp_base + '.wav'
+        v = voice or 'David'
+        safe = text.replace("'", "''")
+        ps = ("Add-Type -AssemblyName System.Speech; $s = New-Object System.Speech.Synthesis.SpeechSynthesizer; "
+              f"$v = $s.GetInstalledVoices() | Where-Object {{ $_.VoiceInfo.Name -like '*{v}*' }} | Select-Object -First 1; "
+              "if ($v) { $s.SelectVoice($v.VoiceInfo.Name) }; "
+              f"$s.Rate = {int(rate)}; $s.SetOutputToWaveFile('{tmp}'); $s.Speak('{safe}'); $s.Dispose()")
+        r = subprocess.run(['powershell', '-NoProfile', '-Command', ps], capture_output=True, text=True, timeout=60)
+        return tmp, v, r
+    wpm = int(round(175 * 1.1 ** max(-10, min(10, rate))))  # SAPI-style rate -10..10 -> words per minute
+    if sys.platform == 'darwin' and shutil.which('say'):
+        tmp = tmp_base + '.aiff'
+        names = subprocess.run(['say', '-v', '?'], capture_output=True, text=True).stdout.split('\n')
+        match = next((ln.split()[0] for ln in names if voice and ln.lower().startswith(voice.lower())), None)
+        cmd = ['say', '-o', tmp, '-r', str(wpm)] + (['-v', match] if match else []) + [text]
+        return tmp, match or 'default', subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+    eng = shutil.which('espeak-ng') or shutil.which('espeak')
+    if eng:
+        tmp = tmp_base + '.wav'
+        r = subprocess.run([eng, '-w', tmp, '-s', str(wpm)] + (['-v', voice] if voice else []) + [text],
+                           capture_output=True, text=True, timeout=60)
+        if r.returncode != 0 and voice:  # unknown voice name: use the default one
+            r = subprocess.run([eng, '-w', tmp, '-s', str(wpm), text], capture_output=True, text=True, timeout=60)
+            voice = None
+        return tmp, voice or 'default', r
+    raise OpError("no text-to-speech engine found: sound_speak uses Windows SAPI, macOS `say`, or espeak-ng on Linux "
+                  "(apt install espeak-ng); or record the words and bring them in with sound_import")
+
+
+@op(mutates=True)
+def sound_speak(project: str, name: str, text: str, voice: str = None, rate: int = 0, normalize: bool = True) -> str:
+    """Text-to-speech into the sound bank with the OS's own engine: Windows SAPI (voices like David, Zira; the
+    default is David), macOS `say` (Alex, Samantha ...), Linux espeak-ng (en-us, en-gb ...). A voice the engine
+    doesn't have falls back to its default. rate -10..10. Use as a vocoder modulator (vocoder fx,
+    modulator='sound:<name>' or a muted track holding it as audio clips), a sampler source, or an audio clip."""
     import tempfile
     import os
-    if sys.platform != 'win32':
-        raise OpError("sound_speak uses Windows SAPI; on this OS import a speech recording with sound_import instead")
     P = _load(project)
-    tmp = os.path.join(tempfile.gettempdir(), f"ismail_tts_{os.getpid()}.wav")
-    safe = text.replace("'", "''")
-    ps = ("Add-Type -AssemblyName System.Speech; $s = New-Object System.Speech.Synthesis.SpeechSynthesizer; "
-          f"$v = $s.GetInstalledVoices() | Where-Object {{ $_.VoiceInfo.Name -like '*{voice}*' }} | Select-Object -First 1; "
-          "if ($v) { $s.SelectVoice($v.VoiceInfo.Name) }; "
-          f"$s.Rate = {int(rate)}; $s.SetOutputToWaveFile('{tmp}'); $s.Speak('{safe}'); $s.Dispose()")
-    r = subprocess.run(['powershell', '-NoProfile', '-Command', ps], capture_output=True, text=True, timeout=60)
+    tmp, used, r = _tts(text, voice, rate, os.path.join(tempfile.gettempdir(), f"ismail_tts_{os.getpid()}"))
     if r.returncode != 0 or not os.path.exists(tmp):
-        raise OpError(f"TTS failed: {r.stderr.strip()[:300]}")
+        raise OpError(f"TTS failed: {(r.stderr or r.stdout).strip()[:300]}")
+    voice = used
     y, sr = sf.read(tmp, dtype='float64', always_2d=True)
     os.remove(tmp)
     y = y.T

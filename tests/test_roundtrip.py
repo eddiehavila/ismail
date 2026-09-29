@@ -203,3 +203,18 @@ def test_gate_closes_on_rests():
         y = fxmod.apply_fx(np.ones((2, 48000)), g, Ctx(off), 0)[0]
         lv = [y[i * st + st // 2:(i + 1) * st].mean() for i in range(8)]
         assert all(lv[i] > 0.7 for i in (0, 2, 4, 6)) and all(lv[i] < 0.1 for i in (1, 3, 5, 7))
+
+
+def test_sound_speak_on_this_os():
+    import sys
+    if not (sys.platform == 'win32' or shutil.which('say') or shutil.which('espeak-ng') or shutil.which('espeak')):
+        pytest.skip('no text-to-speech engine on this machine')
+    d = tempfile.mkdtemp(prefix='ismail_test_')
+    p = os.path.join(d, 'p')
+    try:
+        api.project_new(p, bpm=120, length_bars=1)
+        from ismail.api import OPS
+        out = OPS['sound_speak'](p, 'hi', 'hello there', voice='no such voice')
+        assert "sound 'hi'" in out and 'hi' in OPS['sound_list'](p)
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
