@@ -237,7 +237,7 @@ def test_mimic_measures_and_rebuilds_a_known_tone():
     assert prof['kind'] == 'sustained'
     n = prof['notes'][2]
     assert abs(n['level'][0] - 20 * np.log10(0.3)) < 1.0 and abs(n['level'][1] - 20 * np.log10(0.15)) < 1.0
-    z = mimic.render(prof, 440.0, t, 0.7, 2.0, variation=0.0, width=0.0)[0]
+    z = mimic.render(prof, 440.0, t, 0.7, 2.0, variation=0.0, width=0.0, room=0.0)[0]
     back = mimic.measure_note(z, 69, kind='sustained')
     # partial balance survives the round trip (absolute level is normalized by the profile)
     assert abs((back['level'][0] - back['level'][1]) - (n['level'][0] - n['level'][1])) < 1.5
