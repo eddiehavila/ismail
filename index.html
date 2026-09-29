@@ -104,6 +104,25 @@ h2 { font-size: 28px; margin: 0 0 8px; letter-spacing: -.01em; }
 .steps p { margin: 0; color: var(--dim); font-size: 15px; }
 @media (max-width: 820px) { .steps { grid-template-columns: 1fr; } }
 
+.cmp-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
+table.cmp { border-collapse: collapse; width: 100%; min-width: 760px; font-size: 14.5px; }
+.cmp th, .cmp td { text-align: left; vertical-align: top; padding: 12px 14px; border-bottom: 1px solid var(--line); }
+.cmp tr:last-child td { border-bottom: 0; }
+.cmp thead th { font: 500 12px var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--faint); background: var(--panel-2); }
+.cmp thead th.us { color: var(--accent); }
+.cmp td:first-child { color: var(--dim); font-weight: 500; width: 17%; }
+.cmp td.us { color: var(--text); background: color-mix(in srgb, var(--accent) 7%, transparent); }
+.cmp td { color: var(--dim); }
+.two { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; margin-top: 18px; }
+.two > div { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; }
+.two h3 { margin: 0 0 8px; font-size: 16px; }
+.two p, .two li { color: var(--dim); font-size: 15px; }
+.two p { margin: 0 0 8px; }
+.two ul { margin: 0; padding-left: 18px; }
+.two li { margin: 4px 0; }
+.note { color: var(--faint); font-size: 13.5px; margin-top: 14px; }
+@media (max-width: 820px) { .two { grid-template-columns: 1fr; } }
+
 footer { padding: 36px 0 60px; color: var(--faint); font-size: 14px; }
 footer p { margin: 6px 0; }
 </style>
@@ -197,6 +216,73 @@ master: -11.8 LUFS, peak -0.3 dBFS
         <p>An agent skill teaches the workflow: plan the piece before writing notes, check every render with the analysis tools, and trust baseline-scored comparisons over a hunch.</p>
       </div>
     </div>
+  </div>
+</section>
+
+<section id="compare">
+  <div class="wrap">
+    <h2>A studio, not a music generator</h2>
+    <p class="sub">Suno and similar services are models that turn a prompt into audio. ismail is the opposite kind of thing: a set of tools your own agent uses to write the song as notes, sounds and code, render it, read what came out, and edit. Here is how that compares with a music generator, and with driving a classic DAW like Ableton or FL Studio.</p>
+
+    <div class="cmp-wrap">
+      <table class="cmp">
+        <thead>
+          <tr><th></th><th class="us">ismail + your agent</th><th>Suno (music generator)</th><th>Ableton, FL Studio</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>What makes the music</td>
+            <td class="us">Your agent's own reasoning: harmony, rhythm, sound design and the math behind each synth</td>
+            <td>A trained model that generates audio from a prompt</td>
+            <td>You, with an agent at most pressing buttons through a bridge</td></tr>
+          <tr><td>How you change it</td>
+            <td class="us">Edit one note, one patch, one bar, one fader; re-render in seconds; everything else stays exactly as it was</td>
+            <td>Regenerate, extend or replace sections of generated audio; stems and a browser studio on paid plans</td>
+            <td>Full manual control, by hand</td></tr>
+          <tr><td>What the agent can perceive</td>
+            <td class="us">Every render comes back as text: levels per bar, drum lanes, piano rolls, chords, structure, scored comparisons</td>
+            <td>Nothing to perceive: you listen and write a new prompt</td>
+            <td>Usually nothing: the agent turns knobs without hearing the result</td></tr>
+          <tr><td>Sounds</td>
+            <td class="us">Anything the agent can describe as code: synths, drum synths, samplers, voices written in Python, speech; any sound becomes an instrument</td>
+            <td>The palette the model learned</td>
+            <td>The plugins you own</td></tr>
+          <tr><td>The song is</td>
+            <td class="us">A project file and a build script: git history, diffs, branches and code review for a track</td>
+            <td>Audio files</td>
+            <td>Binary project files</td></tr>
+          <tr><td>Runs</td>
+            <td class="us">On your machine, open source (MIT), no content filter, no music subscription (you bring the agent: Claude Code, Cursor or any MCP client)</td>
+            <td>A hosted service with plans; the free plan is non-commercial</td>
+            <td>Paid licenses, closed source</td></tr>
+          <tr><td>Gets better when</td>
+            <td class="us">The model driving it gets better: the same prompt, a stronger model, a better song</td>
+            <td>The vendor ships a new model</td>
+            <td>You get better</td></tr>
+          <tr><td>Extending it</td>
+            <td class="us">Any agent or person can add an instrument, an effect or a way to listen, in a few lines of Python</td>
+            <td>Limited to what the service offers (including custom models trained on your own audio)</td>
+            <td>Plugin SDKs around a closed core</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="two">
+      <div>
+        <h3>What Suno does better</h3>
+        <ul>
+          <li>Realistic sung vocals with lyrics. ismail has formant voices, vocoders and speech, not a singer.</li>
+          <li>A full, polished song from one sentence in under a minute. An agent writing a song in ismail takes longer and needs good direction.</li>
+          <li>Genre sound learned from a huge amount of recorded music. Here every sound has to be designed.</li>
+          <li>Nothing to install.</li>
+        </ul>
+      </div>
+      <div>
+        <h3>Why not just drive Ableton or FL Studio?</h3>
+        <p>They were designed before AI agents, for a person with ears and a mouse. Bridges and scripting let an agent press their buttons, but the instruments, channels and arrangement aren't laid out as text an agent can reason about, and the agent still can't hear what it did.</p>
+        <p>ismail starts from the other end: everything an agent needs to write and to perceive is compact text, and renders are fast. Its first working version was written by an AI agent in about a day, which is the point: if something is missing, your agent can add it.</p>
+      </div>
+    </div>
+    <p class="note">Local does not mean copyright-free: a remix of someone else's melody is still their melody. What changes is that nothing here is generated by a model trained on other people's recordings; the notes and sounds are whatever your agent writes. Suno plan details as of 2026 (<a href="https://suno.com/hub/ai-music-software">Suno</a>).</p>
   </div>
 </section>
 
