@@ -1,5 +1,26 @@
 # ismail
 
+**A DAW for AI agents. It can't hear, so it reads.**
+
+[![ismail: a DAW for AI agents](https://newsbubbles.github.io/ismail/social.png)](https://newsbubbles.github.io/ismail/)
+
+**[Listen to songs an agent made with it](https://newsbubbles.github.io/ismail/)**, each shown with the text the agent read while making it. The playhead runs across that text as the song plays.
+
+| song | what it is |
+|---|---|
+| [Poppycock](https://newsbubbles.github.io/ismail/#poppycock) | dubstep, one bass voice whose note velocity picks each hit's articulation |
+| [Fantaisie-Impromptu](https://newsbubbles.github.io/ismail/#fantaisie) | Chopin on a piano synthesized from measured notes, no samples |
+| [AstraSMB](https://newsbubbles.github.io/ismail/#astrasmb) | drum and bass at 174 BPM |
+| [Clash](https://newsbubbles.github.io/ismail/#clash) | hybrid orchestral fight cue, every instrument synthesized |
+| [Two Kinds of Tears](https://newsbubbles.github.io/ismail/#tears) | solo piano, a minor theme that returns in major |
+| [Bass of Storms](https://newsbubbles.github.io/ismail/#bassofstorms) | fan remix of Song of Storms as dubstep |
+
+[![Luigi Manson on YouTube](https://i.ytimg.com/vi/ZzT1T9GUoRo/hqdefault.jpg)](https://www.youtube.com/watch?v=ZzT1T9GUoRo)
+
+*Luigi Manson, made with ismail (fan remix of the Luigi's Mansion theme).*
+
+## What it is
+
 A DAW built to be operated by an AI agent. Everything goes in as text (notes, instrument patches, effect chains, automation) and everything comes back as text: levels, spectra, drum patterns, piano rolls, chords, vowels, song structure, and structured comparisons against a reference track. The agent never needs ears or images to work (a spectrogram PNG is there if you want one).
 
 One set of operations, three ways in:
@@ -194,6 +215,10 @@ skills/ismail/   the agent skill (SKILL.md + references)
 .mcp.json, .cursor/   MCP and rule config for Claude Code and Cursor
 songs/           your projects (git-ignored)
 ```
+
+## Made something with it?
+
+Open an issue with the song (a link is fine) and the prompt you gave your agent. The best ones go on the [showcase page](https://newsbubbles.github.io/ismail/).
 
 ## License
 
