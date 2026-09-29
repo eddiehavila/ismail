@@ -22,9 +22,11 @@ Learned from recreating Vitalic's "Allan Dellon". Each step exists because skipp
 - Route one stem's registers to different tracks with low/high (bass C2-A2, stabs A#2-B4, lead C5+). Ignore the lowest octave of a separated stem: it is mostly kick bleed and sub-octaves of distorted synths.
 - Melodic, non-looping parts (a vocal phrase): read `analyze_pitches(per_bar=4)` and write the line yourself; hold notes as long as the formant view says the voice is voiced.
 
-## 4. Sounds
+## 4. Sounds, one instrument and one chunk at a time
 
-`sound_extract` the event averaged over its loop position (`every=8`), then `instrument_fit`. Check the fitted sound in context afterwards. Keep the reference out of the render: extracted sounds are fitting targets, not samples to use.
+Right notes on the wrong instrument still sound wrong. Before arranging the whole song, match each lead instrument on a short passage where it is exposed (the intro, a break), following `references/instruments.md` section 4: spectrogram first, then a voice that has the mechanism the reference uses (a Polyphia guitar part turned out to be mostly touch harmonics, which no amount of note fixing could produce), then the user's ear on that chunk.
+
+For repeated electronic events: `sound_extract` the event averaged over its loop position (`every=8`), then `instrument_fit`. Check the fitted sound in context afterwards. Keep the reference out of the render: extracted sounds are fitting targets, not samples to use.
 
 ## 5. Compare, then drill down
 
@@ -43,4 +45,4 @@ Learned from recreating Vitalic's "Allan Dellon". Each step exists because skipp
 
 ## When is it done
 
-When the mix perceptual group is near its ceiling in every section, no WARNING lines remain, the arrangement maps match, and the user has listened. Report the numbers against their ceilings and say plainly which parts still differ.
+When the mix perceptual group is near its ceiling in every section, no WARNING lines remain, the arrangement maps match, the master is at the reference's loudness, and the user has listened and said the instruments sound right. Report the numbers against their ceilings and say plainly which parts still differ.

@@ -1,0 +1,75 @@
+# Instruments that sound real
+
+The default failure: every part is a `synth` (basic waves, one filter, an envelope), so a cowboy song comes out like a 1990s game console playing a cowboy song. The `synth` type is right for synth sounds (basses, leads, pads, stabs in electronic music). An acoustic or electric instrument (guitar, strings, piano, brass, voice, a crowd) needs one of the routes below, and the choice goes in the Session Sheet with the example it is modeled on.
+
+## 1. Get an example before you design anything
+
+A sound is designed toward something you can measure. In this order:
+
+1. **The user's example.** Ask: "is there a recording where this instrument sounds the way you want?" A reference song, a YouTube link, a file. Ask even when they did not mention one.
+2. **A solo passage in the reference.** When recreating a song, find a few seconds where the instrument plays alone or on top (an intro, a break). `analyze_structure` and `spectrogram` show where. That chunk is the target; the rest of the song waits.
+3. **A free recording of the instrument.** CC0 or permissive: Freesound (filter CC0), VSCO 2 Community Edition, University of Iowa Musical Instrument Samples, the Philharmonia-derived tonejs-instruments set. A few notes across the range at two dynamics is enough to measure. Credit the source in the voice's INFO.
+4. **Memory, written down.** With nothing to measure, write a Sound Sheet from what you know of the instrument before coding: how it is excited (pluck, bow, breath, hammer, strike), what resonates (string, body, tube, membrane, room), which partials are strong, how the highs decay against the lows, what the attack sounds like, what noise rides along (bow hair, breath, fingers, fret buzz), how velocity changes the colour, and how two notes in a row differ. Then show it to the user; it is cheaper to correct a sheet than a voice.
+
+Reference audio is for measuring. Never place it in the render.
+
+## 2. Pick the route
+
+| route | when | how |
+|---|---|---|
+| library voice | `voices_list` has it (grand_piano, growl, sfx ...) | `voice_help(name)`; set params; done |
+| measured voice | an acoustic or electric instrument, voice, choir, crowd | write `<project>/voices/<name>.py` from the principles below, fit its params to the example |
+| sampler | you have a clean recording of the exact sound and one pitch or a few pitches is enough (a hit, a stab, a vocal chop) | `sound_import`, then a `sampler` track (or a `kit` mapping pitches to samplers) |
+| synth | the sound is a synth | presets + `references/sound-design.md` |
+
+The voices that sound best in this project (grand_piano, the bowed strings, the hum, the concert audience, the guitars) were all measured voices. Start from the closest one: copy it into the song's `voices/` and change it, rather than starting from a blank file.
+
+## 3. What makes a measured voice sound real
+
+Each of these was the difference between "a synth imitating X" and X in at least one voice here:
+
+- **Every partial has its own envelope.** Highs die faster than lows on a string (a gong is the reverse: highs outlast lows). One amplitude envelope over a static spectrum is the console sound.
+- **A body, measured.** Read the instrument's resonance curve from the example (1/12 octave is enough) and let every partial read it at its current frequency, so vibrato makes harmonics flutter through the resonances (the bowed voice). A guitar body has modes near 100, 200 and 400 Hz; a pickup is a comb plus an LC resonance.
+- **Where it is excited.** A pluck or bow at 1/n of the string removes every n-th partial (pluck-position comb). A touch at the 1/node point is a natural harmonic: only multiples of the node survive (eharm).
+- **Noise between the harmonics.** Bow hair, breath, finger and hammer noise, measured as the level between partials. Without it a voice sounds like an organ.
+- **Inharmonicity and stretch.** Stiff strings (piano, low guitar strings) run sharp up the series.
+- **More than one of it.** Two string polarizations, 1-3 detuned strings per piano note, a section of detuned players each with their own vibrato and timing. Static unison detune is the cheap version.
+- **Velocity changes colour, not just level.** Harder is brighter, with a faster attack and more noise; for guitars, very soft can mean a harmonic or a tap.
+- **No two notes identical.** Seed small random variation per note (timing, level, brightness, noise). Repeated identical hits read as a machine.
+- **The attack is its own sound.** The hammer knock, the pick, the chiff, the consonant. It is short and does much of the instrument's identity.
+- **Space.** Real instruments are heard in a room: a spaced-pair stereo image (per-partial phase and level between channels), early reflections, a reverb send. A dry mono voice sounds like a chip.
+
+Build it as a voice module with an `INFO` dict (summary, range, velocity, params, source of the measurements), so it can move into the library later.
+
+## 4. Match it chunk by chunk
+
+Do not tune an instrument across a whole song. Take one short chunk where it is exposed (2-4 bars, often the intro) and loop on it:
+
+1. `sound_extract` a clean note or event from the chunk, or `project_new` a small project whose reference is only that chunk.
+2. Write the chunk's notes (from `notes_from_audio_loop` or by ear-reading `analyze_roll`), render only those bars.
+3. Compare: `spectrogram` of both (a missing harmonic, a wrong decay, an absent noise band shows up there first), `analyze_timbre`, `sound_compare`, `instrument_fit` for the voice's params, `eq_match` for the long-term balance.
+4. When a fit pins a parameter at the edge of its range, the model is missing a mechanism (harmonics, a second pickup, a body mode); add the mechanism, not a bigger range.
+5. Play the chunk to the user (below). Only when they say it sounds like the instrument, move to the next chunk or the rest of the song.
+
+Learned the hard way: a Polyphia recreation had the right notes on the guitar, but the guitarist plays most of them as harmonics. The transcription was "correct" and the part sounded wrong until the voice itself could play touch harmonics, and that only showed once the intro was matched on its own.
+
+## 5. Ask the human, every time you play them something
+
+You cannot hear; the user can. Every time you give them an mp3 (`render(mp3='also')`):
+
+- Say what to listen for: "does the guitar in bars 1-4 sound like the one in the reference? Too clean, too dull, wrong attack, wrong body?" Ask about one or two things, not "what do you think?".
+- Say what you measured, so they can tell you where the numbers and their ears disagree.
+- Write their answer down in the song folder (`notes/feedback.md`: date, draft, what they said, what you changed). The ear wins over any metric: when it disagrees with a score, the score is missing something, and that is worth a line in the notes.
+- When a lesson holds across songs, it belongs in this skill (or the voice's INFO), not only in one song's notes.
+
+## Genre palettes
+
+Before choosing sounds, list what the genre is actually played on, then check `voices_list` for each:
+
+- country / cowboy: steel-string acoustic guitar, fiddle (bowed violin), upright bass (bowed contrabass, pizz), harmonica, pedal steel, brushed snare
+- orchestral / film: bowed strings (section size, tremolo, ponticello), brass, timpani, choir, piano, gong
+- folk / singer-songwriter: acoustic guitar, voice or hum, light percussion, room
+- rock / metal: electric guitar through amp and cab, bass guitar, acoustic kit
+- jazz: upright bass, piano, brushes, ride cymbal, horn
+
+Anything on that list with no voice yet is a voice to build (route 2 or 3) before the arrangement, not a synth to settle for.
