@@ -1,0 +1,65 @@
+# Playing live
+
+The live engine plays a queue of clips in real time while you edit it: a jam with the user, a set, a stream,
+music that answers something happening now. A finished song is still made offline (render, master); a live set
+is performed, and `live_record` keeps a take.
+
+You are slow. A turn takes 5 to 30 seconds, which is 4 to 20 bars. So you never play notes as they happen: you
+queue clips that loop until replaced, pre-program arcs, and schedule sweeps. Everything faster than your turn
+lives inside the clips and the ramps.
+
+## The loop, live
+
+0. **Set Sheet** (in your reply, before any tool call): the Session Sheet plus an **arc**: which clip plays on
+   which bars, what changes at each boundary, and how long the queue runs before it needs you (the runway).
+1. **Rig**: `live_start(project, bpm)` (tempo is fixed per run), `live_bus` for a shared reverb, then one
+   `live_track` per part with its instrument, `fx` chain and `sends`. A track plays one clip at a time: to layer
+   two patterns on one sound, use two tracks.
+2. **Queue the arc in one `live_queue` batch.** Chain with `at='after:#k'` (item k of the same batch) and loop
+   counts; phrase starts with `next_4` / `next_8`. End on clips that loop `forever` or on a final chord. The
+   reply's landing bars are the truth: when a clip is "moved" later, its first notes needed the render time.
+3. **Sweeps and builds**: `live_fx(target, index, params, ramp_beats, at='bar:N')`, with N taken from the queue
+   reply. Ramps on one param form a schedule: a later ramp does not erase an earlier one. A snap then a sweep =
+   two calls, the second a beat later (`bar:N.25`).
+4. **Listen every turn**: `live_status` (levels per track and bus, runway, late events, underruns, safety gain
+   reduction) and `live_listen(bars=4, view=...)`. Write the Listening Report lines as for a render.
+5. **Change on phrase boundaries** (`next_4`, `next_8`), not mid-phrase, unless the cut is the point.
+6. **Record** with `live_record`: the take starts on a downbeat and has a `.json` sidecar;
+   `live_listen(recording='rec_....wav', bars=[a, b])` analyses it in the set's bar numbers, after the set too.
+7. **Ask the user** what they heard, as always, and log it in `notes/feedback.md`.
+
+Write the set as a script, `songs/<slug>/set.py`, like a `build.py`: rerunnable, and the notes and arc are
+readable later. `examples/disco_set.py` (in this skill) is a worked example (intro, groove, breakdown with a filter snap and
+sweep, drop, ending; 17 clips in one batch).
+
+## Rules
+
+- **Runway before a slow job.** Before anything that takes time (`mimic_measure` 25 to 60 s, `instrument_fit` and
+  `track_fit` minutes, a long think), queue an arc longer than the job, with change in it (a clip with a fill
+  in its last bar, an evolving chain, a ramp), not one bar repeated.
+- **Variation inside the clip.** A 4-bar clip with a fill in bar 4 beats a 1-bar clip plus four tool calls.
+- **Balance with faders.** Read the per-track levels in `live_status` and set `volume_db`. The safety chain is
+  a floor, not a mixer: its limiter and rider should read 0 dB.
+- **Live output is quiet by design** (trim -6 dB, sustained cap -16 dBFS rms, ceiling -1 dBFS; about -23
+  LUFS for a balanced mix). Do not chase loudness live; master a take offline.
+- **Sounds you are unsure of**: try them on a muted or quiet track (`volume_db=-40`, then fade with a ramp on a
+  gain fx) rather than straight onto the main part.
+- **Tempo change** = `live_stop`, then `live_start` with the new tempo.
+
+## What is and is not live yet
+
+Live: every instrument type except mimic profiles in practice (they render 3 to 4x slower than real time per
+voice; the other session is finishing them), every effect (the same processors as offline renders, block for
+block), send buses, sidechain/duck/vocoder from live tracks, ramps on every automatable fx param.
+Not yet: master-bus effects (the safety chain is the master), vocoder modulators from sound-bank sounds,
+instrument-param automation (use fx params), tempo changes inside a run.
+
+## Numbers worth knowing
+
+- Output trails the mix by ~96 ms (a fixed 4096-sample alignment budget for effect lookahead, plus the safety
+  limiter). Tracks stay aligned with each other; `live_listen` and recordings compensate.
+- A chain may need at most 4096 samples of lookahead along track + bus (a hall is 1024, a limiter its
+  lookahead, oversampled distortion 20). The error says which effect to drop.
+- A replaced chain rings out (its reverb tail keeps sounding) for up to 12 s.
+- Render cost per note (one core): grand_piano ~0.04 s, growl ~0.1 s, pad synth ~0.2 s, drums ~0.02 s. The
+  first launch after adding a slow voice may move a bar or two later; later launches reuse the rendered notes.
