@@ -33,7 +33,7 @@ BLOCK = 512
 AHEAD_S = 0.3           # finished audio kept ahead of the device
 HORIZON_S = 4.0         # how far ahead events are sent to render
 AIR_S = 120.0           # output history kept for live_listen
-MARGIN_S = 0.15         # render estimate safety margin
+MARGIN_S = 0.5          # render estimate safety margin (quantized launches make this inaudible)
 DEFAULT_EVENT_S = 0.3   # per-event render time before a track has measured one
 
 
@@ -86,6 +86,8 @@ class Engine:
         self.rec = None
         self.rec_path = None
         self.stats = collections.Counter()
+        self.last_late = None
+        self.last_underrun = None
         self.last_cmd = time.time()
         self.running = True
         self.stopped = threading.Event()
@@ -204,11 +206,11 @@ class Engine:
         if c is None or (c.end is not None and on >= c.end - EPS):
             return
         start = self.sample(on)
-        if start + y.shape[1] <= self.pos:
-            self.stats['late'] += 1
-            return
         if start < self.pos:
             self.stats['late'] += 1
+            self.last_late = f"{track} {fmt_bar(on, self.bpb)} by {(self.pos - start) / SR * 1000:.0f} ms"
+            if start + y.shape[1] <= self.pos:
+                return
         self.seq += 1
         heapq.heappush(self.pending, (start, self.seq, Seg(start, y, track, cid, on)))
 
@@ -224,28 +226,29 @@ class Engine:
                 self.meta.pop(cid, None)
                 for key in [k for k in self.cache if k[0] == cid]:
                     del self.cache[key]
+            todo = []
             for c in list(self.tl.clips.values()):
                 m = self.meta[c.id]
                 b0 = m['placed'] if m['placed'] is not None else c.start
                 if horizon <= b0:
                     continue
                 for k, ei, on in self.tl.events(c, b0, horizon, m['groups']):
-                    key = (c.id, ei)
-                    have = self.cache.get(key)
-                    if isinstance(have, np.ndarray):
-                        self._place(c.id, c.track, on, have)
-                    elif have == 'error':
-                        continue
-                    else:
-                        self.waiting[key].append(on)
-                        if have is None:
-                            self.cache[key] = 'pending'
-                            g = m['groups'][ei]
-                            t0 = c.notes[g[0]][0]
-                            notes_s = [((c.notes[j][0] - t0) * self.spb, c.notes[j][1], c.notes[j][2] * self.spb,
-                                        c.notes[j][3]) for j in g]
-                            self._submit(key, c.track, notes_s, (t0 % self.bpb) * self.spb)
+                    todo.append((on, c, ei))
                 m['placed'] = horizon
+            for on, c, ei in sorted(todo, key=lambda x: x[0]):     # render in the order they will sound
+                key = (c.id, ei)
+                have = self.cache.get(key)
+                if isinstance(have, np.ndarray):
+                    self._place(c.id, c.track, on, have)
+                elif have != 'error':
+                    self.waiting[key].append(on)
+                    if have is None:
+                        self.cache[key] = 'pending'
+                        g = self.meta[c.id]['groups'][ei]
+                        t0 = c.notes[g[0]][0]
+                        notes_s = [((c.notes[j][0] - t0) * self.spb, c.notes[j][1], c.notes[j][2] * self.spb,
+                                    c.notes[j][3]) for j in g]
+                        self._submit(key, c.track, notes_s, (t0 % self.bpb) * self.spb)
 
     def _schedule_loop(self):
         while self.running:
@@ -338,6 +341,7 @@ class Engine:
             self._fifo_n -= got
         if got < frames and self.pos > 0 and self.fade is None:
             self.stats['underruns'] += 1
+            self.last_underrun = fmt_bar(self.beat(self.played), self.bpb)
         self.played += got
         return out
 
@@ -405,10 +409,9 @@ class Engine:
             raise LiveError("live tracks have no effects yet (effects are the next milestone); drop 'fx' and shape the "
                             "tone inside the instrument")
         try:
+            # voice modules are checked by the op before they get here: importing one in this process could hold
+            # the GIL for seconds and starve the audio
             inst = instruments.normalize(spec)
-            if inst.get('type') == 'code' and inst.get('voice'):
-                from .. import voices
-                voices.function(inst['voice'], inst.get('fn', 'voice'), self.root)
         except (instruments.InstrumentError, ValueError) as e:
             raise LiveError(f"instrument invalid: {e}")
         return inst
@@ -470,13 +473,13 @@ class Engine:
             msg.append(f"vol {tr['volume_db']:g} dB, pan {tr['pan']:g}")
             return f"{track}: " + ', '.join(msg)
 
-    def _lead_beats(self, track, onsets):
+    def _lead_beats(self, track, onsets, extra=0):
         """Beats a new clip on `track` must start after now so that each event (sorted onsets, in beats from the
         clip start) is rendered before it sounds; events render in onset order across the workers."""
         tr = self.tracks[track]
         per = tr['est'] if tr['est'] is not None else DEFAULT_EVENT_S
         w = max(1, self.n_workers)
-        backlog = sum(1 for j in self.jobs.values() if not j['warm'])
+        backlog = sum(1 for j in self.jobs.values() if not j['warm']) + extra
         warm = (tr['warm_s'] or 2.0) if tr['warming'] else 0.0
         need = 0.0
         for i, on in enumerate(onsets[:64]):
@@ -541,10 +544,12 @@ class Engine:
             now = self.beat(self.pos)
             tl = copy.deepcopy(self.tl)
             claims, lines, added = [], [], []
+            extra = 0                        # events of earlier clips in this batch, rendered alongside
             for i, (track, notes, length, loop, at) in enumerate(parsed):
                 inst = self.tracks[track]['inst']
                 onsets = [notes[g[0]][0] for g in _mono_groups(sorted(notes), inst)] if notes else []
-                ready = now + self._lead_beats(track, onsets)
+                ready = now + self._lead_beats(track, onsets, extra)
+                extra += len(onsets)
                 try:
                     beat, note = tl.resolve_at(at, now, ready if notes else now)
                 except QueueError as e:
@@ -643,7 +648,9 @@ class Engine:
             lines.append(self._runway())
             backlog = sum(1 for j in self.jobs.values() if not j['warm'])
             lines.append(f"render: {self.n_workers or 'inline'} workers, backlog {backlog}, late events "
-                         f"{self.stats['late']}, rejected {self.stats['rejected']}, underruns {self.stats['underruns']}")
+                         f"{self.stats['late']}" + (f" (last: {self.last_late})" if self.last_late else '') +
+                         f", rejected {self.stats['rejected']}, underruns {self.stats['underruns']}" +
+                         (f" (last at {self.last_underrun})" if self.last_underrun else ''))
             return '\n'.join(lines)
 
     def cmd_view(self, bars=8, clip=None):
@@ -778,6 +785,7 @@ def main():
     ap.add_argument('--workers', type=int, default=2)
     ap.add_argument('--port', type=int, default=0)
     a = ap.parse_args()
+    import scipy.signal  # noqa: F401  (seconds to import: do it before audio starts, never mid-set)
     eng = Engine(a.project, a.bpm, a.bpb, a.workers, a.device)
     httpd = serve(eng, a.port)
     eng.start()

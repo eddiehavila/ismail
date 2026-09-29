@@ -29,6 +29,17 @@ HEAR (audio -> text), cheapest first
   analyze_melody      monophonic line -> notes               analyze_formants  vowels of a voice
   analyze_timbre / analyze_spectrum / sound_compare          spectrogram (PNG, last resort)
 
+LIVE (play in real time while you edit; a separate engine process per project folder)
+  live_start(bpm) -> live_track(track, instrument) -> live_queue([{track, notes | lanes, bars, loop, at}, ...])
+  -> live_status / live_view / live_listen(bars) -> more live_queue ... -> live_stop.
+  Clips loop until replaced, so the music keeps going between your turns: work at phrase scale (next_4, next_8),
+  put per-beat variation inside the clip, and chain clips with at='after:<id>' to pre-program an arc.
+  A clip replaces what its track would play from its start; {track, stop: true} silences one. Launch bars move
+  later when the first notes cannot render in time (the reply says so). Keep the runway (live_status) longer than
+  any slow job you start (sound design, fitting). live_listen is the same analysis as HEAR, on the last bars
+  played. The output always passes a trim, a loudness cap and a limiter; watch their gain reduction in
+  live_status and balance with volume_db instead of pushing. No effects on live tracks yet.
+
 RECREATE A REFERENCE (what worked)
   1. analyze_grid -> project_set(bpm, offset_sec); then align(a='track:<drum>', b='ref:drums') and correct
      offset_sec by the reported lag. Timing errors poison every other metric.

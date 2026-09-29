@@ -100,6 +100,14 @@ def live_track(project: str, track: str, instrument=None, volume_db: float = Non
     Changing the instrument of a playing track takes over at `at` (same values as live_queue). New instruments
     warm up off the air first (live_status shows WARMING). volume_db <= +6. remove=True silences and deletes it now.
     No effects on live tracks yet: shape the tone in the instrument."""
+    if instrument is not None:
+        from .. import api
+        P = api.Project(project) if os.path.exists(os.path.join(os.path.abspath(project), 'project.json')) else None
+        if isinstance(instrument, str) and instrument.startswith('track:') and P is None:
+            raise OpError(f"instrument {instrument!r} copies a project track, but {project} has no project.json; "
+                          f"pass a dict or 'preset:<name>'")
+        # a folder without project.json still has song voices in <folder>/voices: check against that root
+        instrument = api._resolve_instrument(instrument, P or type('Root', (), {'root': os.path.abspath(project)})())
     return _call(project, 'track', track=track, instrument=instrument, volume_db=volume_db, pan=pan, remove=remove,
                  at=at)
 
