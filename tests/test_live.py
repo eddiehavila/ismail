@@ -67,14 +67,14 @@ def run(eng, seconds):
         eng.mix_block()
 
 
-def onset_times(eng, thresh=0.02):
+def onset_times(eng, thresh=0.02, gap=0.3):
     """Sample indices where the air log crosses up through `thresh` (first sample of each hit)."""
     y = np.abs(eng.air[0, :eng.pos])
     above = y > thresh
     idx = np.nonzero(above[1:] & ~above[:-1])[0] + 1
     keep = []
     for i in idx:
-        if not keep or i - keep[-1] > SR * 0.3:
+        if not keep or i - keep[-1] > SR * gap:
             keep.append(i)
     return keep
 
@@ -139,3 +139,86 @@ def test_status_and_listen(eng):
     assert 'playing c1' in st and 'limiter' in st
     d = eng.cmd_listen_dump(bars=2)
     assert d['first'] == 1 and d['last'] == 2
+
+
+# ------------------------------------------------------------------ effects in the live graph
+
+def level(eng, t0, t1):
+    """RMS dBFS of the air log between song seconds t0 and t1."""
+    y = eng.air[:, int(t0 * SR):int(t1 * SR)]
+    return 10 * np.log10(np.mean(y ** 2) + 1e-20)
+
+
+def test_delay_echo_lands_on_the_grid(eng):
+    eng.cmd_track('k', instrument={'type': 'hat'}, fx=[{'type': 'delay', 'time_beats': 0.5, 'feedback': 0.0,
+                                                                'mix': 0.5, 'hp_hz': None}])
+    eng.cmd_queue([{'track': 'k', 'lanes': {'C1': 'x...............'}, 'loop': 1}])
+    run(eng, 4.5)
+    hits = onset_times(eng, thresh=0.005, gap=0.1)
+    beat = 0.5 * SR
+    assert abs(hits[0] - 4 * beat) < 0.001 * SR          # dry hit at bar 2
+    assert abs(hits[1] - 4.5 * beat) < 0.001 * SR        # its echo half a beat later
+
+
+def test_lookahead_tracks_stay_aligned(eng):
+    eng.cmd_track('a', instrument={'type': 'kick'}, fx=[{'type': 'limiter', 'lookahead_ms': 5}, {'type': 'hall', 'mix': 0.0}])
+    eng.cmd_track('b', instrument={'type': 'kick'}, pan=1.0)
+    eng.cmd_track('a', pan=-1.0)
+    eng.cmd_queue([{'track': 'a', 'lanes': {'C1': 'x...'}, 'loop': 1}, {'track': 'b', 'lanes': {'C1': 'x...'}, 'loop': 1}])
+    run(eng, 3.0)
+    left = np.nonzero(np.abs(eng.air[0, :eng.pos]) > 0.01)[0][0]
+    right = np.nonzero(np.abs(eng.air[1, :eng.pos]) > 0.01)[0][0]
+    assert abs(int(left) - int(right)) <= 2 and abs(left - 2 * SR) < 0.001 * SR
+
+
+def test_chain_swap_lets_the_reverb_ring_out(eng):
+    eng.cmd_track('p', instrument='preset:pluck', fx=[{'type': 'reverb', 'size': 0.95, 'mix': 0.6}])
+    eng.cmd_queue([{'track': 'p', 'notes': '0 C4 0.25', 'loop': 1}])
+    run(eng, 2.6)                                            # note at 2.0 s (bar 2)
+    eng.cmd_track('p', fx=[], at='now')                      # dry from now on
+    run(eng, 1.0)
+    assert level(eng, 2.7, 3.0) > -60                        # the old chain's tail is still sounding
+
+
+def test_send_bus_and_param_ramp(eng):
+    eng.cmd_bus('verb', fx=[{'type': 'hall', 'rt60': 1.5, 'mix': 1.0}])
+    eng.cmd_track('p', instrument='preset:pluck', sends={'verb': 0}, fx=[{'type': 'gain', 'gain_db': 0}])
+    eng.cmd_queue([{'track': 'p', 'notes': '0 C4 0.25; 2 E4 0.25', 'bars': 1}])
+    run(eng, 4.2)
+    st = eng.cmd_status()
+    assert 'bus verb' in st and 'hall' in st and 'fed by p' in st
+    before = level(eng, 3.0, 4.0)
+    out = eng.cmd_fx('p', 0, {'gain_db': -30}, ramp_beats=1)
+    assert '0 -> -30' in out
+    run(eng, 2.5)
+    assert level(eng, 5.9, 6.4) < before - 12              # ramped down (the hall still carries a little)
+
+
+def test_duck_on_source_notes(eng):
+    eng.cmd_track('k', instrument={'type': 'kick'}, volume_db=-40)
+    eng.cmd_track('pad', instrument='preset:pad', fx=[{'type': 'duck', 'source': 'k', 'depth_db': -24,
+                                                       'release_ms': 250}])
+    eng.cmd_queue([{'track': 'pad', 'notes': '0 C4 4', 'bars': 1}, {'track': 'k', 'lanes': {'C1': 'x...'}}])
+    run(eng, 5.0)
+    on = level(eng, 4.0 + 0.01, 4.0 + 0.06)                 # just after a kick (bar 3)
+    off = level(eng, 4.0 + 0.35, 4.0 + 0.45)                # recovered
+    assert off - on > 10
+
+
+def test_graph_errors_point_forward(eng):
+    eng.cmd_track('k', instrument={'type': 'kick'})
+    with pytest.raises(LiveError, match='live_bus first'):
+        eng.cmd_track('k', sends={'nope': -6})
+    with pytest.raises(LiveError, match='not a live track'):
+        eng.cmd_track('k', fx=[{'type': 'compressor', 'sidechain': 'ghost'}])
+    with pytest.raises(LiveError, match='itself'):
+        eng.cmd_track('k', fx=[{'type': 'duck', 'source': 'k'}])
+    with pytest.raises(LiveError, match='budget'):
+        eng.cmd_track('k', fx=[{'type': 'limiter', 'lookahead_ms': 200}])
+    eng.cmd_track('s', instrument={'type': 'snare'}, fx=[{'type': 'compressor', 'sidechain': 'k'}])
+    with pytest.raises(LiveError, match='loop'):
+        eng.cmd_track('k', fx=[{'type': 'compressor', 'sidechain': 's'}])
+    with pytest.raises(LiveError, match='valid'):
+        eng.cmd_fx('s', 0, {'nonsense': 1})
+    with pytest.raises(LiveError, match='out of range'):
+        eng.cmd_fx('s', 3, {'mix': 1})

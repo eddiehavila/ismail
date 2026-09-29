@@ -38,7 +38,10 @@ LIVE (play in real time while you edit; a separate engine process per project fo
   later when the first notes cannot render in time (the reply says so). Keep the runway (live_status) longer than
   any slow job you start (sound design, fitting). live_listen is the same analysis as HEAR, on the last bars
   played. The output always passes a trim, a loudness cap and a limiter; watch their gain reduction in
-  live_status and balance with volume_db instead of pushing. No effects on live tracks yet.
+  live_status and balance with volume_db instead of pushing.
+  Effects: live_track(fx=[...]) sets a track's chain (fx_help; 'track:<name>' copies a project track's chain),
+  live_bus + sends={bus: dB} share one hall/delay across tracks, live_fx(target, index, params, ramp_beats)
+  moves automatable params (a sweep, a fade, a build) without resending the chain. Replaced chains ring out.
 
 RECREATE A REFERENCE (what worked)
   1. analyze_grid -> project_set(bpm, offset_sec); then align(a='track:<drum>', b='ref:drums') and correct

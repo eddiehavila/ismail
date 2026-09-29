@@ -44,6 +44,7 @@ def bar_of(beat, bpb):
 
 def fmt_bar(beat, bpb):
     """Beat -> 'bar 12' or 'bar 12 beat 3' (beats 1-based, as counted)."""
+    beat = round(beat, 6)           # beats computed back from sample positions land a hair early
     bar = int(math.floor(beat / bpb + EPS)) + 1
     off = beat - (bar - 1) * bpb
     return f"bar {bar}" if abs(off) < EPS else f"bar {bar} beat {fmt_num(off + 1)}"

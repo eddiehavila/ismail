@@ -92,14 +92,35 @@ def live_status(project: str) -> str:
     return _call(project, 'status')
 
 
+def _project_fx(project, spec):
+    """'track:<name>' | 'bus:<name>' -> that chain from the folder's project.json."""
+    try:
+        with open(os.path.join(os.path.abspath(project), 'project.json'), encoding='utf8') as f:
+            d = json.load(f)
+    except (OSError, ValueError):
+        raise OpError(f"fx={spec!r} copies a chain from project.json, but {project} has none")
+    kind, name = spec.split(':', 1)
+    src = d.get('tracks' if kind == 'track' else 'buses', {}).get(name)
+    if src is None:
+        raise OpError(f"fx={spec!r}: project.json has no {kind} {name!r}")
+    return src.get('fx', [])
+
+
 @op()
 def live_track(project: str, track: str, instrument=None, volume_db: float = None, pan: float = None,
-               remove: bool = False, at: str = 'next_bar') -> str:
+               fx=None, sends: dict = None, remove: bool = False, at: str = 'next_bar') -> str:
     """Create or change a live track. instrument: a dict (instrument_help), 'preset:<name>' (presets_list),
     {'type': 'code', 'voice': '<name>'} (voices_list) or 'track:<name>' (copy from the folder's project.json).
-    Changing the instrument of a playing track takes over at `at` (same values as live_queue). New instruments
-    warm up off the air first (live_status shows WARMING). volume_db <= +6. remove=True silences and deletes it now.
-    No effects on live tracks yet: shape the tone in the instrument."""
+    fx: the track's whole effect chain, a list of effect dicts (fx_help), or 'track:<name>' to copy a project
+    track's chain; [] removes all. Sidechain/duck/vocoder sources must be live tracks. sends: {bus: dB} replaces
+    the track's sends (post-fader; live_bus creates buses). A new instrument or chain on a playing track takes
+    over at `at` (live_queue values, or 'now'); a replaced chain's tail rings out. New instruments warm up off the
+    air first (live_status shows WARMING). volume_db <= +6. remove=True silences and deletes the track now.
+    To move one effect param (a sweep, a fade), use live_fx instead of resending the chain."""
+    if isinstance(fx, str):
+        if not fx.startswith(('track:', 'bus:')):
+            raise OpError("fx: a list of effect dicts, or 'track:<name>' / 'bus:<name>' to copy from project.json")
+        fx = _project_fx(project, fx)
     if instrument is not None:
         from .. import api
         P = api.Project(project) if os.path.exists(os.path.join(os.path.abspath(project), 'project.json')) else None
@@ -109,7 +130,30 @@ def live_track(project: str, track: str, instrument=None, volume_db: float = Non
         # a folder without project.json still has song voices in <folder>/voices: check against that root
         instrument = api._resolve_instrument(instrument, P or type('Root', (), {'root': os.path.abspath(project)})())
     return _call(project, 'track', track=track, instrument=instrument, volume_db=volume_db, pan=pan, remove=remove,
-                 at=at)
+                 at=at, fx=fx, sends=sends)
+
+
+@op()
+def live_bus(project: str, bus: str, fx=None, volume_db: float = None, remove: bool = False, at: str = 'now') -> str:
+    """Create or change a send bus (a shared effect such as one hall for many tracks; tracks feed it with
+    live_track(sends={bus: dB})). fx: its chain (list, or 'bus:<name>' / 'track:<name>' to copy from project.json);
+    reverbs and delays on a bus output only the wet signal unless given 'dry'. A replaced chain's tail rings out.
+    remove=True deletes it and the sends into it."""
+    if isinstance(fx, str):
+        if not fx.startswith(('track:', 'bus:')):
+            raise OpError("fx: a list of effect dicts, or 'track:<name>' / 'bus:<name>' to copy from project.json")
+        fx = _project_fx(project, fx)
+    return _call(project, 'bus', bus=bus, fx=fx, volume_db=volume_db, remove=remove, at=at)
+
+
+@op()
+def live_fx(project: str, target: str, index: int, params: dict, ramp_beats: float = 0, at: str = 'now') -> str:
+    """Change params of one effect in a live chain. target: a track, or 'bus:<name>'; index: 0-based position in
+    its chain (live_status lists chains). Automatable params (fx_help lists them: cutoff, mix, gain_db, depth ...)
+    glide from their current value to the new one over ramp_beats, starting at `at` ('now' or a live_queue
+    value): one call = a filter sweep over 8 bars, a fade, a build. Frequencies glide in log space. Other params
+    rebuild that chain at `at` (the old tail rings out)."""
+    return _call(project, 'fx', target=target, index=index, params=params, ramp_beats=ramp_beats, at=at)
 
 
 @op()
