@@ -1052,6 +1052,9 @@ def render(project: str, bars: list = None, tracks: list = None, stems: bool = F
     L = [f"rendered {y.shape[1] / R.sr:.1f}s" + (f" (bars {bars[0]}-{bars[1]})" if bars else '') +
          f" in {R.elapsed:.1f}s -> renders/latest.wav{' + renders/' + out + '.wav' if out and mp3 != 'only' else ''}{mp3_note}",
          f"master: {lufs:.1f} LUFS, peak {peak:.1f} dBFS" + (f", CLIPPING {clip:.2f}% of samples (lower levels or add limiter)" if clip > 0.001 else '')]
+    if R.full and lufs < -20:
+        L.append(f"  QUIET: {lufs:.1f} LUFS is under every genre target (classical and ambient sit at -18 to -16): raise "
+                 f"the master (limiter gain_db) or the faders; at low playback volume this reads as nothing")
     L.append("  per track (after its fx and fader, scaled by the master chain's gain, so tracks sum to the mix;"
              " buses listed as bus:<name>):")
     for k, v in st.items():
@@ -1095,9 +1098,17 @@ def _grid(P, bpm, offset_sec):
 
 @op()
 def analyze_grid(project: str, source: str = None, bpm_hint: float = None) -> str:
-    """Estimate tempo and the time of bar 1 of an audio source. Use the result in project_new/project_set so bars line up."""
+    """Estimate tempo, the time of bar 1 (kick, harmony, section changes and snare on 2 and 4 vote), the tuning
+    offset from A440 and, with a reference drum stem, the swing. Use the result in project_new/project_set."""
     P = _load(project)
-    return A.beat_grid(P.resolve_audio(source), bpm_hint, P.bpb)[1]
+    g, txt = A.beat_grid(P.resolve_audio(source), bpm_hint, P.bpb)
+    ref = P.d.get('reference') or {}
+    drums = os.path.join(ref.get('stems_dir') or '', 'drums.wav')
+    if P.auto_source(source) in ('ref', 'ref:drums') and ref.get('stems_dir') and os.path.exists(drums):
+        txt += '\n' + A.swing(drums, g['bpm'], g['offset_sec'])[1]
+    else:
+        txt += "\nswing: not measured (needs a drum stem: separate(source='ref'), then analyze_swing)"
+    return txt
 
 
 @op()
@@ -1311,4 +1322,5 @@ def call(name, **kw):
 
 from . import api_cmp  # noqa: E402,F401  (registers stem/structure/comparison ops)
 from . import api_sound  # noqa: E402,F401  (registers sound_compare / instrument_fit)
+from . import api_measure  # noqa: E402,F401  (registers tuning, swing, kit, section and level ops)
 from .live import ops as _live_ops  # noqa: E402,F401  (registers the live_* ops)

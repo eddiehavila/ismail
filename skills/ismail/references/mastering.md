@@ -25,6 +25,7 @@ On `track='master'`, in this order:
 
 - `render(mp3='also')` and read: integrated LUFS vs target, peak, limiter gain reduction.
 - `analyze_overview(source='render')`: the quietest sections should still be audible (a -40 dB section in a -12 LUFS song is a mistake unless it is a deliberate breakdown).
-- Loud sections against quiet ones: `analyze_bars` level per bar. Mastering should keep the contrast the arrangement planned (the energy curve in the Session Sheet), not flatten it.
+- Loud sections against quiet ones: `analyze_sections` with the Sheet's form map (or `analyze_bars` level per bar). Mastering should keep the contrast the arrangement planned (the energy curve in the Session Sheet), not flatten it. An orchestral piece with a pianissimo opening and a fortissimo climax measured 22 dB between them and the listener heard it as dynamic; the fix that mattered was the build before the climax, which sat within 0.2 dB of it until its faders came down 4 dB.
+- A live set is mastered too: its output needs the same chain and the same loudness check. `render` prints QUIET under -20 LUFS; a live set at -21 LUFS was heard as "nothing".
 - Compare against the reference at matched loudness. A louder render always seems better, to people and to perceptual scores.
 - Then ask the user to listen on two systems if they can (headphones and a phone speaker): "does the low end hold up on the phone? is anything harsh on headphones?"

@@ -183,10 +183,12 @@ Tested leave-one-out on violin, cello and double bass recordings, a mimic note r
 
 | Question | Tool |
 |---|---|
-| Tempo and where bar 1 is | `analyze_grid`, `align` |
+| Tempo, where bar 1 is, tuning, swing | `analyze_grid` (bar 1 voted by kick, harmony, section changes and the snare on 2 and 4), `align`, `analyze_swing` |
 | Song form, what plays where | `analyze_structure` (arrangement map, sections, loop length, root per bar) |
 | Levels, bands and chords per bar | `analyze_bars`, `analyze_chords`, `analyze_key` |
 | Drum pattern | `analyze_drums` (step strings you can paste into `pattern_write`) |
+| What is in a drum kit | `analyze_kit` (splits a drum stem into its pieces, with each one's pattern and audio) |
+| Loudness per section, dynamic range | `analyze_sections` (warns when a build is as loud as its climax) |
 | Notes | `analyze_pitches` (per beat), `analyze_roll` (piano roll), `analyze_melody`, `analyze_notes` |
 | Rhythm of level (pumping, gating) | `analyze_envelope` |
 | What a sound is | `analyze_timbre`, `analyze_spectrum`, `sound_compare` |
@@ -199,11 +201,11 @@ Sources are `render`, `track:<name>` (after `render(stems=True)`), `ref`, `ref:<
 
 Bring your own reference audio (`project_new(..., reference=<file>)`); none is included here.
 
-1. `analyze_grid(source='ref')`, then `align` a rendered drum track against `ref:drums` and correct `offset_sec`.
-2. `separate(source='ref')` (demucs) and read `analyze_structure(source='ref')`.
+1. `analyze_grid(source='ref')`, then `align` a rendered drum track against `ref:drums` and correct `offset_sec`. If it reports the record 15 cents or more off A440 (a sped-up sample), run `ref_retune()` first: otherwise every note reads as a pair of semitones.
+2. `separate(source='ref')` (demucs) and read `analyze_structure(source='ref')`. Measure the drums before writing them: `analyze_swing` and `analyze_kit(source='ref:drums')`.
 3. Transcribe with `notes_from_audio_loop`. It keeps only notes that recur across repetitions of the loop, because raw transcription copies echoes, leakage and distortion partials as hard notes. If the song alternates versions of its loop, transcribe each from its own repetitions and pass `base_bars` so the shared notes stay identical.
 4. Design sounds: `sound_extract` a repeated hit or stab, then `instrument_fit` (evolution strategy over instrument and effect parameters, scored on spectrum, envelope, width and pitch clarity). `track_fit` tunes a part in context against the reference stem.
-5. `stem_map_set`, `render(stems=True)`, `cmp_run`, then drill down: `cmp_summary`, `cmp_arrangement`, `cmp_sections`, `cmp_worst`, `cmp_bars`, `cmp_zoom(bar)`. `cmp_list` tracks progress across runs.
+5. `stem_map_set`, `render(stems=True)`, `levels_from_ref` (faders from the reference's stem balance), `cmp_run`, then drill down: `cmp_summary`, `cmp_arrangement`, `cmp_sections`, `cmp_worst`, `cmp_bars`, `cmp_zoom(bar)`. `cmp_list` tracks progress across runs.
 
 ### How comparisons score
 
