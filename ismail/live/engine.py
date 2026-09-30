@@ -292,11 +292,16 @@ class Engine:
             for c in list(self.tl.clips.values()):
                 m = self.meta[c.id]
                 b0 = m['placed'] if m['placed'] is not None else c.start
-                if horizon <= b0:
+                h = horizon
+                tr = self.tracks.get(c.track)
+                if tr and tr['inst'] and tr['inst'].get('_whole'):
+                    # a whole-section event can be minutes of audio: send it one pass ahead, not HORIZON_S ahead
+                    h = max(horizon, min(b0 + c.length, c.end if c.end is not None else b0 + c.length))
+                if h <= b0:
                     continue
-                for k, ei, on in self.tl.events(c, b0, horizon, m['groups']):
+                for k, ei, on in self.tl.events(c, b0, h, m['groups']):
                     todo.append((on, c, ei))
-                m['placed'] = horizon
+                m['placed'] = h
             for on, c, ei in sorted(todo, key=lambda x: x[0]):     # render in the order they will sound
                 tp = self._transpose(c.track, on)
                 key = (c.id, ei, tp)
