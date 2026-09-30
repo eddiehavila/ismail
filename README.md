@@ -12,7 +12,7 @@ Your agent writes the song as notes, sounds and code, reads back what it made, a
 
 | song | what it is |
 |---|---|
-| [Live set: Clash, Poppycock, Mycelium](https://newsbubbles.github.io/ismail/#liveset) | recorded live: the agent mixes three of its songs on decks at 150 BPM (orchestral into dubstep into psytrance), key-matched, with a filter transition and a bass-swap blend |
+| [Live set: Clash, Poppycock, Mycelium](https://newsbubbles.github.io/ismail/#liveset) | recorded live: the agent plays three of its songs in full on decks at 150 BPM (orchestral into dubstep into psytrance), each blended into the next, every song re-rendered from its notes |
 | [Tidewater](https://newsbubbles.github.io/ismail/#tidewater) | strings measured from recordings (mimic), piano, taiko and gong; 22 dB from a pianissimo solo cello to the fortissimo tutti |
 | [Mycelium Protocol](https://newsbubbles.github.io/ismail/#mycelium) | psytrance at 145 BPM, sounds fitted to a reference record's drums and bass |
 | [Poppycock](https://newsbubbles.github.io/ismail/#poppycock) | dubstep, one bass voice whose note velocity picks each hit's articulation |
@@ -230,7 +230,7 @@ The perceptual group exists because the others can all look fine while the resul
 
 The same instruments and effects play in real time while the agent edits the music: a jam, a DJ set, a
 soundtrack that follows a game or an audience. [Hear a recorded set](https://newsbubbles.github.io/ismail/#liveset):
-three finished songs mixed live on decks, the set written as one script (`live_load`, `live_deck`, `live_transition`). `live_start` runs a separate engine process per folder (a local
+three whole songs played live on decks, the set written as one script (`live_load`, `live_deck`, `live_transition`). `live_start` runs a separate engine process per folder (a local
 control port, render workers, a mixer and a safety chain), and the agent drives it with ops:
 
 ```text
