@@ -215,14 +215,30 @@ def measure_note(y, midi, sr=SR, vel=0.7, kind='auto'):
     # made every note start at full level ("hits the string" where the player eases in)
     b_atk, b_ov = _band_attack(y, kind, sr)
     if kind == 'sustained':
-        # release starts where the level falls 6 dB under the sustain median for good
-        sus_lvl = np.median(tot[jpk:jend + 1])
-        above = np.where(tot[jpk:jend + 1] > sus_lvl - 6)[0]
-        jrel = jpk + int(above[-1]) if len(above) else jend
-        jatk_end = jpk
-        sus = np.arange(min(jatk_end + int(0.15 * sr / HOP), jrel), jrel)
+        # the held part is the longest stretch within 12 dB of the note's median level (gaps under 60 ms bridged).
+        # Anchoring it at the loudest frame measured a note that swells into its cut-off, or runs into the next
+        # note, in its release
+        med = np.median(tot[:jend + 1])
+        idx = np.flatnonzero(tot[:jend + 1] > med - 12)
+        cuts = np.flatnonzero(np.diff(idx) > int(0.06 * sr / HOP))
+        starts, ends = np.r_[idx[0], idx[cuts + 1]], np.r_[idx[cuts], idx[-1]]
+        r = int(np.argmax(ends - starts))
+        j0, j1 = int(starts[r]), int(ends[r])
+        jstop = int(starts[r + 1]) if r + 1 < len(starts) else nf     # the next note, if the window caught one
+        trim = min(int(0.35 * sr / HOP), (j1 - j0) // 4)
+        sus = np.arange(j0 + trim, j1 - trim + 1)
         if len(sus) < 4:
-            sus = np.arange(jpk, max(jpk + 4, jrel))
+            sus = np.arange(j0, min(j0 + 4, nf))
+        sus_lvl = np.median(tot[sus])
+        # attack ends where the level first reaches 3 dB under the held level; release starts where it falls
+        # 6 dB under it for good
+        jatk_end = j0 + int(np.argmax(tot[j0:sus[0] + 1] > sus_lvl - 3))
+        above = np.flatnonzero(tot[j0:j1 + 1] > sus_lvl - 6)
+        jrel = max(j0 + int(above[-1]) if len(above) else j1, int(sus[-1]))
+        peak_db = float(tot[:jrel + 1].max())
+        alive = np.flatnonzero(tot[:jstop] > peak_db - 50)
+        jend = int(alive[-1]) if len(alive) else jstop - 1
+        dur = tf[jend]
         for i in range(kmax):
             a = A_db[i]
             s_lvl = float(np.median(a[sus]))
@@ -230,7 +246,7 @@ def measure_note(y, midi, sr=SR, vel=0.7, kind='auto'):
             atk = float(np.interp(lf_i, np.log2(NOISE_HZ), b_atk))
             ov = float(np.interp(lf_i, np.log2(NOISE_HZ), b_ov))
             fl = float(np.std(a[sus] - np.convolve(a[sus], np.ones(9) / 9, 'same')[:len(sus)])) if len(sus) > 12 else 0.5
-            rel = a[jrel:jrel + int(1.5 * sr / HOP)]
+            rel = a[jrel:min(jrel + int(1.5 * sr / HOP), jstop)]
             rt = tf[jrel:jrel + len(rel)] - tf[jrel]
             live = rel > s_lvl - 45
             t60 = _fit_decay(rt[live], rel[live]) if live.sum() > 3 else 0.3
@@ -280,7 +296,8 @@ def measure_note(y, midi, sr=SR, vel=0.7, kind='auto'):
                't60_after': [p[3] for p in parts], 'beat_hz': [p[4] for p in parts], 'beat_db': [p[5] for p in parts]}
         noise_sus = np.median(noise_db[:, jpk:jpk + max(4, int(0.3 * sr / HOP))], axis=1) - peak_db
         vib_frames = np.arange(jpk, min(jend, jpk + int(1.0 * sr / HOP)))
-    atk_frames = np.arange(0, max(1, jpk + 1))
+        jatk_end = jpk
+    atk_frames = np.arange(0, max(1, jatk_end + 1))
     noise_atk = noise_db[:, atk_frames].max(axis=1) - peak_db
 
     # vibrato cycle by cycle (rate, depth, their spread, how it builds up) and slow drift, in cents
