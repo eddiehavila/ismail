@@ -74,6 +74,8 @@ h2 { font-size: 28px; margin: 0 0 8px; letter-spacing: -.01em; }
 .meta { font: 13px var(--mono); color: var(--faint); }
 .desc { color: var(--dim); margin: 6px 0 12px; }
 .track audio { width: 100%; height: 40px; }
+.engine { margin: 6px 0 10px; font: 12.5px var(--mono); color: var(--dim); }
+.engine span { color: var(--accent); margin-right: 6px; }
 .tag { font: 500 11px var(--mono); color: var(--accent); border: 1px solid var(--accent); border-radius: 4px; padding: 1px 6px; margin-left: 8px; vertical-align: 2px; }
 
 .seen { margin-top: 12px; }
@@ -172,6 +174,7 @@ master: -11.8 LUFS, peak -0.3 dBFS
   <div class="wrap">
     <h2>Listen</h2>
     <p class="sub">Under each song is the text the agent used to judge it: the arrangement map (one character per bar, 9 = loudest, rows per frequency band, the bass note and the sections it found) and a piano roll of one part. Press play and the playhead runs across the map; click the map to jump to a bar.</p>
+    <p class="sub">Each song says what made it: <b>sprite</b> is the synth engine (oscillators, filters, envelopes, drum synths), <b>mimic</b> plays instruments measured from a few recorded notes, and <b>voices</b> are instruments written as code (the grand piano is built from measured piano partials).</p>
     <div id="tracks"></div>
   </div>
 </section>
@@ -343,6 +346,18 @@ const DESC = {
   bassofstorms: 'Fan remix: Song of Storms (Zelda: Ocarina of Time) as dubstep, with a synthesized ocarina and a fairy that talks.',
   lettre: 'Solo piano, slow and sad, played with a rubato tempo map.'
 };
+const ENGINE = {
+  liveset: 'sprite synths, drum synths and code voices (the three songs below), re-rendered live on decks',
+  tidewater: 'mimic strings (violin, cello, double bass measured from recordings) · grand_piano voice · code voices for taiko, gong and audience',
+  poppycock: 'sprite synths · drum synths · growl code voice (the bass) · samplers',
+  mycelium: 'sprite synths · drum synths · a sampler',
+  fantaisie: 'grand_piano voice (partials measured from piano recordings, written as code)',
+  astrasmb: 'sprite synths · drum synths',
+  clash: 'sprite synths · drum synths · a code voice for the taiko',
+  tears: 'grand_piano voice',
+  bassofstorms: 'sprite synths · drum synths · growl code voice · a code voice for the ocarina and the fairy',
+  lettre: 'grand_piano voice (an inline copy)'
+};
 const TAG = { bassofstorms: 'fan remix', liveset: 'live' };
 const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 const fmt = s => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}`;
@@ -382,6 +397,7 @@ function charWidth(pre) {
         <span class="meta">${fmt(d.duration)} · ${d.tracks} tracks</span>
       </div>
       <p class="desc">${esc(DESC[slug] || d.doc)}</p>
+      ${ENGINE[slug] ? `<p class="engine"><span>made with</span> ${esc(ENGINE[slug])}</p>` : ''}
       <audio controls preload="none" src="audio/${slug}.mp3"></audio>
       <details class="seen">
         <summary>what the agent saw</summary>
