@@ -66,6 +66,8 @@ def _tail_s(inst):
 
 
 def _mono_groups(notes, inst):
+    if inst.get('_whole'):          # a deck track with instrument automation: its whole section is one event
+        return [list(range(len(notes)))] if notes else []
     # a mono synth glides inside a phrase; a performer voice plays overlapping notes as one gesture (legato,
     # slides, a ringing chord): both render a group of overlapping notes as one event
     if (inst.get('type') == 'synth' and inst.get('mono')) or inst.get('performer'):
@@ -153,9 +155,9 @@ class Engine:
         return int(round(beat * self.spb * SR))
 
     # ------------------------------------------------------------------ rendering
-    def _submit(self, key, track, notes_s, lead_s, warm=False, expr=None):
+    def _submit(self, key, track, notes_s, lead_s, warm=False, expr=None, iauto=None):
         tr = self.tracks[track]
-        inst = self._job_inst(tr, expr)
+        inst = self._job_inst(tr, expr, iauto)
         self._jid += 1
         jid = self._jid
         audio_s = max(s + d for s, _, d, _ in notes_s) + _tail_s(inst)
@@ -314,9 +316,10 @@ class Engine:
                         lead = 0.0 if tr['inst']['type'] in ('code', 'mimic') else (t0 % self.bpb) * self.spb
                         expr = self._event_expr(c, t0, max(c.notes[j][0] + c.notes[j][2] for j in g) - t0) \
                             if tr['inst'].get('performer') else None
+                        iauto = self._event_iauto(tr, t0)
                         ck = (c.track, tr['gen'], round(lead, 6),
                               tuple((round(a, 6), m, round(d, 6), v) for a, m, d, v in notes_s),
-                              repr(sorted(expr.items())) if expr else '')
+                              repr(sorted(expr.items())) if expr else '', repr(sorted(iauto.items())) if iauto else '')
                         r = self.renders.get(ck)
                         if isinstance(r, np.ndarray):
                             self.cache[key] = r
@@ -327,7 +330,7 @@ class Engine:
                         else:
                             self.renders[ck] = 'pending'
                             self.rwait[ck] = [key]
-                            self._submit(ck, c.track, notes_s, lead, expr=expr)
+                            self._submit(ck, c.track, notes_s, lead, expr=expr, iauto=iauto)
 
     def _transpose(self, track, beat):
         """Semitones the track's deck transposes by at `beat` (drums never transpose)."""
@@ -431,6 +434,9 @@ class Engine:
                 g = np.array([[gl1], [gr1]])
             else:
                 g = np.stack([gl0 + (gl1 - gl0) * ramp, gr0 + (gr1 - gr0) * ramp])
+            vsch = self.ramps.get(('track:' + name, -1, 'volume_db'))
+            if vsch is not None:                       # a loaded song's volume automation: dB offset on the fader
+                g = g * 10 ** (np.asarray(vsch.curve(p0, n)) / 20)
             y = x * g
             ret = path.run_retiring(n, retired)
             dest = deck_in.get(t['deck'], master)
@@ -466,6 +472,9 @@ class Engine:
             gl1, gr1 = b['gl'], b['gr']
             b['cur'] = (gl1, gr1)
             y = x * np.stack([gl0 + (gl1 - gl0) * ramp, gr0 + (gr1 - gr0) * ramp])
+            vsch = self.ramps.get(('bus:' + bname, -1, 'volume_db'))
+            if vsch is not None:                       # a loaded song's bus volume automation
+                y = y * 10 ** (np.asarray(vsch.curve(p0, n)) / 20)
             deck_in.get(b['deck'], master).__iadd__(y)
             ms = float(np.mean(y ** 2))
             b['ms'] = b['ms'] * a + ms * (1 - a)
@@ -653,13 +662,22 @@ class Engine:
         except (F.FxError, ValueError) as e:
             raise LiveError(f"{where}: {e}")
 
-    def _job_inst(self, tr, expr=None):
-        """The instrument as a render job sees it: baked effects and expression lanes ride along."""
+    def _job_inst(self, tr, expr=None, iauto=None):
+        """The instrument as a render job sees it: baked effects, expression lanes and instrument automation
+        ride along."""
         inst = tr['inst']
         bake = tr.get('bake') or []
-        if not bake and not expr:
+        if not bake and not expr and not iauto:
             return inst
-        return dict(inst, _bake=bake, _expr=expr or {})
+        return dict(inst, _bake=bake, _expr=expr or {}, _auto=iauto or {})
+
+    def _event_iauto(self, tr, t0):
+        """A deck track's instrument automation for the event starting at clip beat t0: {param: [(seconds from
+        the onset, value)]}."""
+        lanes = tr.get('inst_auto')
+        if not lanes:
+            return None
+        return {k: [((b - t0) * self.spb, v) for b, v in pts] for k, pts in lanes.items()}
 
     def _event_expr(self, c, t0, span):
         """A clip's expression lanes cut to one event: [(seconds from the event onset, value)], starting with
@@ -1038,6 +1056,55 @@ class Engine:
                 msg.append('cued (off air)' if cue else 'on air')
             return f"deck {deck} ({when}): " + (', '.join(msg) or 'unchanged') + f"\n  {dk.describe(False)}"
 
+    def _deck_automation(self, info, start, loop):
+        """A loaded song's automation as ramps from `start` (house beats): fx params on the effect's schedule, track
+        volume as a dB offset on the fader, both shaped like the studio render (linear, log for frequencies, held
+        before and after). A looping deck repeats it every pass for the next 10 minutes. -> what could not come."""
+        b0, b1 = info['beats']
+        span = b1 - b0
+        passes = max(1, math.ceil(600 / (span * self.spb))) if loop else 1
+        bad = []
+        for target, lanes in info.get('automation', {}).items():
+            kind, name = target.split(':', 1)
+            node = (self.tracks if kind == 'track' else self.buses).get(name)
+            if node is None:
+                continue
+            for key, pts in lanes.items():
+                if key.startswith('inst.'):
+                    continue                           # rendered with the notes (inst_auto), not a ramp
+                if key == 'volume_db':
+                    idx, param = -1, 'volume_db'
+                else:
+                    try:
+                        _, i, param = key.split('.', 2)
+                        idx = int(i)
+                        f = node['path'].chain.fx[idx]
+                    except (ValueError, IndexError):
+                        bad.append(f"{name} {key} (no such effect)")
+                        continue
+                    if param not in F.AUTOMATABLE.get(f['type'], ()):
+                        bad.append(f"{name} {key} (not automatable live)")
+                        continue
+                pts = sorted((float(p[0]), float(p[1])) for p in pts)
+                beats = np.array([p[0] for p in pts])
+                vals = np.array([p[1] for p in pts])
+                log = any(k in param for k in G.LOG_PARAMS) and bool(np.all(vals > 0))
+
+                def at(b):
+                    return float(np.exp(np.interp(b, beats, np.log(vals))) if log else np.interp(b, beats, vals))
+                inner = [b for b in beats if b0 < b < b1]
+                knots = [(0.0, at(b0))] + [(b - b0, at(b)) for b in inner] + [(span, at(b1))]
+                sch = self.ramps[(target, idx, param)] = G.Schedule()
+                for p in range(passes):
+                    base = start + p * span
+                    for (x0, v0), (x1, v1) in zip(knots, knots[1:]):
+                        s0, s1 = self.sample(base + x0), self.sample(base + x1)
+                        if s1 > s0:
+                            sch.add(G.Ramp(s0, v0, s1, v1, log))
+                if idx >= 0:
+                    node['path'].chain.fx[idx][param] = knots[0][1]
+        return bad
+
     def cmd_load(self, deck, song, bars=None, at='next_bar', loop=True, cue=None):
         try:
             info, buses, tracks, clips, skipped = D.read_song(song, deck, bars, self.bpb)
@@ -1064,6 +1131,14 @@ class Engine:
                            fx=t['fx'] or None, sends=t['sends'] or None, deck=deck, output=t['output'],
                            root=t['root'], warm=False)
         with self.lock:
+            b0 = info['beats'][0]
+            for target, lanes in info.get('automation', {}).items():
+                tr = self.tracks.get(target.split(':', 1)[1]) if target.startswith('track:') else None
+                il = {k[5:]: sorted((float(b) - b0, float(v)) for b, v in pts) for k, pts in lanes.items()
+                      if k.startswith('inst.')}
+                if tr is not None and il and tr['inst'] and not tr['inst'].get('performer'):
+                    tr['inst'] = dict(tr['inst'], _whole=True)
+                    tr['inst_auto'] = il
             for t in tracks:                               # one warm-up per distinct instrument, not per track
                 self.tracks[t['track']]['warming'] = 0
             seen = {}
@@ -1086,6 +1161,11 @@ class Engine:
                 raise LiveError(str(e))
         bar = beat / self.bpb + 1
         out = self.cmd_queue([dict(c, loop=None if loop else 1, at=f'bar:{bar:g}') for c in clips])
+        with self.lock:
+            auto_note = self._deck_automation(info, beat, loop)
+        if auto_note:
+            skipped.setdefault('automation', [])
+            skipped['automation'] = skipped['automation'] + auto_note
         sk = [f"{k}: {v if isinstance(v, int) else ', '.join(v)}" for k, v in skipped.items() if v]
         head = (f"deck {deck}: loaded {info['name']} bars {info['bars'][0]}-{info['bars'][1]} "
                 f"({info['bars'][1] - info['bars'][0] + 1} bars, {len(tracks)} tracks, {len(buses)} buses), starts "
@@ -1407,8 +1487,11 @@ class Engine:
                 lines.append(f"  bus {name:<6} fx {b['path'].chain.describe()} | vol {b['volume_db']:+g} | level "
                              f"{lvl:6.1f} dBFS | fed by {', '.join(users) or 'nothing yet'}")
                 b['path'].chain.gr = {}
-            moving = [f"{k[0]} {'' if k[1] < 0 else f'fx[{k[1]}].'}{k[2]} -> " + ', '.join(f"{r.v1:g} by {fmt_bar(self.beat(r.p1), self.bpb)}"
-                                                                   for r in sch.r if r.p1 > self.pos)
+            def ahead(sch):                            # a loaded song's automation can hold hundreds: show two
+                fut = [r for r in sch.r if r.p1 > self.pos]
+                return ', '.join(f"{r.v1:g} by {fmt_bar(self.beat(r.p1), self.bpb)}" for r in fut[:2]) + \
+                    (f" (+{len(fut) - 2} more)" if len(fut) > 2 else '')
+            moving = [f"{k[0]} {'' if k[1] < 0 else f'fx[{k[1]}].'}{k[2]} -> " + ahead(sch)
                       for k, sch in self.ramps.items() if sch.target.p1 > self.pos]
             if moving:
                 lines.append("ramps: " + '; '.join(moving))

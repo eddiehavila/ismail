@@ -317,6 +317,42 @@ def test_load_cue_transition(eng, tmp_path):
     assert not any(eng.tl.playing(k, eng.beat(eng.pos)) for k, t in eng.tracks.items() if t['deck'] == 'A')
 
 
+def test_deck_keeps_the_songs_mix(eng, tmp_path):
+    """A loaded song sounds like its render: a drum group bus with a reverb insert keeps the dry drums, and
+    automation comes over (fx params and volume as ramps, instrument params rendered with the notes, the master
+    fade on everything that feeds the master)."""
+    from ismail.api import OPS
+    root = make_song(str(tmp_path / 'song'), 'Song', 'C4')
+    OPS['bus_add'](root, 'drums', fx=[{'type': 'reverb', 'size': 0.3, 'mix': 0.1}])
+    OPS['bus_add'](root, 'verb', fx=[{'type': 'reverb', 'mix': 1.0}])
+    OPS['track_set'](root, 'kick', output='drums')
+    OPS['track_set'](root, 'lead', sends={'verb': -12})
+    OPS['track_add'](root, 'bass', instrument={'type': 'synth', 'oscs': [{'wave': 'saw'}],
+                                               'filter': {'type': 'lp24', 'cutoff': 300}})
+    OPS['notes_write'](root, 'bass', 1, '0 C2 4', repeat=4)
+    OPS['fx_add'](root, 'lead', {'type': 'filter', 'mode': 'lp24', 'cutoff': 500})
+    OPS['automation_set'](root, 'lead', 'fx.0.cutoff', [[1, 500], [3, 8000]])
+    OPS['automation_set'](root, 'lead', 'volume_db', [[1, -6], [2, 0]])
+    OPS['automation_set'](root, 'bass', 'inst.filter.cutoff', [[1, 200], [4, 4000]])
+    OPS['automation_set'](root, 'master', 'volume_db', [[3, 0], [5, -60]])
+    out = eng.cmd_load('A', root, at='bar:3', loop=False)
+    assert 'automation:' not in out                           # every lane came over
+    drums = eng.buses['A.drums']['path'].chain.procs[0]
+    verb = eng.buses['A.verb']['path'].chain.procs[0]
+    assert drums.env.dry == 1.0 and verb.env.dry == 0.0      # insert on a group bus, wet-only on a send bus
+    keys = set(eng.ramps)
+    assert ('track:A.lead', 0, 'cutoff') in keys and ('track:A.lead', -1, 'volume_db') in keys
+    assert ('bus:A.drums', -1, 'volume_db') in keys and ('track:A.bass', -1, 'volume_db') in keys  # master fade
+    bass = eng.tracks['A.bass']
+    assert bass['inst'].get('_whole') and bass['inst_auto']['filter.cutoff'][0] == (0.0, 200.0)
+    lead_cut = eng.ramps[('track:A.lead', 0, 'cutoff')]
+    start = eng.sample(8)                                     # bar 3 of the house = beat 8
+    assert abs(lead_cut.value(start) - 500) < 1 and abs(lead_cut.value(start + eng.sample(8) - 1) - 8000) < 50
+    run(eng, 16.0)
+    assert not [k for k, v in eng.cache.items() if isinstance(v, str) and v == 'error']
+    assert np.max(np.abs(eng.air[:, :eng.pos])) > 0.01
+
+
 def test_deck_transpose_and_errors(eng, tmp_path):
     a = make_song(str(tmp_path / 'songA'), 'Song A', 'A4')
     eng.cmd_load('A', a, at='next_bar')

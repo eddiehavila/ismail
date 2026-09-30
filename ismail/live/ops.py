@@ -182,8 +182,11 @@ def live_load(project: str, deck: str, song: str, bars: list = None, at: str = '
     """Load an ismail song (its project folder: tracks, instruments, effects, buses, notes) onto a deck; every
     track starts on the same bar. bars=[a, b] takes a section. It plays at the house tempo (re-rendered, not
     time-stretched) and loops unless loop=False. Cued (off air) by default while another deck is on air: listen
-    with live_listen(deck=...), then bring it in with live_transition. Automation and placed audio clips do not
-    come over (the reply lists what was left out). Loading replaces what a cued deck held."""
+    with live_listen(deck=...), then bring it in with live_transition. The song's mix comes over as rendered:
+    its automation (effect params and volume as ramps, instrument params rendered with the notes, the master fade;
+    repeated every pass on a looping deck) and its group buses (a reverb on a drum bus keeps the dry drums). Placed
+    audio clips and the master effect chain do not (the reply lists what was left out). Loading replaces what a
+    cued deck held."""
     if not os.path.isabs(song):
         cand = os.path.join(os.path.abspath(project), song)
         song = cand if os.path.exists(cand) else os.path.abspath(song)

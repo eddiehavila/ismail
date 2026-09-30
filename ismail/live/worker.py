@@ -85,12 +85,28 @@ def _perform(inst, notes, total, bpm, root, expr):
     return out
 
 
+def _auto_curves(lanes, lead_s, total):
+    """Instrument automation {param: [(seconds from the onset, value)]} -> per-sample curves over the event, shaped
+    like the studio's (render.automation_curve: linear, log for frequencies, held before and after)."""
+    from ..render import LOG_PARAMS
+    out = {}
+    t = np.arange(total) / SR - lead_s
+    for k, pts in lanes.items():
+        xs = np.array([p[0] for p in pts], dtype=float)
+        vs = np.array([p[1] for p in pts], dtype=float)
+        if any(x in k for x in LOG_PARAMS) and np.all(vs > 0):
+            out[k] = np.exp(np.interp(t, xs, np.log(vs)))
+        else:
+            out[k] = np.interp(t, xs, vs)
+    return out
+
+
 def render_event(inst, notes, lead_s, bpm, root):
     """notes: [(start_s, midi, dur_s, vel)] relative to the event onset; lead_s: where the onset sits inside the
     bar (keeps drum noise seeds and bar-locked LFO phase as offline). Returns float32 (2, n) from the onset.
     inst may carry '_bake' (studio effects run on this event) and '_expr' (lanes for a performer voice)."""
-    bake, expr = inst.get('_bake') or [], inst.get('_expr')
-    inst = {k: v for k, v in inst.items() if k not in ('_bake', '_expr')}
+    bake, expr, iauto = inst.get('_bake') or [], inst.get('_expr'), inst.get('_auto') or {}
+    inst = {k: v for k, v in inst.items() if k not in ('_bake', '_expr', '_auto', '_whole')}
     lead = int(round(lead_s * SR))
     span = max(s + d for s, _, d, _ in notes)
     total = lead + int((span + MAX_TAIL_S) * SR)
@@ -98,7 +114,8 @@ def render_event(inst, notes, lead_s, bpm, root):
     if inst.get('performer'):
         y = _perform(inst, shifted, total, bpm, root, expr)
     else:
-        y = instruments.render_instrument(inst, shifted, total, None, bpm, SR, root)
+        y = instruments.render_instrument(inst, shifted, total, _auto_curves(iauto, lead_s, total) or None, bpm,
+                                          SR, root)
     if bake:
         from .. import fx as studio_fx
         ctx = _BakeCtx(bpm)

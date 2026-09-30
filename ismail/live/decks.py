@@ -109,6 +109,9 @@ class Deck:
 
 # ------------------------------------------------------------------ loading a song
 
+DRY_FX = ('reverb', 'delay', 'hall')     # effects with a dry level (studio fx._dry)
+
+
 def _rename_fx(fxs, deck, names):
     out = []
     for f in fxs or []:
@@ -121,6 +124,16 @@ def _rename_fx(fxs, deck, names):
                 raise DeckError(f"{f['type']} uses {v}: live effects take a track as modulator, not a sound")
         out.append(f)
     return out
+
+
+def _sum_lanes(a, b):
+    """Two dB lanes [[beat, value], ...] -> their sum, exact at the union of their points."""
+    import numpy as np
+    a, b = sorted(a), sorted(b)
+    xs = sorted({p[0] for p in a} | {p[0] for p in b})
+    ia = np.interp(xs, [p[0] for p in a], [p[1] for p in a])
+    ib = np.interp(xs, [p[0] for p in b], [p[1] for p in b])
+    return [[float(x), float(u + v)] for x, u, v in zip(xs, ia, ib)]
 
 
 def read_song(path, deck, bars, house_bpb):
@@ -142,8 +155,24 @@ def read_song(path, deck, bars, house_bpb):
     beat0, beat1 = (b0 - 1) * bpb, b1 * bpb
     tnames = set(d['tracks'])
     skipped = {'muted': [], 'no instrument': [], 'automation': [], 'placed audio': 0, 'silent in range': []}
-    buses = [(f"{deck}.{b}", _rename_fx(v.get('fx'), deck, tnames), float(v.get('volume_db', 0.0)))
+    # a bus that tracks play through (a drum group) keeps the studio's insert rule: its reverb, delay or hall passes
+    # the dry signal (dry 1); only a pure send bus is wet-only. Live buses default to wet-only, which took the kick
+    # and snare out of a song whose drum group had a reverb on it
+    grouped = {t.get('output') for t in d['tracks'].values()}
+    buses = [(f"{deck}.{b}", [dict(f, dry=1.0) if b in grouped and f['type'] in DRY_FX and f.get('dry') is None
+                              else f for f in _rename_fx(v.get('fx'), deck, tnames)], float(v.get('volume_db', 0.0)))
              for b, v in (d.get('buses') or {}).items()]
+    # automation comes over: {'track:<deck>.<name>' or 'bus:<deck>.<name>': {'fx.0.cutoff' | 'volume_db' | 'inst.<param>':
+    # [[beat, value], ...]}}, beats from the song's bar 1 (the studio's format). fx and volume become ramps; inst lanes
+    # render with the notes (the track's section is one render event)
+    auto = {}
+    for b, v in (d.get('buses') or {}).items():
+        for key, pts in (v.get('automation') or {}).items():
+            if key == 'volume_db' or key.startswith('fx.'):
+                auto.setdefault(f"bus:{deck}.{b}", {})[key] = pts
+            else:
+                skipped['automation'].append(f"bus {b} {key}")
+    master_fade = ((d.get('master') or {}).get('automation') or {}).get('volume_db')
     tracks, clips = [], []
     solo = any(t.get('solo') for t in d['tracks'].values())
     for name, t in d['tracks'].items():
@@ -154,9 +183,12 @@ def read_song(path, deck, bars, house_bpb):
         if not t.get('instrument'):
             skipped['no instrument'].append(name)
             continue
-        if t.get('automation'):
-            skipped['automation'].append(name)
-        notes = [(n[0] - beat0, n[1], n[2], n[3]) for n in t.get('notes', []) if beat0 <= n[0] < beat1]
+        for key, pts in (t.get('automation') or {}).items():
+            if key == 'volume_db' or key.startswith(('fx.', 'inst.')):
+                auto.setdefault(f"track:{deck}.{name}", {})[key] = pts
+            else:
+                skipped['automation'].append(f"{name} {key}")
+        notes =[(n[0] - beat0, n[1], n[2], n[3]) for n in t.get('notes', []) if beat0 <= n[0] < beat1]
         full = f"{deck}.{name}"
         out = t.get('output', 'master')
         tracks.append({'track': full, 'instrument': t['instrument'], 'fx': _rename_fx(t.get('fx'), deck, tnames),
@@ -172,8 +204,19 @@ def read_song(path, deck, bars, house_bpb):
     if dropped:
         skipped['effects without their source'] = dropped
     clips = [c for c in clips if c['track'] in {t['track'] for t in tracks}]
+    if master_fade:
+        # the song's master fade rides on everything that feeds its master directly (tracks without a bus, and its
+        # buses), added in dB to any volume automation already there: both are piecewise linear, so summing them at
+        # the union of their points is exact
+        heads = [t['track'] for t in tracks if t['output'] is None] + [b[0] for b in buses]
+        for h in heads:
+            key = ('track:' if not any(h == b[0] for b in buses) else 'bus:') + h
+            own = auto.setdefault(key, {}).get('volume_db')
+            auto[key]['volume_db'] = _sum_lanes(own, master_fade) if own else master_fade
+    kept = {t['track'] for t in tracks} | {b[0] for b in buses}
     song = {'name': d.get('name') or os.path.basename(root.rstrip('/\\')), 'bars': [b0, b1],
-            'bpm': d.get('bpm'), 'root': root, 'tracks': [t['track'] for t in tracks]}
+            'bpm': d.get('bpm'), 'root': root, 'tracks': [t['track'] for t in tracks],
+            'automation': {k: v for k, v in auto.items() if k.split(':', 1)[1] in kept}, 'beats': [beat0, beat1]}
     return song, buses, tracks, clips, skipped
 
 

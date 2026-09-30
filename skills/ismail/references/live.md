@@ -106,8 +106,12 @@ air; only you hear it, through `live_listen(deck=...)`.
 
 1. `live_load(deck='B', song=<ismail project folder>, bars=[a, b])` puts a song (or a section) on deck B: its
    tracks, effects and buses come over as `B.<name>`, its notes play at the house tempo (re-rendered, not
-   stretched). It is cued while another deck is on air. The reply lists what did not come over (automation,
-   placed audio clips, effects whose source track was muted).
+   stretched), with its automation (effect sweeps, volume curves, instrument filter and pitch moves, the master
+   fade) and its group buses. It is cued while another deck is on air. The reply lists what did not come over
+   (placed audio clips, the master effect chain, effects whose source track was muted). A track with instrument
+   automation renders its whole section as one event: load the deck several bars before it plays.
+   Before a set, A/B each song on a deck against its render (a silent engine, `live_start(device='none')`, plus
+   `live_record`): a drum bus that had lost its dry signal left only the bass audible, and only the user heard it.
 2. Listen to deck B while deck A plays; fix it there (`live_deck` eq/transpose, `live_fx` on `B.<track>`).
    Key-match with `live_deck(transpose=...)` (drums stay).
 3. `live_transition(to='B', style=..., bars=16, at='next_8')` queues the whole mix: `blend` (B up without bass,
@@ -155,8 +159,8 @@ last studio-only effect in a chain is baked, so order is kept; a sidechain or du
 cannot bake at all (put the effect on the tracks).
 
 Not yet: master-bus effects (the safety chain is the master), vocoder modulators from sound-bank sounds,
-instrument-param automation (use fx params, or expr lanes on a performer), tempo changes inside a run, a song's
-automation and placed audio clips on a deck.
+instrument-param automation on your own live tracks (a deck's song has it; otherwise use fx params, or expr
+lanes on a performer), tempo changes inside a run, placed audio clips and the master effect chain on a deck.
 
 ## Numbers worth knowing
 
