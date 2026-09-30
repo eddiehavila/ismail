@@ -86,3 +86,51 @@ def test_backbeat_puts_the_snare_on_two_and_four(tmp):
     off = (g['offset_sec'] - 1.3) % bar
     assert min(off, bar - off) < 0.03, txt
     assert max(g['backbeat_scores']) > 0.15, txt
+
+
+def test_kit_and_sections_and_quiet_render(tmp):
+    p = os.path.join(tmp, 'p')
+    api.project_new(p, bpm=96, length_bars=16)
+    loop = os.path.join(tmp, 'loop.wav')
+    sf.write(loop, drum_loop(96, 0.0, 16), SR)
+    txt = OPS['analyze_kit'](p, source=loop, bars=[1, 16], k=3, cycle=1)
+    assert txt.count('\ncomp ') == 3 and os.path.exists(os.path.join(p, 'analysis', 'kit', 'comp_0.wav'))
+    assert 'kick' in txt and 'hat' in txt, txt
+    # four 4-bar sections: the third is as loud as the fourth (the build eats the climax), then a fixed version
+    t = np.arange(int(16 * 2.5 * SR)) / SR
+    for levels, warned in (((-30, -20, -11, -10), True), ((-30, -20, -15, -10), False)):
+        env = np.repeat([10 ** (lv / 20) for lv in levels], len(t) // 4 + 1)[:len(t)]
+        f = os.path.join(tmp, f'song{warned}.wav')
+        sf.write(f, np.sin(2 * np.pi * 220 * t) * env * 1.41, SR)
+        out = OPS['analyze_sections'](p, source=f, block=4)
+        assert ('WARNING' in out) == warned, out
+        assert '20.0 dB between' in out, out
+
+
+def test_ref_retune_and_levels_from_ref(tmp):
+    p = os.path.join(tmp, 'p')
+    api.project_new(p, bpm=120, length_bars=4)
+    api.track_add(p, 'drums', instrument='preset:kit_basic')
+    api.track_add(p, 'bass', instrument={"type": "synth", "oscs": [{"wave": "saw"}], "mono": True}, volume_db=-6)
+    api.pattern_write(p, 'drums', 1, {"C1": "x...x...x...x...", "D1": "....x.......x..."}, repeat=4)
+    api.notes_write(p, 'bass', 1, "0 E2 1; 1 G2 1; 2 A2 1; 3 D3 1", repeat=4)
+    txt = api.render(p, stems=True)
+    assert 'QUIET' not in txt
+    # the reference: your own stems with the bass 6 dB lower, the mix detuned +40 cents
+    sd = os.path.join(tmp, 'ref_stems')
+    os.makedirs(sd)
+    for s, t, g in (('drums', 'drums', 1.0), ('bass', 'bass', 0.5)):
+        y, sr = sf.read(os.path.join(p, 'renders', 'stems', t + '.wav'))
+        sf.write(os.path.join(sd, s + '.wav'), y * g, sr)
+    ref = os.path.join(tmp, 'ref.wav')
+    sf.write(ref, np.stack([tones(40, 8.5)] * 2, 1), SR)
+    api.project_set(p, reference=ref, reference_stems=sd)
+    OPS['stem_map_set'](p, {'drums': 'drums', 'bass': 'bass'})
+    out = OPS['levels_from_ref'](p, apply=True)
+    vol = api._load(p).d['tracks']
+    assert abs((vol['bass']['volume_db'] + 6) - vol['drums']['volume_db'] + 6.0) < 0.5, out
+    out = OPS['ref_retune'](p)
+    new = api._load(p).d['reference']
+    assert new['file'] != ref and os.path.exists(os.path.join(new['stems_dir'], 'bass.wav')), out
+    assert abs(A.tuning(A.load(new['file']))[0]) < 5
+    assert new['original']['file'] == ref

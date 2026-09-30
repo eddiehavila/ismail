@@ -1052,6 +1052,9 @@ def render(project: str, bars: list = None, tracks: list = None, stems: bool = F
     L = [f"rendered {y.shape[1] / R.sr:.1f}s" + (f" (bars {bars[0]}-{bars[1]})" if bars else '') +
          f" in {R.elapsed:.1f}s -> renders/latest.wav{' + renders/' + out + '.wav' if out and mp3 != 'only' else ''}{mp3_note}",
          f"master: {lufs:.1f} LUFS, peak {peak:.1f} dBFS" + (f", CLIPPING {clip:.2f}% of samples (lower levels or add limiter)" if clip > 0.001 else '')]
+    if R.full and lufs < -20:
+        L.append(f"  QUIET: {lufs:.1f} LUFS is under every genre target (classical and ambient sit at -18 to -16): raise "
+                 f"the master (limiter gain_db) or the faders; at low playback volume this reads as nothing")
     L.append("  per track (after its fx and fader, scaled by the master chain's gain, so tracks sum to the mix;"
              " buses listed as bus:<name>):")
     for k, v in st.items():
@@ -1319,3 +1322,4 @@ def call(name, **kw):
 
 from . import api_cmp  # noqa: E402,F401  (registers stem/structure/comparison ops)
 from . import api_sound  # noqa: E402,F401  (registers sound_compare / instrument_fit)
+from . import api_measure  # noqa: E402,F401  (registers tuning, swing, kit, section and level ops)

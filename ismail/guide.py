@@ -28,17 +28,22 @@ HEAR (audio -> text), cheapest first
   analyze_roll        piano roll of a source (same features the comparisons score)
   analyze_melody      monophonic line -> notes               analyze_formants  vowels of a voice
   analyze_timbre / analyze_spectrum / sound_compare          spectrogram (PNG, last resort)
+  analyze_kit         drum kit pieces (NMF) + their patterns analyze_swing     how late swung hats land
+  analyze_sections    loudness per section, dynamic range, a build as loud as its climax
 
 RECREATE A REFERENCE (what worked)
   1. analyze_grid -> project_set(bpm, offset_sec); then align(a='track:<drum>', b='ref:drums') and correct
-     offset_sec by the reported lag. Timing errors poison every other metric.
+     offset_sec by the reported lag. Timing errors poison every other metric. It also prints the tuning: a record
+     15+ cents off A440 needs ref_retune() before any pitch reading, or every note reads as two semitones.
   2. separate(source='ref') (or project_set reference_stems=...) and analyze_structure(source='ref').
+     analyze_swing and analyze_kit(source='ref:drums') before writing any drums: measured, never guessed.
   3. Transcribe with notes_from_audio_loop (consensus over loop repetitions). Raw notes_from_audio copies echoes,
      leakage and distortion partials as hard notes: it scores well and sounds like clutter.
      Route registers of one stem to different tracks with low/high.
   4. Sound design: sound_extract a repeated hit/stab (e.g. every=8 for one position of an 8-bar loop), then
      instrument_fit(target='sound:x', params={path: [lo, hi]}, fx=[...]) - fx params fit too ('fx.0.depth_db').
-  5. stem_map_set({track: stem}) -> render(stems=True) -> cmp_run. Read cmp_summary, then drill:
+  5. stem_map_set({track: stem}) -> render(stems=True) -> levels_from_ref (faders from the reference's stem
+     balance, not by feel) -> cmp_run. Read cmp_summary, then drill:
      cmp_arrangement (macro), cmp_sections, cmp_worst / cmp_bars (per bar), cmp_zoom(bar) (per 16th:
      b both, r reference only, y yours only, UPPERCASE = note start). cmp_list = progress over time.
   6. For fair stem scores use cmp_run(stems='demucs') at checkpoints: your render is separated by the same
