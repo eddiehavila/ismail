@@ -180,9 +180,9 @@ def analyze_kit(project: str, source: str = 'ref:drums', bars: list = None, k: i
 @op()
 def analyze_sections(project: str, source: str = 'render', sections: dict = None, block: int = 4) -> str:
     """Loudness per section: rms, peak, loudest and quietest 400 ms, and the song's dynamic range. sections =
-    {"intro": [1, 4], "climax": [25, 28], ...} (bars inclusive); omitted = blocks of `block` bars. Flags a section
-    that peaks within 3 dB of the loudest one right before it (the climax will not arrive: a build as loud as its
-    climax only showed up here) and sections so quiet they vanish at normal volume."""
+    {"intro": [1, 4], "climax": [25, 28], ...} (bars inclusive); omitted = blocks of `block` bars. Flags the
+    section right before the loudest when it is 2 dB or more quieter on average but peaks within 3 dB of it (a build
+    as loud as its climax: the climax will not arrive, and this only showed up here) and sections so quiet they vanish at normal volume."""
     P = _load(project)
     y, sr = _segment(P, source)
     _, g = P.source(source)
@@ -212,7 +212,9 @@ def analyze_sections(project: str, source: str = 'render', sections: dict = None
     L.append(f"dynamic range: {top[3] - low[3]:.1f} dB between the loudest section ({top[0]}, rms {top[3]:.1f}) and the "
              f"quietest with sound ({low[0]}, {low[3]:.1f})")
     i = rows.index(top)
-    if i > 0 and rows[i - 1][5] > top[5] - 3:
+    # a build: 2 dB or more under the loudest section on average, yet its loudest moment is as loud. Two loud
+    # sections in a row (a drop that goes on) are one section and are not flagged
+    if i > 0 and rows[i - 1][5] > top[5] - 3 and rows[i - 1][3] < top[3] - 2:
         p = rows[i - 1]
         L.append(f"WARNING {p[0]} (bars {p[1]}-{p[2]}) peaks {top[5] - p[5]:.1f} dB under {top[0]}, the loudest: the "
                  f"arrival will not land. Keep what comes before the climax 3 dB or more under it (faders, automation "

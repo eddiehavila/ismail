@@ -96,14 +96,18 @@ def test_kit_and_sections_and_quiet_render(tmp):
     txt = OPS['analyze_kit'](p, source=loop, bars=[1, 16], k=3, cycle=1)
     assert txt.count('\ncomp ') == 3 and os.path.exists(os.path.join(p, 'analysis', 'kit', 'comp_0.wav'))
     assert 'kick' in txt and 'hat' in txt, txt
-    # four 4-bar sections: the third is as loud as the fourth (the build eats the climax), then a fixed version
+    # four 4-bar sections, levels per 2-bar half. A build that rises to the climax's level (3 dB under on average,
+    # 0.5 dB at its end) is flagged; a drop that goes on at the same level is one section, and a build kept 5 dB
+    # under is fine
     t = np.arange(int(16 * 2.5 * SR)) / SR
-    for levels, warned in (((-30, -20, -11, -10), True), ((-30, -20, -15, -10), False)):
-        env = np.repeat([10 ** (lv / 20) for lv in levels], len(t) // 4 + 1)[:len(t)]
-        f = os.path.join(tmp, f'song{warned}.wav')
+    for name, levels, warned in (('build', (-30, -30, -20, -20, -20, -10.5, -10, -10), True),
+                                 ('drops', (-30, -30, -20, -20, -11, -11, -10, -10), False),
+                                 ('fixed', (-30, -30, -20, -20, -15, -15, -10, -10), False)):
+        env = np.repeat([10 ** (lv / 20) for lv in levels], len(t) // 8 + 1)[:len(t)]
+        f = os.path.join(tmp, f'song_{name}.wav')
         sf.write(f, np.sin(2 * np.pi * 220 * t) * env * 1.41, SR)
         out = OPS['analyze_sections'](p, source=f, block=4)
-        assert ('WARNING' in out) == warned, out
+        assert ('WARNING' in out) == warned, (name, out)
         assert '20.0 dB between' in out, out
 
 
