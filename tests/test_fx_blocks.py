@@ -1,8 +1,8 @@
-"""Every effect gives the same output whether the signal arrives whole (offline) or in blocks of any size (live)."""
+"""Every live effect processor gives the same output whether the signal arrives whole or in blocks of any size."""
 import numpy as np
 import pytest
 
-from ismail import fx as F
+from ismail.live import fx_blocks as F
 from ismail.dsp import SR
 
 N = int(1.5 * SR)

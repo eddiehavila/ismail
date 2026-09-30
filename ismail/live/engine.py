@@ -21,7 +21,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import numpy as np
 
-from .. import fx as F
+from . import fx_blocks as F
 from .. import instruments
 from ..dsp import SR
 from ..notation import NotationError, format_notes, parse_notes, parse_steps, pitch_to_midi, fmt_num
@@ -66,7 +66,9 @@ def _tail_s(inst):
 
 
 def _mono_groups(notes, inst):
-    if inst.get('type') == 'synth' and inst.get('mono'):
+    # a mono synth glides inside a phrase; a performer voice plays overlapping notes as one gesture (legato,
+    # slides, a ringing chord): both render a group of overlapping notes as one event
+    if (inst.get('type') == 'synth' and inst.get('mono')) or inst.get('performer'):
         groups = []
         for i, (st, _, d, _) in enumerate(notes):
             if groups and st < max(notes[j][0] + notes[j][2] for j in groups[-1]) - EPS:
@@ -151,9 +153,9 @@ class Engine:
         return int(round(beat * self.spb * SR))
 
     # ------------------------------------------------------------------ rendering
-    def _submit(self, key, track, notes_s, lead_s, warm=False):
+    def _submit(self, key, track, notes_s, lead_s, warm=False, expr=None):
         tr = self.tracks[track]
-        inst = tr['inst']
+        inst = self._job_inst(tr, expr)
         self._jid += 1
         jid = self._jid
         audio_s = max(s + d for s, _, d, _ in notes_s) + _tail_s(inst)
@@ -174,7 +176,7 @@ class Engine:
         """A short throwaway note on every worker (first-use compilation happens off the air), then one 1 s note
         on whichever worker is free to measure what a second of this instrument costs to render."""
         tr = self.tracks[track]
-        inst = tr['inst']
+        inst = self._job_inst(tr)
         pitch = int(next(iter(inst['map']))) if inst.get('type') == 'kit' else 60
         short, full = [(0.0, pitch, 0.1, 100)], [(0.0, pitch, 1.0, 100)]
         guess = self._rate(tr)
@@ -310,8 +312,11 @@ class Engine:
                         tr = self.tracks[c.track]
                         # code and mimic voices do not depend on where the note sits in the bar
                         lead = 0.0 if tr['inst']['type'] in ('code', 'mimic') else (t0 % self.bpb) * self.spb
+                        expr = self._event_expr(c, t0, max(c.notes[j][0] + c.notes[j][2] for j in g) - t0) \
+                            if tr['inst'].get('performer') else None
                         ck = (c.track, tr['gen'], round(lead, 6),
-                              tuple((round(a, 6), m, round(d, 6), v) for a, m, d, v in notes_s))
+                              tuple((round(a, 6), m, round(d, 6), v) for a, m, d, v in notes_s),
+                              repr(sorted(expr.items())) if expr else '')
                         r = self.renders.get(ck)
                         if isinstance(r, np.ndarray):
                             self.cache[key] = r
@@ -322,7 +327,7 @@ class Engine:
                         else:
                             self.renders[ck] = 'pending'
                             self.rwait[ck] = [key]
-                            self._submit(ck, c.track, notes_s, lead)
+                            self._submit(ck, c.track, notes_s, lead, expr=expr)
 
     def _transpose(self, track, beat):
         """Semitones the track's deck transposes by at `beat` (drums never transpose)."""
@@ -626,6 +631,17 @@ class Engine:
             fxs = G.normalize_chain(fxs, where)
         except G.GraphError as e:
             raise LiveError(str(e))
+        bake, fxs = G.split_chain(fxs)
+        if bake and own is None:
+            raise LiveError(f"{where}: {', '.join(sorted({f['type'] for f in bake if f['type'] not in F.PROCS}))} has "
+                            f"no live version and a bus cannot bake it (a bus has no notes to render): put it on "
+                            f"the tracks instead")
+        for f in bake:
+            src = [f.get(k) for k in ('sidechain', 'source', 'modulator') if f.get(k)]
+            if src:
+                raise LiveError(f"{where}: {f['type']} reads {src[0]!r} but sits before a studio-only effect, so it "
+                                f"would be baked per note, where other tracks are not available: move it after the "
+                                f"studio-only effects")
         for d in G.deps(fxs):
             if d == own:
                 raise LiveError(f"{where}: a track cannot sidechain, duck or vocode from itself")
@@ -633,9 +649,29 @@ class Engine:
                 raise LiveError(f"{where}: an effect reads track {d!r}, which is not a live track; tracks: "
                                 f"{list(self.tracks) or 'none'} (create it first)")
         try:
-            return G.Chain(fxs, self.bpm, dry_default)
+            return G.Chain(fxs, self.bpm, dry_default, bake)
         except (F.FxError, ValueError) as e:
             raise LiveError(f"{where}: {e}")
+
+    def _job_inst(self, tr, expr=None):
+        """The instrument as a render job sees it: baked effects and expression lanes ride along."""
+        inst = tr['inst']
+        bake = tr.get('bake') or []
+        if not bake and not expr:
+            return inst
+        return dict(inst, _bake=bake, _expr=expr or {})
+
+    def _event_expr(self, c, t0, span):
+        """A clip's expression lanes cut to one event: [(seconds from the event onset, value)], starting with
+        the value in force at the onset."""
+        if not c.expr:
+            return None
+        out = {}
+        for name, pts in c.expr.items():
+            before = [v for b, v in pts if b <= t0 + EPS]
+            seg = [((b - t0) * self.spb, v) for b, v in pts if t0 + EPS < b <= t0 + span]
+            out[name] = [(0.0, before[-1] if before else pts[0][1])] + seg
+        return out
 
     def _order(self, override=None):
         """Tracks in an order where every sidechain/vocoder source comes before the tracks that read it."""
@@ -766,7 +802,7 @@ class Engine:
                                       'cur': (0.0, 0.0), 'ms': 0.0, 'est': None, 'warming': 0, 'warm_s': None,
                                       'errors': [], 'gen': 0, 'path': G.Path(chain), 'sends': sends or {},
                                       'send_lags': {}, 'deck': deck, 'output': output, 'out_lag': None,
-                                      'root': root}
+                                      'root': root, 'bake': list(chain.bake)}
                 self._send_lags(self.tracks[track])
                 self._refresh_graph()
                 new_chain = None
@@ -776,6 +812,13 @@ class Engine:
                 self._check_latency(new_chain.latency, sends if sends is not None else tr['sends'], f"track {track!r}")
                 self._order({track: new_chain.fx})
                 s0 = self._at_sample(at)
+
+                if new_chain.bake != tr.get('bake'):
+                    # baked effects live in the rendered notes: render them again from the swap on
+                    tr['bake'] = list(new_chain.bake)
+                    tr['gen'] += 1
+                    if tr['inst'] is not None:
+                        self._rerender_from(track, self.beat(s0), tr['inst'])
 
                 def swap(tr=tr, ch=new_chain, name=track):
                     tr['path'].retire_to(ch)
@@ -1159,12 +1202,23 @@ class Engine:
         if track not in self.tracks:
             raise LiveError(f"clip [{i}]: no live track {track!r}; create it with live_track(project, track="
                             f"'{track}', instrument=...). Live tracks: {list(self.tracks) or 'none'}")
-        known = {'track', 'notes', 'lanes', 'step', 'bars', 'beats', 'loop', 'at', 'stop'}
+        known = {'track', 'notes', 'lanes', 'step', 'bars', 'beats', 'loop', 'at', 'stop', 'expr'}
         extra = set(it) - known
         if extra:
             raise LiveError(f"clip [{i}]: unknown keys {sorted(extra)}; valid: {sorted(known)}")
         if it.get('stop'):
-            return track, None, None, None
+            return track, None, None, None, None
+        expr = None
+        if it.get('expr'):
+            if not self.tracks[track]['inst'] or not self.tracks[track]['inst'].get('performer'):
+                raise LiveError(f"clip [{i}]: expr lanes drive performer voices (a voice module with perform()); "
+                                f"track {track!r} is not one. For effect params use live_fx ramps")
+            try:
+                expr = {str(k): sorted((float(b), float(v)) for b, v in pts) for k, pts in it['expr'].items()}
+                assert all(expr.values())
+            except (TypeError, ValueError, AssertionError, AttributeError):
+                raise LiveError(f"clip [{i}]: expr is {{lane: [[beat, value], ...]}} with beats from the clip start, "
+                                f"e.g. {{'bend': [[0, 0], [1.5, 2], [2, 0]]}}")
         notes = []
         try:
             if it.get('notes'):
@@ -1199,7 +1253,7 @@ class Engine:
                 assert loop >= 1
             except (ValueError, AssertionError):
                 raise LiveError(f"clip [{i}]: loop={it.get('loop')!r}; use a count >= 1 or 'forever'")
-        return track, notes, length, loop
+        return track, notes, length, loop, expr
 
     def cmd_queue(self, clips):
         if not isinstance(clips, list) or not clips:
@@ -1211,7 +1265,7 @@ class Engine:
             claims, lines, added = [], [], []
             extra = 0.0                      # render seconds of earlier clips in this batch
             batch_ids = {}                   # batch index -> clip id, for at='after:#<index>'
-            for i, (track, notes, length, loop, at) in enumerate(parsed):
+            for i, (track, notes, length, loop, expr, at) in enumerate(parsed):
                 if at.startswith('after:#'):
                     try:
                         k = int(at[7:])
@@ -1242,6 +1296,7 @@ class Engine:
                                  + (f"\n  note: {note}" if note else ''))
                     continue
                 c = tl.add(track, notes, length, loop, beat, at)
+                c.expr = expr
                 batch_ids[i] = c.id
                 added.append(c)
                 bars = length / self.bpb

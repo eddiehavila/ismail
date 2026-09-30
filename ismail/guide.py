@@ -44,6 +44,9 @@ LIVE (play in real time while you edit; a separate engine process per project fo
   Effects: live_track(fx=[...]) sets a track's chain (fx_help; 'track:<name>' copies a project track's chain),
   live_bus + sends={bus: dB} share one hall/delay across tracks, live_fx(target, index, params, ramp_beats)
   moves automatable params (a sweep, a fade, a build) without resending the chain. Replaced chains ring out.
+  An effect with no live version is baked into each rendered note (live_status marks it; no live_fx on it).
+  A performer voice (module with perform()) plays overlapping notes as one gesture; clip expr={'bend': [[beat,
+  semitones], ...]} drives its bends and vibrato.
   Decks: live_load(deck, song=<ismail project folder>, bars=[a, b]) puts a whole song on a deck (cued, off air,
   while another deck plays); live_listen(deck=...) hears the cued deck; live_transition(to, style, bars) queues
   the mix (blend | bass_swap | filter | cut); live_deck sets fader, 3-band isolator (kill at -40), filter knob,

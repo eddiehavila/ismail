@@ -28,6 +28,7 @@ class Clip:
         self.start = float(start)
         self.at = at
         self.cut = None                  # beat where a later clip or stop takes over
+        self.expr = None                 # {lane: [(beat_in_clip, value)]} for performer voices (bend, vib, ...)
 
     @property
     def natural_end(self):

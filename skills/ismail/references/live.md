@@ -78,10 +78,18 @@ triplets first announces the new grid; then drop. 2T and T/2 (half-time) work th
 Phrase boundaries: `next_16` and friends count from bar 1 of the run, not from where a playing part's phrase
 began. When a new part must line up with a 16-bar phrase that started on bar 37, use `bar:<37 + 16k>`.
 
-## Phrase voices: performers in a live set
+## Performers and phrase voices
 
-A code voice renders one note at a time, so legato, slides and bends between notes need another shape: make
-**one note = one whole phrase**. The voice takes a `phrases` param, `{"<velocity>": {"notes": [...], "bend":
+A code voice renders one note at a time, so legato, slides and bends between notes need another shape.
+
+**Performer voices.** A voice module with `perform(notes, total_n, sr, bpm, lanes, **params)` and no `voice()`
+plays a whole part (a guitar with hammer-ons and slides, strings that ring on). `live_track` detects it, and live
+renders each group of overlapping notes as one event, so legato and slides work. Bends and vibrato come from the
+clip's `expr` lanes, `{"bend": [[beat, semitones], ...], "vib": [[beat, cents], ...]}` with beats from the clip
+start; the voice's INFO lists its lanes.
+
+**Phrase voices** are the older trick for a performer that is not written that way: make **one note = one whole
+phrase**. The voice takes a `phrases` param, `{"<velocity>": {"notes": [...], "bend":
 [[beat, semitones], ...], "vib": [[beat, cents], ...]}}`, and the note's velocity picks the phrase; the note's
 pitch can transpose it against a `root`. Inside, call the performer on the phrase's notes and lanes and run any
 offline effect chain on the result. Phrases render once and are cached, so they can be slow (a physical guitar
@@ -135,11 +143,20 @@ hole at the bass swap. Pick `bars` so the section starts on its downbeat hit.
 
 ## What is and is not live yet
 
-Live: every instrument type including mimic profiles, every effect (the same processors as offline renders,
-block for block), send buses, sidechain/duck/vocoder from live tracks, ramps on every automatable fx param.
+Live: every instrument type including mimic profiles and performer voices, every effect, send buses,
+sidechain/duck/vocoder from live tracks, ramps on every automatable fx param.
+
+Effects run two ways. An effect with a live processor (every built-in type today) runs block by block on the
+mixer and matches the studio version (held by tests). An effect that exists only in the studio (a new type, a
+guitar rig) is **baked**: the render workers run it on each note or phrase before the mix. `live_status` marks it
+`(baked)`. A baked effect cannot be moved with `live_fx`, restarts its LFOs and tails per note, and hears each
+note alone (a fuzz on a chord distorts each note, not the sum; on a mono line it is exact). Everything up to the
+last studio-only effect in a chain is baked, so order is kept; a sidechain or duck cannot sit before one, and a bus
+cannot bake at all (put the effect on the tracks).
+
 Not yet: master-bus effects (the safety chain is the master), vocoder modulators from sound-bank sounds,
-instrument-param automation (use fx params), tempo changes inside a run, a song's automation and placed audio
-clips on a deck.
+instrument-param automation (use fx params, or expr lanes on a performer), tempo changes inside a run, a song's
+automation and placed audio clips on a deck.
 
 ## Numbers worth knowing
 

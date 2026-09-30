@@ -332,3 +332,69 @@ def test_deck_transpose_and_errors(eng, tmp_path):
         eng.cmd_transition('C', from_deck='A')
     with pytest.raises(LiveError, match='between'):
         eng.cmd_deck('A', filter=2)
+
+
+# ------------------------------------------------------------------ studio / live split
+
+def test_studio_only_effect_is_baked(eng, monkeypatch):
+    """An effect with no live processor runs the studio function on each rendered note, in chain order."""
+    from ismail.live import fx_blocks
+    monkeypatch.delitem(fx_blocks.PROCS, 'bitcrush')
+    out = eng.cmd_track('h', instrument='preset:pluck', fx=[{'type': 'bitcrush', 'bits': 3, 'rate_hz': 4000},
+                                                          {'type': 'gain', 'gain_db': -3}])
+    assert out.startswith('h: new track')
+    assert 'bitcrush (baked) > gain' in eng.cmd_status()
+    eng.cmd_queue([{'track': 'h', 'notes': '0 C4 1', 'loop': 1}])
+    run(eng, 3.0)
+    assert level(eng, 2.0, 2.5) > -40
+    eng.cmd_bus('b')
+    with pytest.raises(LiveError, match='bus cannot bake'):
+        eng.cmd_bus('b', fx=[{'type': 'bitcrush'}])
+    eng.cmd_track('k', instrument={'type': 'kick'})
+    with pytest.raises(LiveError, match='move it after'):
+        eng.cmd_track('h', fx=[{'type': 'duck', 'source': 'k'}, {'type': 'bitcrush'}])
+
+
+PERFORMER = '''
+import numpy as np
+
+def perform(notes, total_n, sr, bpm=120.0, lanes=None, **params):
+    """one sine that slides between overlapping notes; lanes['bend'] adds semitones"""
+    y = np.zeros(total_n)
+    if not notes:
+        return y
+    f = np.zeros(total_n)
+    for st, m, d, v in sorted(notes):
+        f[int(st * sr):] = 440.0 * 2 ** ((m - 69) / 12)
+    end = int(max(st + d for st, _, d, _ in notes) * sr)
+    bend = (lanes or {}).get('bend')
+    if bend is not None:
+        f = f * 2 ** (bend / 12)
+    ph = np.cumsum(2 * np.pi * f / sr)
+    y[:end] = 0.3 * np.sin(ph[:end])
+    return y
+'''
+
+
+def test_performer_plays_phrases_with_expression(eng, tmp_path):
+    from ismail.live.ops import _mark_performer
+    (tmp_path / 'voices').mkdir(exist_ok=True)
+    (tmp_path / 'voices' / 'slide.py').write_text(PERFORMER)
+    inst = _mark_performer({'type': 'code', 'voice': 'slide', 'tail': 0.1}, str(tmp_path))
+    assert inst.get('performer')
+    assert not _mark_performer({'type': 'code', 'voice': 'grand_piano'}, str(tmp_path)).get('performer')
+    eng.cmd_track('g', instrument=inst)
+    with pytest.raises(LiveError, match='performer'):
+        eng.cmd_track('p', instrument='preset:pluck')
+        eng.cmd_queue([{'track': 'p', 'notes': '0 C4 1', 'expr': {'bend': [[0, 0]]}}])
+    out = eng.cmd_queue([{'track': 'g', 'notes': '0 A4 1.5; 1 A4 1', 'loop': 1,
+                          'expr': {'bend': [[0, 0], [1.0, 0], [1.01, 12]]}}])
+    cid = out.split()[0]
+    assert eng.meta[cid]['groups'] == [[0, 1]]              # overlapping notes = one phrase event
+    run(eng, 4.0)
+    a = eng.air[0, int(2.1 * SR):int(2.4 * SR)]            # before the bend: 440 Hz
+    b = eng.air[0, int(2.6 * SR):int(2.9 * SR)]            # after: an octave up
+
+    def hz(x):
+        return np.sum(np.diff(np.signbit(x).astype(int)) != 0) / 2 / (len(x) / SR)
+    assert abs(hz(a) - 440) < 15 and abs(hz(b) - 880) < 25

@@ -13,7 +13,7 @@ import os
 import numpy as np
 from scipy import signal
 
-from .. import dsp, fx as F
+from . import dsp_blocks as dsp, fx_blocks as F
 from ..dsp import SR
 
 KILL_DB = -40.0              # an isolator band at or below this is off

@@ -110,6 +110,22 @@ def _project_fx(project, spec):
     return src.get('fx', [])
 
 
+def _mark_performer(inst, project):
+    """A code voice whose module has perform() and no voice function plays whole phrases: flag it so the engine
+    groups overlapping notes into one event and passes clip expr lanes (the module is imported here, in the op
+    process, never in the engine)."""
+    if not isinstance(inst, dict) or inst.get('type') != 'code' or not inst.get('voice'):
+        return inst
+    from .. import voices
+    try:
+        mod = voices.load(inst['voice'], os.path.abspath(project))
+    except Exception:
+        return inst
+    if callable(getattr(mod, 'perform', None)) and not callable(getattr(mod, inst.get('fn') or 'voice', None)):
+        return dict(inst, performer=True)
+    return inst
+
+
 @op()
 def live_track(project: str, track: str, instrument=None, volume_db: float = None, pan: float = None,
                fx=None, sends: dict = None, remove: bool = False, at: str = 'next_bar', deck: str = None) -> str:
@@ -134,6 +150,7 @@ def live_track(project: str, track: str, instrument=None, volume_db: float = Non
                           f"pass a dict or 'preset:<name>'")
         # a folder without project.json still has song voices in <folder>/voices: check against that root
         instrument = api._resolve_instrument(instrument, P or type('Root', (), {'root': os.path.abspath(project)})())
+        instrument = _mark_performer(instrument, project)
     return _call(project, 'track', track=track, instrument=instrument, volume_db=volume_db, pan=pan, remove=remove,
                  at=at, fx=fx, sends=sends, deck=deck)
 
@@ -209,6 +226,8 @@ def live_queue(project: str, clips: list) -> str:
       lanes: {pitch: 'x...x...'} step strings (same as pattern_write), step = beats per char (0.25).
       bars (or beats, for odd lengths): clip length; default = whole bars covering the notes. It repeats every length.
       loop: repeats before it ends (default 'forever': it plays until something replaces it).
+      expr: {lane: [[beat, value], ...]} expression for a performer voice (bend in semitones, vib in cents ...),
+          beats from the clip start; the voice's INFO lists its lanes.
       at: next_bar (default) | next_beat | next_2 | next_4 | next_8 | next_16 (phrase boundaries counted from bar 1)
           | asap | bar:<n> | after:<clip id> (when that clip ends; chain clips to pre-program an arc)
           | after:#<k> (when item k of this same batch ends: a whole arc in one call, no ids needed).

@@ -6,7 +6,7 @@ died away (reverbs ring out instead of being cut).
 """
 import numpy as np
 
-from .. import dsp, fx as F
+from . import dsp_blocks as dsp, fx_blocks as F
 from ..dsp import SR
 
 LAT_BUDGET = 4096           # ~93 ms: the most lookahead any track path + bus may add up to
@@ -107,9 +107,20 @@ def normalize_chain(fxs, where):
     return out
 
 
+def split_chain(fxs):
+    """(bake, run): effects up to and including the last one without a live processor are baked (the render
+    workers run the studio function on each note or phrase), the rest run live. Order is never changed."""
+    k = 0
+    for i, f in enumerate(fxs):
+        if f['type'] not in F.PROCS:
+            k = i + 1
+    return fxs[:k], fxs[k:]
+
+
 class Chain:
-    def __init__(self, fxs, bpm, dry_default):
+    def __init__(self, fxs, bpm, dry_default, bake=None):
         self.fx = fxs
+        self.bake = list(bake or [])
         self.procs = []
         for f in fxs:
             dry = float(f['dry']) if f.get('dry') is not None else dry_default
@@ -123,7 +134,7 @@ class Chain:
         return x
 
     def describe(self, gr=True):
-        parts = []
+        parts = [f['type'] + ' (baked)' for f in self.bake]
         for i, f in enumerate(self.fx):
             s = f['type'] + (':' + f['mode'] if f['type'] in ('filter', 'distortion') else '')
             if gr and self.gr.get(i, 0.0) < -0.05:

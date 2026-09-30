@@ -47,13 +47,63 @@ class SoundBank:
         return y / (np.max(np.abs(y)) + 1e-12)
 
 
+class _BakeCtx:
+    """What a studio effect sees when it is baked into one rendered event: no automation (live_fx moves only
+    live effects), no other tracks (split_chain keeps effects that read them out of the bake)."""
+    sr, offset_samples, track = SR, 0, ''
+
+    def __init__(self, bpm):
+        self.bpm = bpm
+
+    def param(self, idx, name, default):
+        return default
+
+    def note_gr(self, idx, gr):
+        pass
+
+
+def _lane_curve(points, n):
+    t = np.array([p[0] for p in points]) * SR
+    v = np.array([p[1] for p in points], dtype=np.float64)
+    return np.interp(np.arange(n), t, v)
+
+
+def _perform(inst, notes, total, bpm, root, expr):
+    """A performer voice (module with perform(notes, total_n, sr, bpm, lanes, **params)) plays the whole event."""
+    from .. import dsp, voices
+    mod = voices.load(inst['voice'], root)
+    lanes = {k: _lane_curve(p, total) for k, p in (expr or {}).items()}
+    y = np.asarray(mod.perform(notes, total, SR, bpm=bpm, lanes=lanes, **(inst.get('params') or {})),
+                   dtype=np.float64)
+    y = np.stack([y, y]) if y.ndim == 1 else y
+    out = np.zeros((2, total))
+    out[:, :min(total, y.shape[1])] = y[:, :total]
+    out *= dsp.undb(inst.get('gain_db', 0.0))
+    if inst.get('pan'):
+        gl, gr = dsp.pan_gains(inst['pan'])
+        out *= np.array([[gl], [gr]])
+    return out
+
+
 def render_event(inst, notes, lead_s, bpm, root):
     """notes: [(start_s, midi, dur_s, vel)] relative to the event onset; lead_s: where the onset sits inside the
-    bar (keeps drum noise seeds and bar-locked LFO phase as offline). Returns float32 (2, n) from the onset."""
+    bar (keeps drum noise seeds and bar-locked LFO phase as offline). Returns float32 (2, n) from the onset.
+    inst may carry '_bake' (studio effects run on this event) and '_expr' (lanes for a performer voice)."""
+    bake, expr = inst.get('_bake') or [], inst.get('_expr')
+    inst = {k: v for k, v in inst.items() if k not in ('_bake', '_expr')}
     lead = int(round(lead_s * SR))
     span = max(s + d for s, _, d, _ in notes)
     total = lead + int((span + MAX_TAIL_S) * SR)
-    y = instruments.render_instrument(inst, [(s + lead_s, m, d, v) for s, m, d, v in notes], total, None, bpm, SR, root)
+    shifted = [(s + lead_s, m, d, v) for s, m, d, v in notes]
+    if inst.get('performer'):
+        y = _perform(inst, shifted, total, bpm, root, expr)
+    else:
+        y = instruments.render_instrument(inst, shifted, total, None, bpm, SR, root)
+    if bake:
+        from .. import fx as studio_fx
+        ctx = _BakeCtx(bpm)
+        for i, f in enumerate(bake):
+            y = studio_fx.apply_fx(y, f, ctx, i)
     y = y[:, lead:]
     lvl = np.max(np.abs(y), axis=0)
     idx = np.nonzero(lvl > 1e-5)[0]
