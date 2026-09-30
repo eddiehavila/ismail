@@ -43,7 +43,8 @@ sweep, drop, ending; 17 clips in one batch).
 A live set is only as good as its sounds, and the rules of the main skill hold here too: no genre parts on bare
 sprite patches. For a style with a reference, match the sounds offline first (`references/recreate.md`: drums,
 bass and lead one at a time, the user's ear on each A/B) and take the matched instruments into the set; a set of
-console sounds is not rescued by arrangement. Set faders from the reference's stem-to-stem levels, not by feel.
+console sounds is not rescued by arrangement. Set faders from the reference's stem balance (`levels_from_ref` offline,
+then carry the faders into the set), and swing from `analyze_swing`, not by feel.
 
 ## Running a set: the DJ loop
 
