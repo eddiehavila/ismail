@@ -1095,9 +1095,17 @@ def _grid(P, bpm, offset_sec):
 
 @op()
 def analyze_grid(project: str, source: str = None, bpm_hint: float = None) -> str:
-    """Estimate tempo and the time of bar 1 of an audio source. Use the result in project_new/project_set so bars line up."""
+    """Estimate tempo, the time of bar 1 (kick, harmony, section changes and snare on 2 and 4 vote), the tuning
+    offset from A440 and, with a reference drum stem, the swing. Use the result in project_new/project_set."""
     P = _load(project)
-    return A.beat_grid(P.resolve_audio(source), bpm_hint, P.bpb)[1]
+    g, txt = A.beat_grid(P.resolve_audio(source), bpm_hint, P.bpb)
+    ref = P.d.get('reference') or {}
+    drums = os.path.join(ref.get('stems_dir') or '', 'drums.wav')
+    if P.auto_source(source) in ('ref', 'ref:drums') and ref.get('stems_dir') and os.path.exists(drums):
+        txt += '\n' + A.swing(drums, g['bpm'], g['offset_sec'])[1]
+    else:
+        txt += "\nswing: not measured (needs a drum stem: separate(source='ref'), then analyze_swing)"
+    return txt
 
 
 @op()

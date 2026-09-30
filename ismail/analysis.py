@@ -185,12 +185,36 @@ def beat_grid(path, bpm_hint=None, beats_per_bar=4):
         scores.append(low[bf[p::beats_per_bar]].mean() / (low[bf].mean() + 1e-9)
                       + cchg[p::beats_per_bar].mean() / (cchg.mean() + 1e-9))
     bar_len = beats_per_bar * 60 / bpm
+    # backbeat: in 4/4 with a drum kit the snare (1.5-5 kHz onsets, less the kick band) lands on beats 2 and 4. A
+    # clear contrast (|b| >= 0.15; backbeat songs read 0.15-1.1, four-on-the-floor and drumless under 0.05) votes and
+    # moves section jumps off snare beats; together they fixed a G-funk bar 1 read one beat late (snare on 1 and 3)
+    # and changed none of 5 other songs with known bar 1
+    backbeat = [0.0] * beats_per_bar
+    if beats_per_bar == 4:
+        w = max(int(0.04 * fps), 1)
+
+        def per_beat(lo, hi):
+            # linear magnitude: in dB a quiet hat rising out of silence jumps as far as the snare
+            on = librosa.onset.onset_strength(S=S[(freqs >= lo) & (freqs < hi)], sr=ASR, hop_length=HOP)
+            return np.array([on[max(f - w, 0):f + w + 1].max() for f in bf])
+        sn, kk_ = per_beat(1500, 5000), per_beat(0, 150)
+        for p in range(4):
+            def contrast(v):
+                on_, off_ = v[(p + 1) % 4::4][:len(v) // 4].mean() + v[(p + 3) % 4::4][:len(v) // 4].mean(), \
+                    v[p::4][:len(v) // 4].mean() + v[(p + 2) % 4::4][:len(v) // 4].mean()
+                return (on_ - off_) / (on_ + off_ + 1e-9)
+            backbeat[p] = round(float(contrast(sn) - contrast(kk_)), 2) if len(bf) >= 16 else 0.0
+    bbv = [2.0 * b if abs(b) >= 0.15 else 0.0 for b in backbeat]
     # section evidence: the biggest level jumps between beats (parts entering, drops) land on bar starts, and a
     # track usually begins on a downbeat. Each is scored per phase and added to the kick/chroma score.
     rms = librosa.feature.rms(y=y, frame_length=2048, hop_length=HOP)[0]
     bl = np.array([20 * np.log10(rms[max(f - int(0.05 * fps), 0):f + int(0.25 * fps) + 1].mean() + 1e-9) for f in bf])
     jump = np.r_[0, np.diff(bl)]
     top = [int(i) for i in np.argsort(jump)[::-1][:12] if jump[i] > 3.0]
+    # with a clear backbeat, a jump on a snare beat belongs to the kick beat before it: the loud snare right after a
+    # section's first beat is where the beat-to-beat jump shows (G-funk: every jump read on beat 2)
+    snare_ph = {q for q in range(beats_per_bar) if backbeat[q] <= -0.15}
+    top = [b - 1 if b % beats_per_bar in snare_ph else b for b in top]
     sect = []
     for p in range(beats_per_bar):
         sect.append(float(np.mean([(b - p) % beats_per_bar == 0 for b in top])) if top else 0.0)
@@ -202,7 +226,7 @@ def beat_grid(path, bpm_hint=None, beats_per_bar=4):
         # distance (in beats) from the first sound to the nearest bar start of this phase
         d = ((first_onset - off_p) / (60 / bpm)) % beats_per_bar
         start.append(1.0 if min(d, beats_per_bar - d) < 0.25 else 0.0)
-    total = [scores[p] + 1.5 * sect[p] + 0.5 * start[p] for p in range(beats_per_bar)]
+    total = [scores[p] + 1.5 * sect[p] + 0.5 * start[p] + bbv[p] for p in range(beats_per_bar)]
     p = int(np.argmax(total))
     first_down = beat0 + p * 60 / bpm
     # pull offset back to the earliest bar start >= 0
@@ -220,14 +244,22 @@ def beat_grid(path, bpm_hint=None, beats_per_bar=4):
     data = {'bpm': round(float(bpm), 3), 'offset_sec': round(float(offset), 4), 'beats_per_bar': beats_per_bar,
             'downbeat_scores': [round(float(s), 2) for s in scores], 'local_tempo': local,
             'bars': int((len(y) / ASR - offset) / bar_len)}
+    cents, conc = tuning(y)
     data.update({'section_scores': [round(v, 2) for v in sect], 'start_scores': start,
-                 'candidate_offsets': cand_offsets})
+                 'backbeat_scores': backbeat, 'candidate_offsets': cand_offsets,
+                 'tuning_cents': round(cents, 1), 'tuning_r': round(conc, 2)})
     ranked = sorted(range(beats_per_bar), key=lambda q: -total[q])
     txt = (f"tempo {bpm:.2f} BPM (constant-tempo fit); bar 1 starts at {offset:.3f}s; ~{data['bars']} bars of "
            f"{beats_per_bar}/4.\ndownbeat candidates (bar 1 at ... s: kick/chord score + section-change score + "
-           f"starts-on-it):\n" +
-           '\n'.join(f"  {cand_offsets[q]:.4f}s  {scores[q]:.2f} + {1.5 * sect[q]:.2f} + {0.5 * start[q]:.1f} = "
-                     f"{total[q]:.2f}{'  <- chosen' if q == p else ''}" for q in ranked) +
+           f"starts-on-it + snare-on-2-and-4):\n" +
+           '\n'.join(f"  {cand_offsets[q]:.4f}s  {scores[q]:.2f} + {1.5 * sect[q]:.2f} + {0.5 * start[q]:.1f} + "
+                     f"{bbv[q]:.2f} = {total[q]:.2f}{'  <- chosen' if q == p else ''}" for q in ranked) +
+           (f"\nbackbeat {backbeat[p]:+.2f} at the chosen bar 1 (snare on 2 and 4 reads +0.15 or more; under 0.15 "
+            f"there is no kit backbeat and it did not vote)" if beats_per_bar == 4 else '') +
+           f"\ntuning {cents:+.0f} cents from A440 (r {conc:.2f}" +
+           (", little pitch content: unreliable)" if conc < 0.15 else ")") +
+           (f": notes will read between semitones. Run ref_retune() before any transcription, key or chord reading"
+            if abs(cents) >= 15 and conc >= 0.15 else '') +
            ("\n  close call: check with analyze_structure(source=...) after project_set(offset_sec=...): sections "
             "should start on bars 1, 5, 9, 17 ..., not mid-phrase" if total[ranked[0]] - total[ranked[1]] < 0.5 else '') +
            "\nlocal tempo per 30s: " +
@@ -376,6 +408,65 @@ def bar_table(path, grid, bars=None, max_bars=32):
 
 KS_MAJ = np.array([6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88])
 KS_MIN = np.array([6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17])
+
+
+def tuning(y, sr=ASR, max_sec=120):
+    """Offset of the recording from A440 in cents, from interpolated spectral peaks (60-2500 Hz) folded onto the
+    semitone grid (circular mean, weighted by level). Returns (cents, r); r is the concentration, about 0.15-0.25 on
+    tonal mixes; a drum loop reads 0.1, so under 0.15 means no clear pitch content. Sped-up records sit tens of cents off."""
+    if len(y) > max_sec * sr:
+        a = (len(y) - max_sec * sr) // 2
+        y = y[a:a + max_sec * sr]
+    n = 8192
+    S = np.abs(librosa.stft(y, n_fft=n, hop_length=2048))
+    f = np.arange(S.shape[0]) * sr / n
+    band = (f[1:-1] > 60) & (f[1:-1] < 2500)
+    L = 20 * np.log10(S + 1e-9)
+    z = w = 0.0
+    for j in range(S.shape[1]):
+        c = L[:, j]
+        pk = np.where(band & (c[1:-1] > c[:-2]) & (c[1:-1] >= c[2:]) & (c[1:-1] > c.max() - 40))[0] + 1
+        if not len(pk):
+            continue
+        a, b, g = c[pk - 1], c[pk], c[pk + 1]
+        m = 12 * np.log2((pk + 0.5 * (a - g) / (a - 2 * b + g - 1e-12)) * sr / n / 440.0) + 69
+        z = z + (S[pk, j] * np.exp(2j * np.pi * (m - np.round(m)))).sum()
+        w += S[pk, j].sum()
+    if not w:
+        return 0.0, 0.0
+    return float(100 * np.angle(z / w) / (2 * np.pi)), float(abs(z / w))
+
+
+def swing(path, bpm, offset, sr=ASR):
+    """Swing from picked hi-hat onsets (> 6 kHz) folded onto the beat. 16th swing = how late the 'a' (beat + 3/4)
+    lands against the 'and' (beat + 1/2); 8th swing = the 'and' against the beat. Both in beats (0.03 = 3% of a
+    beat late; straight = 0). Use a drum stem: on a full mix other highs bury the hats (a G-funk mix read 0.00,
+    its drum stem 0.03, the hand measurement). The 8th reading also holds kick-vs-hat timing."""
+    y = load(path, sr=sr)
+    hop = 64
+    S = np.abs(librosa.stft(y, n_fft=512, hop_length=hop))
+    f = librosa.fft_frequencies(sr=sr, n_fft=512)
+    on = librosa.onset.onset_strength(S=librosa.amplitude_to_db(S[f > 6000]), sr=sr, hop_length=hop)
+    fr = librosa.onset.onset_detect(onset_envelope=on, sr=sr, hop_length=hop, units='frames')
+    if len(fr) < 16:
+        return {}, "swing: too few hi-hat onsets to measure"
+    fr = fr[on[fr] > np.percentile(on[fr], 30)]
+    spb = 60 / bpm
+    x = ((librosa.frames_to_time(fr, sr=sr, hop_length=hop) - offset) / spb) % 1.0
+    pos = {}
+    for p, lo, hi in ((0.0, -0.11, 0.11), (0.5, -0.11, 0.2), (0.75, -0.11, 0.11)):
+        d = (x - p + 0.5) % 1.0 - 0.5
+        m = (d > lo) & (d < hi)
+        pos[p] = (float(np.median(d[m])), int(m.sum())) if m.sum() > 8 else (None, int(m.sum()))
+    s8 = pos[0.5][0] - pos[0.0][0] if pos[0.5][0] is not None and pos[0.0][0] is not None else None
+    s16 = pos[0.75][0] - pos[0.5][0] if pos[0.75][0] is not None and pos[0.5][0] is not None else None
+    ms = spb * 1000
+
+    def show(v, n):
+        return f"{v:+.3f} beat ({v * ms:+.0f} ms, {n} hits)" if v is not None else f"not measured ({n} hits)"
+    data = {'swing16': None if s16 is None else round(s16, 3), 'swing8': None if s8 is None else round(s8, 3)}
+    return data, (f"swing from hi-hat onsets in {os.path.basename(path)}: 16ths {show(s16, pos[0.75][1])}, "
+                  f"8ths {show(s8, pos[0.5][1])}. Write swung notes that late (straight = 0); do not guess.")
 
 
 def key_estimate(path, t0=None, t1=None):
