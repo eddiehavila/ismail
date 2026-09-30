@@ -38,6 +38,16 @@ Rules of thumb: accents (X) on no more than 4 steps per bar per part; a part tha
 - Range: a lead should span about an octave; more reads as random.
 - Space: a lead that plays every bar tires fast. Alternate 2 bars on, 2 bars off, or let a delay (`fx delay time_beats 0.75, feedback 0.4, pingpong`) answer it.
 
+## Feel and phrasing (played parts)
+
+For parts meant to sound played (guitar, bass, live drums), placement matters more than notes. Learned on a 1970 guitar band pastiche; the per-part checks are in `references/blind-tests.md` section 4.
+
+- **No per-note random jitter.** It is what an amateur sounds like; keep it to a few ms. Place whole phrases instead: landing notes tight to the band (within about 8 ms), phrase entries free (on the grid, 35-75 ms late or 25-50 ms early), and the run between re-spaced evenly (a lazy start rushing into the landing, or a push). Move the notes and every expression lane (bend, vibrato, wah, level) together with one time warp.
+- **The band has a feel too:** a shared slow push and pull per bar, 16ths a little late, a little looseness. That alone moved drums, bass and rhythm guitar from "digital" to "organic".
+- **Bends land on chord tones** of the chord sounding when they land, or on a scale tone that is no semitone from a chord tone (which keeps the blues bend from the minor 3rd to the 4th); never more than a whole step. A half-step bend onto the major 3rd over a minor chord sours it for as long as it is held.
+- **Each chord its own scale.** One mode over the whole song put a G natural under Ebm9. A double-stop under a held melody note moves by scale steps, as a pair.
+- Vibrato on held lead notes: 28-42 cents peak to peak at 4.5-5 Hz, wandering in rate and depth, starting after the note settles.
+
 ## Arrangement
 
 - Write the form map in the Session Sheet with an energy number per section. Energy comes from: number of parts, filter cutoff, drum density, register spread.

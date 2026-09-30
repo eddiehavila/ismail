@@ -17,6 +17,11 @@
   fitted in a late-60s guitar record study (20 of 22 single lead notes passed a blind exam). Presets
   `strat70_lead`, `strat70_rhythm`, `strat70_rotary`, `pbass70`, `kit70`; each voice's INFO `rigs` holds the fx
   chain its presets were fitted with, and `voice_help` prints them one line each.
+- Skill: `references/blind-tests.md` (the eye exam and the blind exam: fair clips, reading the answers, the
+  song-level checks single notes miss), and the guitar study's lessons in sound design (register first, harmonic
+  profile, stem bias, rig order, fast rig fit), composition (phrase placement, band feel, bends to chord tones),
+  recreate (straighten a drifting record, round-trip every sensor) and listening (spectrogram pairs; long-window
+  numbers are blind to fakeness).
 
 ## 0.2.0 (2026-09-30)
 

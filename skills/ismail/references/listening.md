@@ -15,11 +15,13 @@
 | Is the low end clean? | `analyze_bars` sub and bass columns, `analyze_spectrum(span=)` | kick and bass should not both peak in the same 1/3-octave band |
 | What is this sound? | `analyze_timbre`, `analyze_spectrum`, `sound_compare` | harmonic slope, brightness and rolloff, envelope times, width |
 | What is the voice saying? | `analyze_formants` | F1/F2 per half beat, nearest vowel |
+| Why does it sound fake or digital? | `spectrogram` of the reference and of yours, same bars | look at them together, one above the other: "chopped rectangles vs ringing lines" showed partials that stopped instead of decaying. Then an ear test (`references/blind-tests.md`) |
 | Anything else | `spectrogram` (PNG) | last resort; it caught a missing low-pass that no text view showed |
 
 Tracks are analysable as `track:<name>` only after `render(stems=True)`. A track stem is the track after its own effects and fader, scaled by the master chain's gain, so the stems sum to the mix. That means a sidechain duck shows up in `track:<name>`; if it barely dips, the duck depth is small, not the stem pre-fx.
 
-Two readings that mislead:
+Readings that mislead:
+- Long-window numbers are blind to fakeness. 8-bar spectral envelopes within 1.8 dB and stem balance within 0.7 dB while the user heard "30% there": what makes a sound fake lives inside single notes (attack, how each partial decays, pitch movement, noise). Report those numbers, never as proof that a sound is convincing.
 - `analyze_drums` on a full mix (`render`, `ref`) is band activity: leads and pads show up as snare and hat hits. Read your drums as `track:<drum track>`.
 - `analyze_melody` on a track with delay or vibrato splits held notes into runs of short notes. Check pitch with it and rhythm with `notes_read(view='roll')`, or read the melody before adding the delay.
 

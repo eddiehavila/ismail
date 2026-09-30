@@ -7,6 +7,7 @@ Learned from recreating Vitalic's "Allan Dellon". Each step exists because skipp
 - Get the audio (yt-dlp; YouTube may bot-wall, SoundCloud search `scsearch:` often works).
 - `project_new(..., reference=<wav>)`, `analyze_grid(source='ref')` for bpm and the time of bar 1. The downbeat pick is fragile when the kick skips beats; the tool prints the phase scores. In 4/4 with a kit the snare has to land on 2 and 4: the tool votes for that (its `backbeat` line) and moves section jumps off snare beats, which fixed a G-funk bar 1 read one beat late. Still check `analyze_drums(source='ref:drums')` for the first bars: snare on steps 5 and 13.
 - Read the **tuning** line of `analyze_grid` before any pitch tool. A sped-up record sat 48 cents sharp and every note read as a pair of semitones in the rolls, chords and transcriptions. At 15 cents or more off, `ref_retune()` writes retuned copies of the reference and its stems and points the project at them; the timing stays.
+- **A played record drifts.** A band without a click can wander a few bpm over a song, and then no single grid fits. Straighten the reference onto a constant grid before transcribing (a phase vocoder with a time map; take the phase advance from the mid channel so the stereo image survives, and keep the time map to put results back). There is no op for this yet.
 - Render a drum track, then `align(a='track:<snare or hats>', b='ref:drums', band='himid' or 'air')` and set `offset_sec` from its answer. A 40 ms offset made onset metrics negative.
 
 ## 2. Separate and read the whole song before writing
@@ -52,6 +53,9 @@ For repeated electronic events: `sound_extract` the event averaged over its loop
 - **Averages hide the gap.** Long-window spectra can agree within 4 dB while the parts sound different; zoom per 16th, and look at a spectrogram when a section stays bad for no visible reason (a missing low-pass showed up only there).
 - **Never delete a downbeat on one reading.** Before removing a kick on beat 1, confirm with `analyze_envelope(source='ref:drums', band='sub')`: a missing downbeat after a break made the beat come back "mid bar" to a listener.
 - **Metrics tuned on one example lie.** Before trusting a new measure, check it ranks a known-bad draft below a known-good one (re-render old drafts from `comparisons/<id>/project.json`).
+
+- **Round-trip every sensor before it reads the record.** Run it on audio where you know the answer (your own render). A generic onset detector found only 25-54% of a lead's notes inside a dense separated mix, and the "looseness" it reported was the rhythm guitar plus its own matching noise: a humanizer fitted to it sounded like "an amateur trying to play" the record. Measure timing on exposed notes refined one by one, and check the detector's round trip on drums first (within 9 ms after a steady 16 ms delay).
+- **Played instruments need the ear.** For a guitar, horn or voice, single notes decide it: see `references/blind-tests.md` for the eye exam and the blind exam.
 
 - **Fitting targets carry bleed.** A hat extracted from the full drum stem had the 808's tail as its loudest band, and the fit chased it. Extract from the piece's `analyze_kit` component, or restrict `fmin`/`fmax` in the fit to the piece's own range.
 

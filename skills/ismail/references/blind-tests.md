@@ -1,0 +1,49 @@
+# Ear tests: the eye exam and the blind exam
+
+You cannot hear. Your metrics average over time, and they stop being useful exactly where "sounds fake" lives: inside single notes (the attack, how each partial decays, pitch movement, noise, micro-dynamics, timing). The user's ear is the only instrument that catches those things, so it has to be put to work efficiently. An ear test is a small local HTML page of clips built so that each answer is a measurement you can act on. Treat building it as sound engineering, not as a chore: in a guitar study the test page moved the result further than any fit.
+
+There are two kinds of test. Use both, in this order.
+
+| | eye exam (tuning) | blind exam (verification) |
+|---|---|---|
+| question | which direction is closer? | can the user tell mine from the real one? |
+| clips | the real sound, plus lenses that each change ONE named thing | R (real), A and B (mine), labels hidden and shuffled |
+| answer | "C, but the vibrato starts slower, more air" | per trial: which is real, or "can't tell", plus a note on the tell |
+| use when | the numbers plateau and you need a direction | you think you are close and need to know if you are done |
+| score | the words the user uses | the share of trials the user could not decide |
+
+## 1. The eye exam: lenses that change one thing
+
+Put the real sound next to lenses, versions that each change exactly ONE named, physical thing (body colour, wood ring, room, open strings, pick or bow noise, brightness, attack, vibrato, evenness). The names become the user's vocabulary for the rest of the session: "B, but more air" is an instruction you can execute. Loudness-match every clip and make clips long enough to include the release. One round of this on a bowed voice found three things no metric showed (moving vibrato, missing air, sympathetic strings).
+
+## 2. The blind exam: can the user tell?
+
+Per trial, three clips of the same moment: **R** the recording, **A** my instrument with the recording's exact expression copied onto it (its pitch curve, filter or wah curve, level curve), **B** my instrument played by my player model (my own vibrato, bends, dynamics, effect moves). The two lenses separate the two questions: A failing means the instrument or rig is wrong; A passing while B fails means the performance is wrong. Hide which is which, shuffle per trial, and reveal the answers with scores and spectrogram strips only after the user submits.
+
+In a guitar study the blind exam went from 3 of 28 undetected to 20 of 22 in four rounds. Each round's misses named the next fix. The design rules below each cost a round when they were missing.
+
+**Make the test fair, or it measures the wrong thing.**
+- **One gesture per clip, on every side.** Cut at the next onset. When the real clip ran on into the player's next notes, every trial was decided by that and the round was wasted.
+- **The same pipeline on all sides.** Two contexts: in the band (the recording's own backing plus the note) and as a stem (the same separation pass run on R, A and B). If R is a separated stem and A is a clean render, the user hears the separation, not the instrument.
+- **Fair backing.** The backing under A and B is the recording minus only the real note: its harmonic comb along the pitch curve, its attack, and its top band while it sounds. Subtracting whole stems also removes other parts that share the stem, and that absence gives the fake away.
+- **One listening level for the whole page.** Normalise every clip to one loudness. When one clip was nearly inaudible, the user could not answer.
+- **Drop trials the sensors cannot follow.** If the pitch tracker cannot follow the real note (pitch error above about 40 cents), lens A copies garbage. Drop the trial automatically and say how many were dropped.
+- **Check alignment.** The onsets of A and B must come from the same detector as R's, run on the full signal. A mask edge once made every A lag 12 ms.
+
+**Page mechanics.** Serve it on localhost (`python -m http.server <port> --bind 127.0.0.1` in the page's folder), not as a file (browsers block audio loads from file pages), and never on a public host when it contains clips of the recording. Give each trial players, a radio per clip plus "can't tell", and a text box. Add one "copy my answers" button that puts every answer and note into one text block the user pastes back. Log every round's answers verbatim in the song's `notes/feedback.md`.
+
+## 3. Reading the answers
+
+- **The ear beats the stem.** Separated stems are biased dark above about 1.5 kHz. A harmonic correction measured against the stems pointed the wrong way (cut the top), while the user heard "upper harmonics too muted". When the ear and a stem-based measurement disagree about timbre, the ear wins.
+- **Long-window metrics are blind to fakeness.** 8-bar spectral envelopes within 1.8 dB and stem balance within 0.7 dB, while the user heard "30% there". Report those numbers, but never as proof that a sound is convincing.
+- **Every tell is a missing mechanism.** "Too clean" meant pick scrape, air, fret rattle and hum. "Real notes don't start at the hit, but in the middle of the strum" meant the player eases in. "A dip in the middle of the note" meant finger pressure (a level curve). Add the mechanism, not a filter that imitates it.
+- **A fit pinned at the edge of its range is a missing mechanism too.** Three times a tone fit hit a bound; each time the fix was physics (a pickup tone knob's LC resonance, a velocity-sensing pickup, frequency-dependent string loss), not a wider bound.
+- **Round-trip every sensor first.** Before a sensor reads a recording, run it on synthetic ground truth. The vibrato sensor had three bugs this way (a 10-cent pitch grid, a one-bin share test, a window longer than one vibrato cycle).
+- **Register and part-writing masquerade as tone.** Two tone fits failed until the voicings and the bass line moved to the recording's register (measured as pitch percentiles). Check where the parts sit before fitting a sound.
+
+## 4. When single notes pass, the song can still fail
+
+After the blind exam passed, the first full band render was "kinda sounds like him, but the start is weird". Two things that no single-note test can reveal:
+
+- **Note choice, along the real pitch.** A scan of the note numbers is not enough: bends, slides and grace notes land on pitches the score never names (a half-step bend from the minor 3rd lands on the major 3rd and sours a minor chord for as long as it is held). Scan the pitch CURVE of each part (notes plus bend lanes) against what the other parts sound at that moment, at about 10 ms resolution, with two measures: **fit** (spectral pitch-class similarity, Milne et al. 2011: every partial of the note and of the context folded onto a 1200-cent circle; it ranks chord tones above tensions above wrong notes, and a quarter-tone miss near zero) and **roughness** (Plomp-Levelt beating between partials; it catches mistuning and close clusters but NOT tonal wrongness: a major 3rd over a minor chord scores barely rougher than the chord tone). Flag a note when a neighbour a semitone or two away fits much better, weighted by how long it is held; short passing notes will be flagged and are usually fine. Then fix the rules that produced the flags, not the notes one by one: bends land on chord tones (or on a scale tone no semitone from a chord tone, which keeps the blues bend from the minor 3rd to the 4th) and never more than a whole step; each chord uses its own scale (a Dorian G natural over an Ebm9 was the main offender); a rhythm double-stop under a held melody note moves by scale steps, as a pair, to the place whose partials best fit the melody note; rubs that ARE the chord stay (the 3rd against the #9 in a 7#9).
+- **Microtiming, at note resolution, with the detector calibrated.** First run the onset detector on YOUR render, where every note time is known. In a dense separated mix a generic onset detector found only 25-54% of the lead's notes and its errors were chance matches (about 20-24 ms of spread from the matching window alone), so the record's "lead looseness" it reported was mostly the rhythm guitar plus detector noise, and a lead humanizer fitted to it came out twice as loose as the player and loosest on the held notes, where a good player is tightest. The listener heard "an amateur trying to play a Hendrix track". Check the round trip itself on something any detector finds (drums: within 9 ms after a steady 16 ms detector delay), then measure the player on notes you can trust: exposed notes whose onsets were refined one by one. There his phrase entries sat either on the grid or 35-75 ms off it (triplet-like places, never smeared evenly), and the notes that runs land on were tight. The model that matched: one monotone time warp over the whole line (notes and every expression lane move together), tight landings on the band's slow push and pull, free entries (on the grid, late or early), and runs re-spaced evenly between them (a lazy start that rushes into the landing, or a push). Per-note random jitter is what sounds amateur; keep it to a few ms. The band's own feel (a shared slow push and pull, late 16ths, a little looseness) made the drums, bass and rhythm guitar sound "less digital and more organic" on the first try.

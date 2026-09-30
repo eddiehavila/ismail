@@ -42,3 +42,15 @@ Drum synths are mono; width comes from effects. Sidechain feel: `duck` with `sou
 ## Effects order that works
 
 instrument -> eq (cleanup) -> distortion -> filter -> duck/compressor -> chorus -> delay; reverb on a bus with sends. Master: limiter last, ceiling -0.3 dB. A drum bus (tracks output to a bus with compressor attack ~8 ms, ratio 3, plus a short room reverb mix 0.1) glues drums; fast attack plus clipping made them worse in testing.
+
+## Guitars and other played strings
+
+Learned matching a 1970 guitar record until 20 of 22 single notes passed a blind exam (`references/blind-tests.md`).
+
+- Start from the library: `voice_help(name='electric')` (guitar or bass) and `voice_help(name='kit70')` list presets and the rig each was fitted with. The voice is the DI signal; without its rig it sounds like a synth.
+- Rig order: wah -> fuzz -> amp -> cab -> delay -> eq for a lead (wah before the fuzz, as on the record); univibe before the amp; a rotary speaker after the cab. Amp noise (`hiss_db`, `hum_db`) belongs in a lead: "too clean" was the most common tell.
+- **Put the parts in the record's register before fitting any tone.** Measure the pitch percentiles of each reference part and move voicings and the bass line there first. Two tone fits failed until the notes moved; register masquerades as tone.
+- **Fit the harmonic profile, not the long-term spectrum.** A long-term spectrum mostly measures which notes were played. The level of each harmonic relative to the fundamental, averaged over notes, is note-independent: fitting it took a bass from 8.6 to 4.6 dB off.
+- **Separated stems are dark above about 1.5 kHz.** A correction measured on the stem cut the top while the user heard "upper harmonics too muted". When a stem-based timbre number and the ear disagree, the ear wins.
+- **Fitting a rig fast:** grid the nonlinear settings (gain, fuzz, drive), fit the linear stages (tone stack, cab, eq) on the spectral envelope for each grid point, then polish the best few with real renders. Minutes, where one global fit over every knob took hours.
+- A fit that pins at a range edge is a missing mechanism (a pickup's tone-knob resonance, a velocity-sensing pickup, treble that dies faster than the fundamental), not a range to widen.
