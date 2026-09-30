@@ -58,6 +58,13 @@ def live_start(project: str, bpm: float, beats_per_bar: int = 4, device: str = '
         workers = min(4, max(2, (os.cpu_count() or 4) - 4))
     if _alive(project):
         return "already running (live_stop first to change tempo or device)\n" + _call(project, 'status')
+    if str(device).lower() not in ('none', 'null'):
+        try:
+            import sounddevice  # noqa: F401
+        except (ImportError, OSError) as e:
+            raise OpError(f"playing to speakers needs sounddevice ({e}): pip install -e \".[live]\" (on Linux also "
+                          f"PortAudio: sudo apt install libportaudio2), or start with device='none' to run without "
+                          f"audio out")
     os.makedirs(os.path.join(root, 'live'), exist_ok=True)
     try:
         os.remove(_info_path(project))

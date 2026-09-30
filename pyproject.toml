@@ -1,6 +1,6 @@
 [project]
 name = "ismail"
-version = "0.1.0"
+version = "0.2.0"
 description = "An agent-operated DAW: text in, audio as text out, with an MCP server"
 readme = "README.md"
 license = {text = "MIT"}
@@ -20,6 +20,7 @@ dependencies = [
 perceptual = ["torch>=2.2", "transformers>=4.40"]
 separate = ["demucs>=4.0"]
 video = ["opencv-python>=4.8", "pycollada>=0.8", "pillow>=10.0"]
+live = ["sounddevice>=0.4"]
 dev = ["pytest>=8.0"]
 
 [build-system]
@@ -27,7 +28,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["ismail", "ismail.voices", "ismail.voices.keys", "ismail.voices.bass", "ismail.voices.fx",
+packages = ["ismail", "ismail.live", "ismail.voices", "ismail.voices.keys", "ismail.voices.bass", "ismail.voices.fx",
             "ismail.voices.strings", "ismail.video", "ismail.video.blender"]
 
 [tool.setuptools.package-data]

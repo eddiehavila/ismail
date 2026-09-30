@@ -53,6 +53,7 @@ cd ismail
 pip install -e .                      # engine, analysis, CLI, MCP server
 pip install -e ".[perceptual]"        # optional: CLAP perceptual metric (torch + transformers, model about 600 MB)
 pip install -e ".[separate]"          # optional: demucs stem separation for reference tracks
+pip install -e ".[live]"              # optional: play live to your speakers (sounddevice)
 ```
 
 If `demucs` fights your torch install, use `pip install --no-deps demucs` and then `pip install dora-search einops julius lameenc openunmix`.
@@ -219,6 +220,34 @@ Every metric sits between two baselines computed from the reference alone: the r
 
 The perceptual group exists because the others can all look fine while the result still sounds different, and the clean group exists because note metrics reward clutter. Use `cmp_run(stems='demucs')` at checkpoints so your render goes through the same separation as the reference. Any change to the scoring should be checked against a known-bad and a known-good draft before you trust it.
 
+## Playing live
+
+The same instruments and effects play in real time while the agent edits the music: a jam, a DJ set, a
+soundtrack that follows a game or an audience. `live_start` runs a separate engine process per folder (a local
+control port, render workers, a mixer and a safety chain), and the agent drives it with ops:
+
+```text
+live_start(bpm) -> live_track(track, instrument, fx) -> live_queue([{track, notes, bars, at: 'next_4'}, ...])
+  -> live_status / live_listen(bars) -> more live_queue, live_fx ramps -> live_stop
+```
+
+- **Clips loop until replaced**, so the music keeps going between the agent's turns. A clip lands on the next
+  beat, bar or phrase; `after:#k` chains a whole arc in one call; `live_fx` ramps sweeps and fades.
+- **Render ahead.** Notes render in worker processes seconds before the playhead and the audio callback only
+  copies, so heavy voices (mimic, code voices, guitar performers) play live. A clip whose first notes cannot
+  render in time lands a bar later, and the reply says so.
+- **It listens to itself.** `live_listen` runs the same analysis as a render on the last bars played.
+- **Safety.** Every output passes a trim, a loudness rider, a lookahead limiter and a ceiling; the limits come
+  from the environment (`ISMAIL_LIVE_TRIM_DB`, `ISMAIL_LIVE_CAP_DB`, `ISMAIL_LIVE_CEILING_DB`), never from the agent.
+- **Decks.** `live_load` puts a whole ismail song on a cued deck while another plays; `live_transition` queues
+  the mix (blend, bass swap, filter, cut) with a DJ strip per deck (isolator, filter knob, fader, transpose).
+- **Studio and live.** The studio code is the source of truth. Effects run live as block-by-block twins held to
+  the studio versions by tests; an effect with no live twin is baked into each rendered note. A voice with
+  `perform()` plays whole phrases live (legato, slides), with bends and vibrato from the clip's `expr` lanes.
+
+The skill reference `skills/ismail/references/live.md` has the method for running a set: read the audience,
+steer with small edits, queue a runway before every question, build and drop.
+
 ## Music videos (optional)
 
 `ismail.video` makes a music video from a finished song, with every cut and glitch placed from the song's own notes (the event list comes from the project, so the sync is frame exact). It needs `pip install -e .[video]`, Blender 5.x and ffmpeg.
@@ -257,9 +286,11 @@ ismail/
   perceptual.py  CLAP similarity
   sounddesign.py one-shot rendering, sound distance, parameter fitting
   trackfit.py    in-context fitting against a reference stem
+  live/          the live engine: timeline, render workers, mixer graph, decks, safety, live_* ops,
+                 block-by-block effect twins (fx_blocks.py, dsp_blocks.py)
   video/         optional music-video pipeline: sync, edit engine, Blender shot kit, CLI
   voices/        voice modules: grand_piano, additive_piano, growl, sfx
-  api.py, api_cmp.py, api_sound.py   the operations (CLI and MCP tools)
+  api.py, api_cmp.py, api_sound.py, api_measure.py   the operations (CLI and MCP tools)
   mcp_server.py, guide.py
 skills/ismail/   the agent skill (SKILL.md + references)
 .mcp.json, .cursor/   MCP and rule config for Claude Code and Cursor
