@@ -8,6 +8,11 @@ You are slow. A turn takes 5 to 30 seconds, which is 4 to 20 bars. So you never 
 queue clips that loop until replaced, pre-program arcs, and schedule sweeps. Everything faster than your turn
 lives inside the clips and the ramps.
 
+The engine is fast; you are the latency. A clip lands at the next quantize point and renders 3 to 80x realtime,
+so the delay between a decision and the sound is mostly the tokens you write and the thinking before them. A
+fader move, a filter sweep, one layer in or out, a fill or a new pattern for one part costs seconds; a whole new
+section costs a minute or more. Compose whole sections only for real changes, and steer with small edits.
+
 ## The loop, live
 
 0. **Set Sheet** (in your reply, before any tool call): the Session Sheet plus an **arc**: which clip plays on
@@ -22,15 +27,67 @@ lives inside the clips and the ramps.
    reply. Ramps on one param form a schedule: a later ramp does not erase an earlier one. A snap then a sweep =
    two calls, the second a beat later (`bar:N.25`).
 4. **Listen every turn**: `live_status` (levels per track and bus, runway, late events, underruns, safety gain
-   reduction) and `live_listen(bars=4, view=...)`. Write the Listening Report lines as for a render.
+   reduction) and `live_listen(bars=4, view=...)` (on the live output `bars` is a count of the last bars; a
+   `[a, b]` range only works with `recording=`). Write the Listening Report lines as for a render.
 5. **Change on phrase boundaries** (`next_4`, `next_8`), not mid-phrase, unless the cut is the point.
 6. **Record** with `live_record`: the take starts on a downbeat and has a `.json` sidecar;
    `live_listen(recording='rec_....wav', bars=[a, b])` analyses it in the set's bar numbers, after the set too.
 7. **Ask the user** what they heard, as always, and log it in `notes/feedback.md`.
 
-Write the set as a script, `songs/<slug>/set.py`, like a `build.py`: rerunnable, and the notes and arc are
-readable later. `examples/disco_set.py` (in this skill) is a worked example (intro, groove, breakdown with a filter snap and
+Write a short set as a script, `songs/<slug>/set.py`, like a `build.py`: rerunnable, and the notes and arc are
+readable later. A long set with feedback between parts runs from a control module instead (see Running a set). `examples/disco_set.py` (in this skill) is a worked example (intro, groove, breakdown with a filter snap and
 sweep, drop, ending; 17 clips in one batch).
+
+## Sounds first
+
+A live set is only as good as its sounds, and the rules of the main skill hold here too: no genre parts on bare
+sprite patches. For a style with a reference, match the sounds offline first (`references/recreate.md`: drums,
+bass and lead one at a time, the user's ear on each A/B) and take the matched instruments into the set; a set of
+console sounds is not rescued by arrangement. Set faders from the reference's stem-to-stem levels, not by feel.
+
+## Running a set: the DJ loop
+
+A long set (a DJ set, a party, a 30-minute jam) is a loop between you and the audience, and the user's messages
+are the audience. Later the audience may be a text stream from other devices (motion on the dance floor from a
+camera, facial expression categories); treat it the same way.
+
+- **Read the room.** When the audience is into it, lean in: keep the feel and add an element or two, build, take
+  it down, drop. When it goes flat or repetitive, move on: a switch-up, a breakdown, a new song.
+- **Think in energy, not song form.** Bring elements in over time (a percussion layer, 808 slides, string stabs,
+  a riser), strip them for a breakdown (drums and bass out, filter the keys down, a snare roll into the last
+  bar), then drop with more than before (double-time hats, the hook instrument). Every 16 to 32 bars something
+  should change.
+- **Small edits by default.** Steer with one-element changes between bigger moves: `live_track(volume_db=)`,
+  `live_fx` sweeps, `{track, stop: true}`, a one-bar roll or fill clip (`loop: 0`), one part's new pattern.
+- **Queue a runway before every question.** Whatever is queued loops while the user answers, and answers can
+  take minutes (a static loop ran 9 minutes once). Before asking, queue changes that keep moving for longer than
+  you expect to wait, and near the end of a timed set queue a fallback ending, so the set lands on time without
+  you. New clips replace queued ones on their tracks, so the runway costs nothing when you override it.
+- **Keep a control module, not one script.** A long set is many small tool calls: keep the parts and helpers
+  in `songs/<slug>/set/ctl.py` (pattern functions, a `q()` that queues and appends to a `setlog.md`) and call it
+  from short commands each turn. The log says what was queued when.
+- **Check after every addition**: the new track's level (a track reading -120 dBFS while "playing" is silent,
+  see below), the master `limiter` (layers add up: pull faders when it reads more than ~3 dB), late events.
+
+Changing style at a fixed tempo: the tempo is fixed per run, so change the feel by **metric modulation**. At a
+house tempo T, 1.5T is a triplet grid: trap at 141.9 over G-funk at 94.6, with 6 trap bars = 4 house bars and
+every trap beat = 2/3 of a house beat (write in trap beats, multiply by 2/3). A breakdown whose hats move to
+triplets first announces the new grid; then drop. 2T and T/2 (half-time) work the same way.
+
+Phrase boundaries: `next_16` and friends count from bar 1 of the run, not from where a playing part's phrase
+began. When a new part must line up with a 16-bar phrase that started on bar 37, use `bar:<37 + 16k>`.
+
+## Phrase voices: performers in a live set
+
+A code voice renders one note at a time, so legato, slides and bends between notes need another shape: make
+**one note = one whole phrase**. The voice takes a `phrases` param, `{"<velocity>": {"notes": [...], "bend":
+[[beat, semitones], ...], "vib": [[beat, cents], ...]}}`, and the note's velocity picks the phrase; the note's
+pitch can transpose it against a `root`. Inside, call the performer on the phrase's notes and lanes and run any
+offline effect chain on the result. Phrases render once and are cached, so they can be slow (a physical guitar
+with an amp rig renders at ~1 to 3x realtime).
+
+The instrument, params included, is captured when the track is made. After you add a phrase to the dict,
+re-send `live_track(name, instrument=...)`; a note whose phrase is missing plays silence.
 
 ## Decks: prepare the next part while this one plays
 
@@ -61,11 +118,19 @@ hole at the bass swap. Pick `bars` so the section starts on its downbeat hit.
 - **Variation inside the clip.** A 4-bar clip with a fill in bar 4 beats a 1-bar clip plus four tool calls.
 - **Balance with faders.** Read the per-track levels in `live_status` and set `volume_db`. The safety chain is
   a floor, not a mixer: its limiter and rider should read 0 dB.
-- **Live output is quiet by design** (trim -6 dB, sustained cap -16 dBFS rms, ceiling -1 dBFS; about -23
-  LUFS for a balanced mix). Do not chase loudness live; master a take offline.
+- **Live output is quiet by default** (trim -6 dB, sustained cap -16 dBFS rms, ceiling -1 dBFS; about -21 to
+  -23 LUFS for a balanced mix). That is too quiet for a listener at a normal volume: one user heard "nothing".
+  For a set, start the engine with `ISMAIL_LIVE_TRIM_DB=4` and `ISMAIL_LIVE_CAP_DB=-12` in the environment of
+  the process that calls `live_start` (the engine inherits it): about -16 LUFS. Then keep the limiter near 0 dB
+  with faders.
 - **Sounds you are unsure of**: try them on a muted or quiet track (`volume_db=-40`, then fade with a ramp on a
   gain fx) rather than straight onto the main part.
-- **Tempo change** = `live_stop`, then `live_start` with the new tempo.
+- **Tempo change** = `live_stop`, then `live_start` with the new tempo (a gap). Inside a set, change the feel
+  with metric modulation instead (above).
+- **Gliding parts** (a portamento synth lead, a Moog bass) belong on the synth engine (`mono`, `glide`) with
+  measured harmonics (an `additive` osc or a fitted filter): mimic renders each note alone and does not glide.
+- **Recording a long set** takes disk: 24-bit stereo is ~16 MB a minute (~480 MB for 30 minutes). Check free
+  space first, or skip the take and use `live_listen` on the live output.
 
 ## What is and is not live yet
 
@@ -85,7 +150,8 @@ clips on a deck.
 - `live_status` shows each track's render speed ("renders 3x realtime"). Drums and code voices run 20 to 50x,
   synths 4 to 7x, mimic 1 to 3x (low notes are the slowest: more harmonics). A clip's first pass waits for its
   renders, so the reply moves slow first launches a bar or two later; every later pass reuses them, and
-  identical notes (a repeated chord) render once.
+  identical notes (a repeated chord) render once. Phrase voices (a whole guitar phrase through an amp rig) run
+  ~1 to 3x: queue them a phrase ahead.
 - `live_start` takes ~20 to 30 s: the render workers warm up every instrument kind and every mimic profile in
   the folder before it returns, so the first clips land on time.
 - Mimic profiles come out quiet next to synths and code voices (about 9 dB): check their level in
