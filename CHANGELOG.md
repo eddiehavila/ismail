@@ -8,6 +8,10 @@
   `amp` (Marshall-style tone stack after Yeh and Smith 2006, push-pull power stage with sag), `cab` (min-phase
   cabinet with a mic blend), `rotary` (Leslie with ramping rotors), `tape` (head bump, wow, flutter, hiss), `wah`
   (resonant band-pass). `fx_help(type=...)` documents each. Live runs them baked into each rendered note.
+- Performer voices in the studio: a voice module with `perform()` and no `voice()` renders a whole part at once
+  (strings that ring on, legato, slides, whammy), with expression lanes from automation `inst.lane.<name>`. Live
+  already played them from clip `expr` lanes; one mechanism now: a deck turns a song's `inst.lane.*` automation
+  into its clip's `expr`, and `live_load` marks a song's performer tracks (decks had played them note by note).
 
 ## 0.2.0 (2026-09-30)
 

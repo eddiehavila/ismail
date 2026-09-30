@@ -471,9 +471,27 @@ def render_sampler(p, notes, total_n, auto, sr):
 
 # ------------------------------------------------------------------ code instrument
 
-def render_code(p, notes, total_n, sr, bpm=120.0, root=None):
+def render_code(p, notes, total_n, sr, bpm=120.0, root=None, auto=None):
     from . import voices
     if p.get('voice'):
+        try:
+            mod = voices.load(p['voice'], root)
+        except voices.VoiceError as e:
+            raise InstrumentError(str(e))
+        # fn defaults to 'voice'; a module without voice() but with perform() is a performer
+        want = p.get('fn') or 'voice'
+        perform = getattr(mod, 'perform', None) if (want == 'perform' or not callable(getattr(mod, want, None))) else None
+        if callable(perform):
+            # a performer voice renders the whole part at once (strings that ring on, legato, whammy):
+            # it gets every note and its expression lanes (automation 'inst.lane.<name>', per-sample curves)
+            lanes = {k[5:]: v for k, v in (auto or {}).items() if k.startswith('lane.')}
+            y = np.asarray(perform(notes, total_n, sr, bpm=bpm, lanes=lanes, **(p.get('params') or {})),
+                           dtype=np.float64)
+            if y.ndim == 1:
+                y = np.stack([y, y])
+            out = np.zeros((2, total_n))
+            out[:, :min(total_n, y.shape[1])] = y[:, :total_n]
+            return out
         try:
             fn = voices.function(p['voice'], p.get('fn', 'voice'), root)
         except voices.VoiceError as e:
@@ -530,7 +548,7 @@ def render_instrument(inst, notes, total_n, auto=None, bpm=120.0, sr=SR, root=No
     elif t == 'sampler':
         out = render_sampler(inst, notes, total_n, auto, sr)
     elif t == 'code':
-        out = render_code(inst, notes, total_n, sr, bpm, root)
+        out = render_code(inst, notes, total_n, sr, bpm, root, auto)
     elif t == 'mimic':
         out = render_mimic(inst, notes, total_n, sr, root)
     elif t == 'kit':

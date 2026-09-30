@@ -234,7 +234,9 @@ def _check_voices(spec, P):
         return
     if spec.get('type') == 'code' and spec.get('voice'):
         try:
-            voices.function(spec['voice'], spec.get('fn', 'voice'), P.root if P else None)
+            mod = voices.load(spec['voice'], P.root if P else None)
+            if spec.get('fn') or not callable(getattr(mod, 'perform', None)):
+                voices.function(spec['voice'], spec.get('fn', 'voice'), P.root if P else None)
         except voices.VoiceError as e:
             raise OpError(f"instrument invalid: {e}")
     for v in (spec.get('map') or {}).values():
@@ -834,7 +836,8 @@ def automation_set(project: str, track: str, param: str, points: list, mode: str
     volume_db or fx.<index>.<param>, e.g. a filter sweep on a drum bus). points = [[bar, value], ...] with fractional bars allowed (17.5 = beat 3 of
     bar 17); linear between points (log for Hz params), held before/after. param: 'volume_db' (dB OFFSET added to
     the track fader: 0 = unchanged, -30 = fade out), 'pan',
-    'inst.<path>' (inst.filter.cutoff, inst.oscs.0.level ... see instrument_help), 'fx.<index>.<param>'.
+    'inst.<path>' (inst.filter.cutoff, inst.oscs.0.level ... see instrument_help), 'inst.lane.<name>' (an expression
+    lane of a performer voice, e.g. a guitar's bend in semitones: voice_help lists its lanes), 'fx.<index>.<param>'.
     mode='merge' keeps existing points outside the new points' span."""
     P = _load(project)
     if track == 'master':
@@ -851,7 +854,9 @@ def automation_set(project: str, track: str, param: str, points: list, mode: str
         pass
     elif param.startswith('inst.'):
         pp = param[5:]
-        if not (pp in INST_CONTINUOUS or (pp.startswith('oscs.') and pp.split('.')[-1] in ('level', 'pw', 'fm_amount'))):
+        if pp.startswith('lane.') and len(pp) > 5:
+            pass  # expression lane of a performer voice (bend, vib, mute ...): see voice_help(<voice>)
+        elif not (pp in INST_CONTINUOUS or (pp.startswith('oscs.') and pp.split('.')[-1] in ('level', 'pw', 'fm_amount'))):
             raise OpError(f"inst param {pp!r} is not automatable; use one of {INST_CONTINUOUS} or oscs.N.level|pw|fm_amount")
     elif param.startswith('fx.'):
         try:

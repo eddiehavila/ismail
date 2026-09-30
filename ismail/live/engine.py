@@ -1110,9 +1110,12 @@ class Engine:
                     node['path'].chain.fx[idx][param] = knots[0][1]
         return bad
 
-    def cmd_load(self, deck, song, bars=None, at='next_bar', loop=True, cue=None):
+    def cmd_load(self, deck, song, bars=None, at='next_bar', loop=True, cue=None, performers=None):
         try:
             info, buses, tracks, clips, skipped = D.read_song(song, deck, bars, self.bpb)
+            for t in tracks:                   # performer voices, found by live_load in the op process
+                if t['track'].split('.', 1)[1] in (performers or ()):
+                    t['instrument'] = dict(t['instrument'], performer=True)
         except D.DeckError as e:
             raise LiveError(str(e))
         if not clips:
@@ -1137,13 +1140,26 @@ class Engine:
                            root=t['root'], warm=False)
         with self.lock:
             b0 = info['beats'][0]
+            lane_note, deck_expr = [], {}
             for target, lanes in info.get('automation', {}).items():
                 tr = self.tracks.get(target.split(':', 1)[1]) if target.startswith('track:') else None
-                il = {k[5:]: sorted((float(b) - b0, float(v)) for b, v in pts) for k, pts in lanes.items()
-                      if k.startswith('inst.')}
-                if tr is not None and il and tr['inst'] and not tr['inst'].get('performer'):
-                    tr['inst'] = dict(tr['inst'], _whole=True)
-                    tr['inst_auto'] = il
+                if tr is None or not tr['inst']:
+                    continue
+                pts_of = lambda pts: sorted((float(b) - b0, float(v)) for b, v in pts)  # noqa: E731
+                il = {k[5:]: pts_of(p) for k, p in lanes.items() if k.startswith('inst.') and not k.startswith('inst.lane.')}
+                ll = {k[10:]: pts_of(p) for k, p in lanes.items() if k.startswith('inst.lane.')}
+                if tr['inst'].get('performer'):
+                    # a performer's studio lanes (automation inst.lane.<name>) are its live clip's expr lanes
+                    if ll:
+                        deck_expr[target.split(':', 1)[1]] = {k: [list(x) for x in v] for k, v in ll.items()}
+                    if il:
+                        lane_note.append(f"{target.split(':', 1)[1]} {', '.join(il)} (a performer takes lanes)")
+                else:
+                    if ll:
+                        lane_note.append(f"{target.split(':', 1)[1]} lanes {', '.join(ll)} (not a performer voice)")
+                    if il:
+                        tr['inst'] = dict(tr['inst'], _whole=True)
+                        tr['inst_auto'] = il
             for t in tracks:                               # one warm-up per distinct instrument, not per track
                 self.tracks[t['track']]['warming'] = 0
             seen = {}
@@ -1165,9 +1181,12 @@ class Engine:
             except QueueError as e:
                 raise LiveError(str(e))
         bar = beat / self.bpb + 1
-        out = self.cmd_queue([dict(c, loop=None if loop else 1, at=f'bar:{bar:g}') for c in clips])
+        out = self.cmd_queue([dict(c, loop=None if loop else 1, at=f'bar:{bar:g}',
+                                   **({'expr': deck_expr[c['track']]} if c['track'] in deck_expr else {}))
+                              for c in clips])
         with self.lock:
             auto_note = self._deck_automation(info, beat, loop)
+        auto_note = auto_note + lane_note
         if auto_note:
             skipped.setdefault('automation', [])
             skipped['automation'] = skipped['automation'] + auto_note

@@ -190,7 +190,19 @@ def live_load(project: str, deck: str, song: str, bars: list = None, at: str = '
     if not os.path.isabs(song):
         cand = os.path.join(os.path.abspath(project), song)
         song = cand if os.path.exists(cand) else os.path.abspath(song)
-    return _call(project, 'load', deck=deck, song=song, bars=bars, at=at, loop=loop, cue=cue, timeout=120)
+    return _call(project, 'load', deck=deck, song=song, bars=bars, at=at, loop=loop, cue=cue,
+                 performers=_song_performers(song), timeout=120)
+
+
+def _song_performers(song):
+    """Names of a song's tracks whose voice is a performer (checked here, in the op process, like live_track)."""
+    try:
+        with open(os.path.join(song, 'project.json'), encoding='utf8') as f:
+            tracks = json.load(f).get('tracks', {})
+    except (OSError, ValueError):
+        return []
+    return [n for n, t in tracks.items() if isinstance(t.get('instrument'), dict) and
+            _mark_performer(t['instrument'], song).get('performer')]
 
 
 @op()
