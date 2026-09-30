@@ -1,6 +1,8 @@
 # ismail
 
-**A DAW for AI agents. It can't hear, so it reads.**
+**A DAW for AI agents. It can't hear, so it reads. And it plays live.**
+
+Your agent writes the song as notes, sounds and code, reads back what it made, and then performs it: DJ decks, transitions, requests taken while the music plays.
 
 [![tests](https://github.com/newsbubbles/ismail/actions/workflows/tests.yml/badge.svg)](https://github.com/newsbubbles/ismail/actions/workflows/tests.yml)
 
@@ -10,6 +12,9 @@
 
 | song | what it is |
 |---|---|
+| [Live set: Clash, Poppycock, Mycelium](https://newsbubbles.github.io/ismail/#liveset) | recorded live: the agent mixes three of its songs on decks at 150 BPM (orchestral into dubstep into psytrance), key-matched, with a filter transition and a bass-swap blend |
+| [Tidewater](https://newsbubbles.github.io/ismail/#tidewater) | strings measured from recordings (mimic), piano, taiko and gong; 22 dB from a pianissimo solo cello to the fortissimo tutti |
+| [Mycelium Protocol](https://newsbubbles.github.io/ismail/#mycelium) | psytrance at 145 BPM, sounds fitted to a reference record's drums and bass |
 | [Poppycock](https://newsbubbles.github.io/ismail/#poppycock) | dubstep, one bass voice whose note velocity picks each hit's articulation |
 | [Fantaisie-Impromptu](https://newsbubbles.github.io/ismail/#fantaisie) | Chopin on a piano synthesized from measured notes, no samples |
 | [AstraSMB](https://newsbubbles.github.io/ismail/#astrasmb) | drum and bass at 174 BPM |
@@ -30,6 +35,7 @@ ismail is not a model that turns a prompt into audio, like Suno. It is a set of 
 - **Any sound.** Synths, drum synths, samplers, voices written in Python and speech; any sound can become an instrument.
 - **Local and open.** MIT licensed, runs on your machine, no content filter and no music subscription (you bring the agent).
 - **It improves with your model.** The music is the agent's own work, so a stronger model with the same prompt should write a better song.
+- **It plays live.** The same songs, instruments and effects run in real time: the agent loads finished songs on decks and mixes them, jams with you, and changes the music between its turns while it keeps playing. A text-to-song service hands you a finished file; streaming models such as Lyria RealTime steer a style with prompts, but cannot play the exact song you wrote or change one bar of it.
 
 Suno is still better at realistic sung vocals, a polished song from one sentence in under a minute, and genre sound learned from recorded music. And why not Ableton or FL Studio? They were built for a person with ears and a mouse; an agent can press their buttons through bridges but still can't hear what it did. ismail puts everything an agent needs to write and to perceive into compact text, and if something is missing, your agent can add it. More on the [showcase page](https://newsbubbles.github.io/ismail/#compare).
 
@@ -39,7 +45,7 @@ A DAW built to be operated by an AI agent. Everything goes in as text (notes, in
 
 One set of operations, three ways in:
 
-- **MCP server** for Claude Code, Cursor or any MCP client: `python -m ismail.mcp_server` (stdio, about 70 tools)
+- **MCP server** for Claude Code, Cursor or any MCP client: `python -m ismail.mcp_server` (stdio, 90 tools)
 - **CLI**: `python -m ismail -p <project> <op> [args]`
 - **Python**: `from ismail import api`
 
@@ -223,7 +229,8 @@ The perceptual group exists because the others can all look fine while the resul
 ## Playing live
 
 The same instruments and effects play in real time while the agent edits the music: a jam, a DJ set, a
-soundtrack that follows a game or an audience. `live_start` runs a separate engine process per folder (a local
+soundtrack that follows a game or an audience. [Hear a recorded set](https://newsbubbles.github.io/ismail/#liveset):
+three finished songs mixed live on decks, the set written as one script (`live_load`, `live_deck`, `live_transition`). `live_start` runs a separate engine process per folder (a local
 control port, render workers, a mixer and a safety chain), and the agent drives it with ops:
 
 ```text
@@ -289,7 +296,9 @@ ismail/
   live/          the live engine: timeline, render workers, mixer graph, decks, safety, live_* ops,
                  block-by-block effect twins (fx_blocks.py, dsp_blocks.py)
   video/         optional music-video pipeline: sync, edit engine, Blender shot kit, CLI
-  voices/        voice modules: grand_piano, additive_piano, growl, sfx
+  mimic.py       instruments measured from recordings (partials, body, noise, vibrato, room)
+  voices/        the voice library in family folders: keys (grand_piano, additive_piano), strings (violin,
+                 cello, contrabass mimic profiles), bass (growl), fx (sfx)
   api.py, api_cmp.py, api_sound.py, api_measure.py   the operations (CLI and MCP tools)
   mcp_server.py, guide.py
 skills/ismail/   the agent skill (SKILL.md + references)
