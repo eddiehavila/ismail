@@ -12,6 +12,11 @@
   (strings that ring on, legato, slides, whammy), with expression lanes from automation `inst.lane.<name>`. Live
   already played them from clip `expr` lanes; one mechanism now: a deck turns a song's `inst.lane.*` automation
   into its clip's `expr`, and `live_load` marks a song's performer tracks (decks had played them note by note).
+- Library voices `guitar/electric` (electric guitar or bass: waveguide strings, pickup comb and resonance, lanes
+  for bend, vibrato, mute, slide, level) and `drums/kit70` (a 1970 kit as modal resonator banks), both performers,
+  fitted in a late-60s guitar record study (20 of 22 single lead notes passed a blind exam). Presets
+  `strat70_lead`, `strat70_rhythm`, `strat70_rotary`, `pbass70`, `kit70`; each voice's INFO `rigs` holds the fx
+  chain its presets were fitted with, and `voice_help` prints them one line each.
 
 ## 0.2.0 (2026-09-30)
 

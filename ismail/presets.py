@@ -60,6 +60,21 @@ PRESETS = {
     "additive_piano": {"type": "code", "voice": "additive_piano", "tail": 3.0},
     "growl": {"type": "code", "voice": "growl", "tail": 0.04},
     "sfx": {"type": "code", "voice": "sfx", "tail": 4.5},
+    # performer voices fitted to a late-60s record (voice_help electric / kit70 lists the rig each one needs)
+    "strat70_lead": {"type": "code", "voice": "electric", "tail": 3.0,
+                     "params": {"kind": "strat", "mode": "mono", "seed": 31, "pickup": [0.063, 0.155], "bright": 0.7,
+                                "damp": 0.0, "res_hz": 2800.0, "res_q": 1.6, "release": 0.3, "t60": 9.0,
+                                "vib_rate": 4.8}},
+    "strat70_rhythm": {"type": "code", "voice": "electric", "tail": 3.0,
+                       "params": {"kind": "strat", "mode": "poly", "seed": 11, "pickup": [0.25], "bright": 0.6,
+                                  "damp": 0.0, "res_hz": 950.0, "res_q": 4.8, "strum_ms": 28.0}},
+    "strat70_rotary": {"type": "code", "voice": "electric", "tail": 3.0,
+                       "params": {"kind": "strat", "mode": "poly", "seed": 23, "pickup": [0.155], "bright": 0.6,
+                                  "damp": 0.3, "res_hz": 2600.0}},
+    "pbass70": {"type": "code", "voice": "electric", "tail": 2.0,
+                "params": {"kind": "pbass", "mode": "mono", "seed": 41, "bright": 0.3, "damp": 0.0, "pluck": 0.12,
+                           "velocity": 0.5, "t60_hi": 0.6}},
+    "kit70": {"type": "code", "voice": "kit70", "tail": 4.0, "params": {"seed": 5, "cym_bright": 0.45}},
 }
 
 GM_DRUMS = {"kick": "C1", "snare": "D1", "clap": "D#1", "hat": "F#1", "open_hat": "A#1", "tom_low": "A1",

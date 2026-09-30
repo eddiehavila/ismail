@@ -474,8 +474,14 @@ def voice_help(project: str = None, name: str = 'grand_piano') -> str:
     except voices.VoiceError as e:
         raise OpError(str(e))
     L = [f"{name} ({origin}: {path})", meta.pop('summary', '')]
+    rigs = meta.pop('rigs', None)
     for k, v in meta.items():
         L.append(f"{k}: " + (json.dumps(v, indent=1) if isinstance(v, dict) else str(v)))
+    if rigs:
+        # the fx chains the voice was fitted with, one line each, ready to paste into fx
+        L.append("rigs (instrument='preset:<preset>', then these fx in order):")
+        for rn, r in rigs.items():
+            L.append(f"  {rn} [preset:{r.get('preset', '')}] {r.get('note', '')}\n    fx: {json.dumps(r['fx'])}")
     if doc and doc.split('\n')[0] != L[1]:
         L.append(doc)
     return '\n'.join(L)

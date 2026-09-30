@@ -132,7 +132,7 @@ Keep your projects under `songs/` (git-ignored) or anywhere else; a project is j
 - **Time**: bars are 1-indexed; note times are beats relative to the bar you write at. `offset_sec` is the time of bar 1, so a project can sit exactly on a reference recording's grid.
 - **Notes**: `'<beat> <pitch> <dur> [vel]'`, one per line or `;`-separated. Drum and step patterns: `pattern_write` with strings like `X...x...X...x...` (X 127, x 100, o 70, - 45, `_` ties).
 - **Instruments**: two synth engines. **sprite** (`"type": "synth"` or `"sprite"`: saw, square, pulse, triangle, sine, additive, wavetable and noise oscillators, unison, FM, drive, SVF and ladder filters, envelopes, LFOs, mono glide) is right for synth sounds. **mimic** (`"type": "mimic"`) plays instruments measured from recordings (see below). Plus `sampler`, drum synths (`kick`, `snare`, `hat`, `clap`, `tom`, `noise_hit`), `kit` (pitch to instrument map) and `code` (a Python voice function for anything else). `presets_list` has starting points.
-- **Effects**: eq, filter, distortion, bitcrush, compressor (with sidechain), duck, gate, delay, reverb, chorus, flanger, phaser, tremolo/autopan, width, limiter, vocoder, formant. Tracks, buses and the master fader can be automated.
+- **Effects**: eq, filter, distortion, bitcrush, compressor (with sidechain), duck, gate, delay, reverb, chorus, flanger, phaser, tremolo/autopan, width, limiter, vocoder, formant, and a guitar rig: fuzz, univibe, amp (tone stack, power stage with sag), cab, rotary speaker, tape, wah. Tracks, buses and the master fader can be automated.
 - **Voices**: engineered instruments kept as Python modules, so a project stores a name instead of code (see below).
 - **Sound bank**: sounds made from any instrument and effect chain (`sound_make`), speech (`sound_speak`), imported files, and averaged events cut from a recording (`sound_extract`). Bank sounds work as sampler sources, wavetables, vocoder modulators and audio clips.
 - **Undo and batch**: every edit snapshots the project (`undo`); `batch` applies a list of ops atomically.
@@ -150,6 +150,8 @@ The library is grouped in family folders under `ismail/voices/`; names stay flat
 | strings | `violin`, `cello`, `contrabass` | mimic profiles measured from real recordings (use `{"type": "mimic", "profile": "violin"}`); open strings, measured room and vibrato included; `params.players` makes a section |
 | bass | `growl` | dubstep bass engine: velocity 1x yoi, 2x wub, 3x screech, 4x metal, 5x dive, 6x zap, 7x grind, 8x chop, 9x talk, 11x robot, 12x howl; the LFO rates follow the song tempo |
 | fx | `sfx` | one-shots by velocity: gunshot, reload, shell casing, bone crunch, punch, rip, gong |
+| guitar | `electric` | performer: electric guitar or bass as waveguide strings (pick, pickup comb, pickup resonance) playing a whole part, with legato, slides, bends, whammy, vibrato and mutes as lanes. Presets `strat70_lead`, `strat70_rhythm`, `strat70_rotary`, `pbass70`; it is the DI signal, so `voice_help` lists the rig each preset was fitted with |
+| drums | `kit70` | performer: a 1970 acoustic kit as modal resonator banks that keep ringing across the part (a ride builds wash); preset `kit70` and its fitted EQ |
 
 Use one with `instrument={"type": "code", "voice": "grand_piano", "tail": 4.0}` or `"preset:grand_piano"`. `voices_list` shows what is available and `voice_help(name)` explains a voice's velocity mapping, functions and parameters.
 
@@ -161,9 +163,11 @@ Voices are looked up in this order:
 
 Each of these may have family subfolders (`strings/`, `keys/`, `percussion/` ...), searched too; mimic profiles (`<name>.mimic.json`) are found the same way.
 
-A voice function may take extra keyword arguments: `bpm` is passed automatically, and the track's `"params"` dict is passed as keywords (`{"type": "code", "voice": "mine", "params": {"brightness": 0.3}}`). A module-level `INFO` dict documents it for `voice_help`; every key is optional: `summary` (one line for `voices_list`), `range`, `velocity` (what velocity does), `functions` (name to description), `params` (name to description) and `tail` (recommended tail). Data files sit next to the module (`grand_piano.json`) and are found through `__file__`. Editing a voice file invalidates the render cache for the tracks that use it.
+A voice function may take extra keyword arguments: `bpm` is passed automatically, and the track's `"params"` dict is passed as keywords (`{"type": "code", "voice": "mine", "params": {"brightness": 0.3}}`). A module-level `INFO` dict documents it for `voice_help`; every key is optional: `summary` (one line for `voices_list`), `range`, `velocity` (what velocity does), `functions` (name to description), `params` (name to description), `lanes` (a performer's expression lanes), `rigs` (fx chains it was fitted with, each with its `preset`) and `tail` (recommended tail).
 
-To add a voice to the library, move it from a song's `voices/` folder into the right family folder under `ismail/voices/` (a new family needs an empty `__init__.py` and a line in `pyproject.toml`), give it an `INFO` dict, and add a line to the test that renders every built-in.
+A **performer** voice defines `perform(notes, total_n, sr, bpm, lanes, **params)` instead of `voice()`: it gets the whole part at once, so strings ring on under the next note, legato notes slide or hammer on, and a lane bends everything that sounds. Lanes come from automation `inst.lane.<name>` in the studio and from clip `expr` live (a deck converts one to the other). Data files sit next to the module (`grand_piano.json`) and are found through `__file__`. Editing a voice file invalidates the render cache for the tracks that use it.
+
+To add a voice to the library, move it from a song's `voices/` folder into the right family folder under `ismail/voices/` (a new family needs an empty `__init__.py` and a line in `pyproject.toml`), give it an `INFO` dict, and add a line to the test that renders every built-in (`tests/test_library_performers.py` for performers).
 
 ## mimic: instruments measured from recordings
 
@@ -284,7 +288,7 @@ ismail/
   notation.py    note text, step patterns, piano roll
   dsp.py         oscillators, filters, dynamics, delay lines, reverb (numba)
   instruments.py synth, sampler, drums, kit, code
-  fx.py          effects
+  fx.py          effects; rig.py the guitar rig (fuzz, univibe, amp, cab, rotary, tape, wah)
   render.py      project to audio, dependency ordering, per-track cache, wav/mp3 writers
   analysis.py    audio to text (grid, bars, chords, melody, drums, timbre, formants, compare)
   features.py    16th-step feature grid shared by structure and comparisons
@@ -298,7 +302,7 @@ ismail/
   video/         optional music-video pipeline: sync, edit engine, Blender shot kit, CLI
   mimic.py       instruments measured from recordings (partials, body, noise, vibrato, room)
   voices/        the voice library in family folders: keys (grand_piano, additive_piano), strings (violin,
-                 cello, contrabass mimic profiles), bass (growl), fx (sfx)
+                 cello, contrabass mimic profiles), bass (growl), fx (sfx), guitar (electric), drums (kit70)
   api.py, api_cmp.py, api_sound.py, api_measure.py   the operations (CLI and MCP tools)
   mcp_server.py, guide.py
 skills/ismail/   the agent skill (SKILL.md + references)
