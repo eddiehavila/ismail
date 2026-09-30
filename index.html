@@ -73,7 +73,31 @@ h2 { font-size: 28px; margin: 0 0 8px; letter-spacing: -.01em; }
 .track h3 { margin: 0; font-size: 20px; }
 .meta { font: 13px var(--mono); color: var(--faint); }
 .desc { color: var(--dim); margin: 6px 0 12px; }
-.track audio { width: 100%; height: 40px; }
+.track.now { border-color: var(--accent); }
+.player { display: flex; align-items: center; gap: 12px; }
+.pp { flex: none; width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--accent); padding: 0;
+  background: var(--accent); color: var(--accent-ink); display: grid; place-items: center; cursor: pointer; }
+.pp svg { width: 16px; height: 16px; fill: currentColor; }
+.pp .i-pause, .pp.on .i-play { display: none; }
+.pp.on .i-pause { display: block; }
+.seek { flex: 1; min-width: 0; margin: 0; accent-color: var(--accent); cursor: pointer; }
+.time { font: 12.5px var(--mono); color: var(--faint); white-space: nowrap; }
+.np { position: fixed; left: 0; right: 0; bottom: 0; z-index: 10; display: flex; align-items: center; gap: 12px;
+  padding: 10px 16px; background: var(--panel); border-top: 1px solid var(--line); }
+.np[hidden] { display: none; }
+.np .pp { width: 36px; height: 36px; }
+.np-text { flex: 1; min-width: 0; display: flex; flex-direction: column; font: 13px/1.4 var(--mono); }
+.np-title { all: unset; cursor: pointer; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.np-title:focus-visible { outline: 2px solid var(--accent); }
+.np-sub { color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.np-through { display: flex; align-items: center; gap: 6px; font: 12.5px var(--mono); color: var(--dim);
+  white-space: nowrap; cursor: pointer; }
+.np-through input { accent-color: var(--accent); margin: 0; }
+.np-skip { flex: none; width: 36px; height: 36px; border-radius: 50%; border: 1px solid var(--line); padding: 0;
+  background: none; color: var(--text); display: grid; place-items: center; cursor: pointer; }
+.np-skip svg { width: 14px; height: 14px; fill: currentColor; }
+.np-skip:disabled { opacity: .35; cursor: default; }
+body.has-np { padding-bottom: 72px; }
 .engine { margin: 6px 0 10px; font: 12.5px var(--mono); color: var(--dim); }
 .engine span { color: var(--accent); margin-right: 6px; }
 .tag { font: 500 11px var(--mono); color: var(--accent); border: 1px solid var(--accent); border-radius: 4px; padding: 1px 6px; margin-left: 8px; vertical-align: 2px; }
@@ -173,7 +197,7 @@ master: -11.8 LUFS, peak -0.3 dBFS
 <section id="listen">
   <div class="wrap">
     <h2>Listen</h2>
-    <p class="sub">Under each song is the text the agent used to judge it: the arrangement map (one character per bar, 9 = loudest, rows per frequency band, the bass note and the sections it found) and a piano roll of one part. Press play and the playhead runs across the map; click the map to jump to a bar.</p>
+    <p class="sub">Under each song is the text the agent used to judge it: the arrangement map (one character per bar, 9 = loudest, rows per frequency band, the bass note and the sections it found) and a piano roll of one part. Press play and the playhead runs across the map; click the map to jump to a bar. The songs play through in order, and the one playing opens what the agent saw.</p>
     <p class="sub">Each song says what made it: <b>sprite</b> is the synth engine (oscillators, filters, envelopes, drum synths), <b>mimic</b> plays instruments measured from a few recorded notes, and <b>voices</b> are instruments written as code (the grand piano is built from measured piano partials).</p>
     <div id="tracks"></div>
   </div>
@@ -361,6 +385,7 @@ const ENGINE = {
   lettre: 'grand_piano voice (an inline copy)'
 };
 const TAG = { bassofstorms: 'fan remix', liveset: 'live' };
+const PREFIX = 10; // "      bar " before the first bar column of a map
 const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 const fmt = s => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}`;
 
@@ -374,10 +399,32 @@ function charWidth(pre) {
   return w;
 }
 
+const ICON_PLAY = '<svg class="i-play" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2.5v11l9.5-5.5z"/></svg>';
+const ICON_PAUSE = '<svg class="i-pause" viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 2.5h3v11h-3zM9.5 2.5h3v11h-3z"/></svg>';
+const ICON_NEXT = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 2.5v11l8-5.5zM11.5 2.5h2v11h-2z"/></svg>';
+
 (data => {
   const bySlug = Object.fromEntries(data.map(d => [d.slug, d]));
   const host = document.getElementById('tracks');
-  const audios = [];
+  // one player for every song: a browser lets an element the listener started keep playing with a new source,
+  // so the songs can follow each other (a second element would need a fresh tap on phones)
+  const player = new Audio();
+  player.preload = 'none';
+  const cards = [];
+  let cur = -1, raf = 0;
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  const np = document.createElement('div');
+  np.className = 'np';
+  np.hidden = true;
+  np.innerHTML = `
+    <button class="pp" type="button" aria-label="Play or pause">${ICON_PLAY}${ICON_PAUSE}</button>
+    <div class="np-text"><button class="np-title" type="button"></button><span class="np-sub"></span></div>
+    <label class="np-through"><input type="checkbox" checked> play through</label>
+    <button class="np-skip" type="button" aria-label="Next song">${ICON_NEXT}</button>`;
+  document.body.appendChild(np);
+  const npPP = np.querySelector('.pp'), npTitle = np.querySelector('.np-title'), npSub = np.querySelector('.np-sub');
+  const through = np.querySelector('input'), skip = np.querySelector('.np-skip');
   // the hero's "read it back" panel: the start of Poppycock's section list
   document.getElementById('io-read').textContent =
     'analyze_structure\n' + bySlug.poppycock.sections.split('\n').slice(0, 5)
@@ -400,7 +447,11 @@ function charWidth(pre) {
       </div>
       <p class="desc">${esc(DESC[slug] || d.doc)}</p>
       ${ENGINE[slug] ? `<p class="engine"><span>made with</span> ${esc(ENGINE[slug])}</p>` : ''}
-      <audio controls preload="none" src="audio/${slug}.mp3"></audio>
+      <div class="player">
+        <button class="pp" type="button" aria-label="Play ${esc(d.title)}">${ICON_PLAY}${ICON_PAUSE}</button>
+        <input class="seek" type="range" min="0" max="${d.duration}" step="0.1" value="0" aria-label="Position in ${esc(d.title)}">
+        <span class="time">0:00 / ${fmt(d.duration)}</span>
+      </div>
       <details class="seen">
         <summary>what the agent saw</summary>
         <p class="hint">analyze_structure: one character per bar. Click a bar to jump there.</p>
@@ -412,33 +463,123 @@ function charWidth(pre) {
     host.appendChild(el);
     if (location.hash === '#' + slug) requestAnimationFrame(() => el.scrollIntoView());
 
-    const audio = el.querySelector('audio');
-    const pre = el.querySelector('.map');
-    const head = el.querySelector('.playhead');
-    audios.push(audio);
-    let cw = 0, raf = 0;
-    const PREFIX = 10; // "      bar " before the first bar column
-    const place = () => {
-      if (!cw) cw = charWidth(pre);
-      const bar = Math.floor((audio.currentTime - off) / barSec);
-      head.style.display = bar >= 0 ? 'block' : 'none';
-      head.style.left = `${(PREFIX + bar) * cw}px`;
+    const c = {
+      slug, d, el, off, barSec, cw: 0, auto: false,
+      btn: el.querySelector('.pp'), seek: el.querySelector('.seek'), time: el.querySelector('.time'),
+      pre: el.querySelector('.map'), head: el.querySelector('.playhead'), details: el.querySelector('.seen'),
     };
-    const loop = () => { place(); raf = requestAnimationFrame(loop); };
-    audio.addEventListener('play', () => {
-      audios.forEach(a => { if (a !== audio) a.pause(); });
-      cancelAnimationFrame(raf); loop();
+    const i = cards.push(c) - 1;
+    c.details.addEventListener('toggle', () => { if (!c.details.open) c.auto = false; });
+    c.btn.addEventListener('click', () => {
+      if (i === cur) player.paused ? player.play().catch(() => {}) : player.pause();
+      else playAt(i, 0);
     });
-    audio.addEventListener('pause', () => { cancelAnimationFrame(raf); place(); });
-    audio.addEventListener('seeked', place);
-    pre.addEventListener('click', e => {
-      if (!cw) cw = charWidth(pre);
-      const x = e.clientX - pre.getBoundingClientRect().left;
-      const bar = Math.floor(x / cw) - PREFIX;
+    c.seek.addEventListener('pointerdown', () => { c.dragging = true; });
+    c.seek.addEventListener('pointerup', () => { c.dragging = false; });
+    c.seek.addEventListener('change', () => { c.dragging = false; });
+    c.seek.addEventListener('input', () => {
+      if (i === cur) seekTo(+c.seek.value);
+      else playAt(i, +c.seek.value);
+    });
+    c.pre.addEventListener('click', e => {
+      if (!c.cw) c.cw = charWidth(c.pre);
+      const x = e.clientX - c.pre.getBoundingClientRect().left;
+      const bar = Math.floor(x / c.cw) - PREFIX;
       if (bar < 0) return;
-      audio.currentTime = off + bar * barSec;
-      audio.play();
+      playAt(i, Math.max(0, off + bar * barSec));
     });
+  }
+
+  function place(c) {
+    if (!c.cw) c.cw = charWidth(c.pre);
+    const t = player.currentTime;
+    const bar = Math.floor((t - c.off) / c.barSec);
+    c.head.style.display = bar >= 0 ? 'block' : 'none';
+    c.head.style.left = `${(PREFIX + bar) * c.cw}px`;
+    if (!c.dragging) c.seek.value = t;
+    const txt = `${fmt(t)} / ${fmt(c.d.duration)}`;
+    c.time.textContent = txt;
+    const next = cards[cur + 1];
+    npSub.textContent = txt + (through.checked && next ? ` · next: ${next.d.title}` : '');
+  }
+  const loop = () => { place(cards[cur]); raf = requestAnimationFrame(loop); };
+
+  function seekTo(t) {
+    if (player.readyState >= 1) player.currentTime = t;
+    else player.addEventListener('loadedmetadata', () => { player.currentTime = t; }, { once: true });
+  }
+
+  function playAt(i, t) {
+    const c = cards[i];
+    if (i !== cur) {
+      const prev = cards[cur];
+      if (prev) {
+        prev.el.classList.remove('now');
+        prev.btn.classList.remove('on');
+        if (prev.auto) prev.details.open = false;
+        prev.auto = false;
+        prev.head.style.display = 'none';
+        prev.seek.value = 0;
+        prev.time.textContent = `0:00 / ${fmt(prev.d.duration)}`;
+      }
+      cur = i;
+      player.src = `audio/${c.slug}.mp3`;
+      c.el.classList.add('now');
+      if (!c.details.open) { c.details.open = true; c.auto = true; }
+      npTitle.textContent = c.d.title;
+      skip.disabled = i + 1 >= cards.length;
+      np.hidden = false;
+      document.body.classList.add('has-np');
+      if ('mediaSession' in navigator) {
+        try { navigator.mediaSession.metadata = new MediaMetadata({ title: c.d.title, artist: 'ismail' }); } catch (e) {}
+      }
+    }
+    seekTo(t);
+    player.play().catch(() => {});
+  }
+
+  // the card fits the space above the player bar: centred when it is shorter, its top edge when it is taller
+  function fit(el) {
+    const r = el.getBoundingClientRect();
+    const avail = innerHeight - (np.hidden ? 0 : np.offsetHeight), m = 16;
+    let y = scrollY + r.top - m;
+    if (r.height + 2 * m < avail) y -= (avail - r.height - 2 * m) / 2;
+    scrollTo({ top: Math.max(0, y), behavior: reduce ? 'auto' : 'smooth' });
+  }
+  function onScreen(el) {
+    const r = el.getBoundingClientRect();
+    return r.bottom > 0 && r.top < innerHeight - (np.hidden ? 0 : np.offsetHeight);
+  }
+  function advance(user) {
+    const c = cards[cur], next = cur + 1;
+    if (next >= cards.length) return;
+    // follow along only when the listener is still looking at the song that ended
+    const watching = user || onScreen(c.el);
+    playAt(next, 0);
+    if (watching) fit(cards[next].el);   // measuring forces the layout of the panels that just opened and closed
+  }
+
+  player.addEventListener('play', () => {
+    cards[cur].btn.classList.add('on'); npPP.classList.add('on');
+    cancelAnimationFrame(raf); loop();
+  });
+  player.addEventListener('pause', () => {
+    cards[cur].btn.classList.remove('on'); npPP.classList.remove('on');
+    cancelAnimationFrame(raf); place(cards[cur]);
+  });
+  player.addEventListener('seeked', () => place(cards[cur]));
+  player.addEventListener('ended', () => { if (through.checked) advance(false); });
+  npPP.addEventListener('click', () => player.paused ? player.play().catch(() => {}) : player.pause());
+  npTitle.addEventListener('click', () => fit(cards[cur].el));
+  skip.addEventListener('click', () => advance(true));
+  through.addEventListener('change', () => place(cards[cur]));
+  if ('mediaSession' in navigator) {
+    try {
+      navigator.mediaSession.setActionHandler('nexttrack', () => advance(false));
+      navigator.mediaSession.setActionHandler('previoustrack', () => {
+        if (player.currentTime > 3 || cur === 0) seekTo(0); else playAt(cur - 1, 0);
+      });
+    } catch (e) {}
   }
 })(window.SONGS);
 
