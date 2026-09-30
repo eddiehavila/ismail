@@ -19,6 +19,7 @@ import numpy as np
 
 from . import analysis as A
 from . import fx as fxmod
+from . import rig as rigmod
 from . import instruments as inst_mod
 from .notation import (parse_notes, parse_steps, pitch_to_midi, midi_to_name, format_notes, piano_roll, fmt_num,
                        NotationError)
@@ -816,6 +817,8 @@ def fx_help(project: str = None, type: str = None) -> str:
         if t not in fxmod.FX_DEFAULTS:
             raise OpError(f"unknown fx {t!r}; types: {', '.join(fxmod.FX_DEFAULTS)}")
         out.append(f"{t}: {json.dumps(fxmod.FX_DEFAULTS[t])}  automatable: {list(fxmod.AUTOMATABLE.get(t, ()))}")
+        if t in rigmod.DOCS:
+            out.append(f"    {rigmod.DOCS[t]}")
     out.append("notes: compressor.sidechain = track name; duck.source = track name (ducks on its note-ons) or every_beats;"
                " gate.pattern uses step chars; vocoder.modulator = track name or 'sound:<name>'; eq.bands = "
                "[{type: peak|lowshelf|highshelf|lowcut|highcut|notch|bandpass, freq, gain_db, q, slope 12|24}]")

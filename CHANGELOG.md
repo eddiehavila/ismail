@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Guitar rig and performers
+
+- Rig effects (`ismail/rig.py`): `fuzz` (Fuzz Face bias shift), `univibe` (four-stage LDR phaser with lamp lag),
+  `amp` (Marshall-style tone stack after Yeh and Smith 2006, push-pull power stage with sag), `cab` (min-phase
+  cabinet with a mic blend), `rotary` (Leslie with ramping rotors), `tape` (head bump, wow, flutter, hiss), `wah`
+  (resonant band-pass). `fx_help(type=...)` documents each. Live runs them baked into each rendered note.
+
 ## 0.2.0 (2026-09-30)
 
 ### Live
@@ -22,6 +31,11 @@
   lanes (bend, vibrato) on clips.
 - mimic profiles and code voices play live.
 - Install `.[live]` (sounddevice) to play to speakers; `device='none'` runs without audio out.
+- A deck plays a song the way it renders: a bus that tracks play through keeps its reverb or delay as an insert
+  (dry passes; live buses had been wet-only, which took the drums out of a song with a reverb on its drum bus),
+  and the song's automation comes over (fx params and track and bus volume as ramps, instrument params rendered
+  with the notes, the master fade), repeated every pass on a looping deck. A track with instrument automation
+  renders its section as one event, sent to a worker one pass ahead.
 
 ### Measurement
 
@@ -29,6 +43,8 @@
 - New ops: `ref_retune` (retuned analysis copies of an off-pitch reference), `analyze_swing`, `analyze_kit`
   (the pieces of a drum kit and each one's pattern, by NMF), `analyze_sections`, `levels_from_ref` (faders from
   the reference's stem balance).
+- `analyze_sections` flags a build (2 dB or more under the climax on average, peaking within 3 dB of it), not a
+  drop that goes on at the same level.
 
 ### Voices
 

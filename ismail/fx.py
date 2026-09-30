@@ -43,6 +43,8 @@ FX_DEFAULTS = {
     "formant": {"vowel": "@", "f1": None, "f2": None, "f3": None, "q": 8.0, "gains_db": [0.0, -4.0, -10.0],
                 "mix": 1.0, "shift": 1.0},
 }
+from . import rig as _rig
+FX_DEFAULTS.update(_rig.DEFAULTS)
 VOWEL_FORMANTS = {'i': (280, 2250, 2900), 'e': (400, 2000, 2600), 'E': (550, 1770, 2500), 'a': (750, 1250, 2600),
                   'A': (650, 1050, 2500), 'o': (450, 850, 2400), 'u': (320, 800, 2300), '@': (500, 1450, 2500)}
 FX_TYPES = tuple(FX_DEFAULTS)
@@ -55,6 +57,7 @@ AUTOMATABLE = {
     "phaser": ("mix",), "tremolo": ("depth",), "formant": ("mix",), "width": ("width",), "compressor": ("threshold_db",),
     "duck": ("depth_db",), "gate": ("depth",), "vocoder": ("mix",), "bitcrush": ("mix",),
 }
+AUTOMATABLE.update(_rig.AUTOMATABLE)
 
 
 class FxError(ValueError):
@@ -170,6 +173,8 @@ def apply_fx(x, fx, ctx, idx):
     n = x.shape[1]
     if fx.get('bypass'):
         return x
+    if t in _rig.APPLY:
+        return _rig.APPLY[t](x, fx, sr, P)
     if t == 'gain':
         g = dsp.undb(P('gain_db'))
         gl, gr = dsp.pan_gains(P('pan'))
