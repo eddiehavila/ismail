@@ -18,7 +18,7 @@ ismail is a DAW you drive with text: notes, patches, effects and automation go i
 
 ## The loop (every piece, every time)
 
-0. **Examples.** Ask the user for a recording of what they want (a song, a sound, a link), even if they did not offer one. Recall what the genre is played on and find an example of each instrument that matters (`references/instruments.md`).
+0. **Examples.** Ask the user for a recording of what they want (a song, a sound, a link), even if they did not offer one. Recall what the genre is played on and find an example of each instrument that matters (`references/instruments.md`). A live set, a jam or a "quick" request starts here too: a quick framing shortens the Session Sheet, never this step or the non-negotiables (a live G-funk beat skipped them and the user called draft 1 "horrible").
 1. **Session Sheet** (artifact, write it in your reply before any note): see the template below.
 2. **Build** the skeleton: tracks with instruments from the Sheet, drums first, then bass, then harmony, then lead, then ear candy. Use `batch` for multi-op edits (atomic, one round trip).
 3. **Render a window**, not the song: `render(bars=[a, b], stems=True)` on the section you just changed.
@@ -67,6 +67,9 @@ Registers must not collide: at most one part per octave band doing sustained wor
 - After writing notes for a part, read them back (`notes_read view='roll'` for a bar or two) before rendering. Most note bugs are visible there.
 - When matching a reference: never transcribe with raw `notes_from_audio` over a whole loop section; use `notes_from_audio_loop` (consensus). Never raise a track's level to improve a perceptual score. Never call a match done while `cmp_summary` shows a WARNING line or the mix perceptual group is far under its ceiling.
 - Reference audio is for analysis only. Do not place slices of the reference in the render; make the sounds.
-- No acoustic or electric instrument as a bare sprite (`synth`) patch: use a library voice, measure it with `mimic_measure`, build a measured voice, or use a sampler, and name the example it is modeled on.
+- No acoustic or electric instrument as a bare sprite (`synth`) patch: use a library voice, measure it with `mimic_measure`, build a measured voice, or use a sampler, and name the example it is modeled on. Genres built on records (hip-hop, G-funk, boom bap) get measured drums and bass too: `analyze_kit` on the reference drums, then a voice built from its components, or `sound_extract` + `instrument_fit`. Generic kick and snare fits failed there; a measured kit passed.
+- Numbers that can be measured are measured, never guessed: bar 1, tuning and swing (`analyze_grid`, `analyze_swing`), the pieces of a drum kit (`analyze_kit`), the fader balance against a reference (`levels_from_ref`). A guessed swing of 0.07 beat against a measured 0.03 was audible.
+- Everything the user hears goes through a master stage, live sets included, and its loudness is read at the output (`render` prints QUIET under -20 LUFS). A live set at -21 LUFS read as "nothing" at low volume.
+- Before a full draft goes to the user, `analyze_sections` with the Sheet's form map: the section before the climax peaks 3 dB or more under it (a build as loud as its climax only showed up there), and nothing that should be heard sits 35 dB under the loudest section.
 - When recreating a song, match each important instrument on a short exposed chunk first (`references/instruments.md` section 4) before arranging the whole song around it.
 - Every mp3 you hand the user comes with a question about what they hear, and their answer goes in `notes/feedback.md`.

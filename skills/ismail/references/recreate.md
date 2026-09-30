@@ -5,7 +5,8 @@ Learned from recreating Vitalic's "Allan Dellon". Each step exists because skipp
 ## 1. Grid first; timing errors poison everything
 
 - Get the audio (yt-dlp; YouTube may bot-wall, SoundCloud search `scsearch:` often works).
-- `project_new(..., reference=<wav>)`, `analyze_grid(source='ref')` for bpm and the time of bar 1. The downbeat pick is fragile when the kick skips beats; the tool prints the phase scores.
+- `project_new(..., reference=<wav>)`, `analyze_grid(source='ref')` for bpm and the time of bar 1. The downbeat pick is fragile when the kick skips beats; the tool prints the phase scores. In 4/4 with a kit the snare has to land on 2 and 4: the tool votes for that (its `backbeat` line) and moves section jumps off snare beats, which fixed a G-funk bar 1 read one beat late. Still check `analyze_drums(source='ref:drums')` for the first bars: snare on steps 5 and 13.
+- Read the **tuning** line of `analyze_grid` before any pitch tool. A sped-up record sat 48 cents sharp and every note read as a pair of semitones in the rolls, chords and transcriptions. At 15 cents or more off, `ref_retune()` writes retuned copies of the reference and its stems and points the project at them; the timing stays.
 - Render a drum track, then `align(a='track:<snare or hats>', b='ref:drums', band='himid' or 'air')` and set `offset_sec` from its answer. A 40 ms offset made onset metrics negative.
 
 ## 2. Separate and read the whole song before writing
@@ -13,6 +14,7 @@ Learned from recreating Vitalic's "Allan Dellon". Each step exists because skipp
 - `separate(source='ref')` (demucs, GPU) then `analyze_structure(source='ref')`: arrangement map per stem, sections, harmonic loop length, root per bar.
 - Expect separation quirks: synth bass often lands in `other`, the `bass` stem can be near-empty (comparisons skip it and say so), vocals leak into `other` and vice versa.
 - Drill into sections with `analyze_roll(source='ref:other', bars=, low=, high=)`, `analyze_drums(source='ref:drums')`, `analyze_formants(source='ref:vocals')`.
+- Drums, before writing a note of them: `analyze_kit(source='ref:drums', bars=, k=6)` for the pieces of the kit and each one's pattern and audio (the three `analyze_drums` lanes hid a punch kick apart from the 808 and ghost snares), and `analyze_swing()` for how late the swung hats land (measured on the drum stem; a full mix reads straight).
 
 ## 3. Transcribe by consensus, never raw
 
@@ -30,7 +32,7 @@ For repeated electronic events: `sound_extract` the event averaged over its loop
 
 ## 5. Compare, then drill down
 
-- `stem_map_set({track: stem})`, `render(stems=True)`, `cmp_run(label=)`.
+- `stem_map_set({track: stem})`, `render(stems=True)`, `levels_from_ref()` to set the faders from the reference's stem balance (apply, re-render, repeat until every change is within 1 dB; draft 1 of the G-funk beat had the lead as loud as the drums, the reference has it 19.6 dB under), then `cmp_run(label=)`.
 - Read in this order: `cmp_summary` (per stem groups: notes, rhythm, clean, sound, perceptual; closeness 0 = the reference half a loop off, 1 = the reference against itself one loop later) -> `cmp_arrangement` -> `cmp_sections(stem)` -> `cmp_worst(stem)` -> `cmp_zoom(bar, stem, layers=['level','bands','notes','hits'])` (b both, r reference only, y yours only, uppercase = note start).
 - `cmp_list` shows every run: keep labels meaningful (`draft7-vocoder`).
 

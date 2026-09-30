@@ -8,6 +8,9 @@
 | Is the song shaped the way I planned? | `analyze_structure(source='render')` | one char per bar per row: 9 loudest, each step -4 dB, '.' silent; `root` row = bass note per bar; sections lettered by similar arrangement |
 | Are the notes what I meant? | `notes_read(view='roll')`, then `analyze_pitches(source='track:x')` | the roll shows what you wrote; pitches shows what actually sounds |
 | Is the drum pattern right? | `analyze_drums(source='track:drums')` | step strings per lane; X within 4 dB of the lane's loud hits |
+| What pieces does a kit have? | `analyze_kit(source='ref:drums')` | one component per piece: energy share, pitch region, hits per 16th; `(fragment)` = lower k |
+| How much swing? | `analyze_swing(source=)` | 16ths: the 'a' against the 'and', in beats and ms; straight = 0 |
+| Does the dynamic shape work? | `analyze_sections(sections={...})` | rms, peak, loudest and quietest 400 ms per section; WARNING when a build is as loud as its climax |
 | Does it pump / gate / groove? | `analyze_envelope(bars, band=)` | digits per 16th; a kick-ducked part shows dips on the beats |
 | Is the low end clean? | `analyze_bars` sub and bass columns, `analyze_spectrum(span=)` | kick and bass should not both peak in the same 1/3-octave band |
 | What is this sound? | `analyze_timbre`, `analyze_spectrum`, `sound_compare` | harmonic slope, brightness and rolloff, envelope times, width |
@@ -31,6 +34,7 @@ Rhythm:    analyze_drums / analyze_envelope on bar <n> matches the Sheet: yes/no
 Harmony:   analyze_pitches bar <n> = <notes> (the chord you meant? yes/no)
 Space:     width (analyze_timbre stereo line) <value>; reverb/delay sends present on <tracks>
 Form:      analyze_structure rows match the form map: yes/no (which section differs)
+Dynamics:  analyze_sections: range <dB> quietest to loudest; the section before the climax <dB> under it (3+)
 Worst:     <the single worst line above> -> next fix
 ```
 

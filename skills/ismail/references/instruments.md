@@ -57,6 +57,9 @@ Do not tune an instrument across a whole song. Take one short chunk where it is 
 2. Write the chunk's notes (from `notes_from_audio_loop` or by ear-reading `analyze_roll`), render only those bars.
 3. Compare: `spectrogram` of both (a missing harmonic, a wrong decay, an absent noise band shows up there first), `analyze_timbre`, `sound_compare`, `instrument_fit` for the voice's params, `eq_match` for the long-term balance.
 4. When a fit pins a parameter at the edge of its range, the model is missing a mechanism (harmonics, a second pickup, a body mode); add the mechanism, not a bigger range.
+   - **Measure two pitches before reading a spectrum as a recipe.** A peak at the same Hz on two different notes is a fixed resonance (a filter, a body, a cab), not a harmonic level: a G-funk bass had one at ~196 Hz, and `instrument_fit` stuck at a wrong cutoff until the filter range was set around it. Stereo width plus a clear low pitch in the target means detuned unison.
+   - **Fast "vibrato" may be beating.** A held note that wobbles fast can be beating against another part's overtone. Measure it where no other part shares the pitch class before building vibrato into the voice.
+   - **Glides need the sprite.** mimic has no portamento yet, so a gliding synth lead or bass stays a sprite patch.
 5. Play the chunk to the user (below). Only when they say it sounds like the instrument, move to the next chunk or the rest of the song.
 
 Learned the hard way: a Polyphia recreation had the right notes on the guitar, but the guitarist plays most of them as harmonics. The transcription was "correct" and the part sounded wrong until the voice itself could play touch harmonics, and that only showed once the intro was matched on its own.
