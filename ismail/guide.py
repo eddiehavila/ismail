@@ -31,6 +31,27 @@ HEAR (audio -> text), cheapest first
   analyze_kit         drum kit pieces (NMF) + their patterns analyze_swing     how late swung hats land
   analyze_sections    loudness per section, dynamic range, a build as loud as its climax
 
+LIVE (play in real time while you edit; a separate engine process per project folder)
+  live_start(bpm) -> live_track(track, instrument) -> live_queue([{track, notes | lanes, bars, loop, at}, ...])
+  -> live_status / live_view / live_listen(bars) -> more live_queue ... -> live_stop.
+  Clips loop until replaced, so the music keeps going between your turns: work at phrase scale (next_4, next_8),
+  put per-beat variation inside the clip, and chain clips with at='after:<id>' to pre-program an arc.
+  A clip replaces what its track would play from its start; {track, stop: true} silences one. Launch bars move
+  later when the first notes cannot render in time (the reply says so). Keep the runway (live_status) longer than
+  any slow job you start (sound design, fitting). live_listen is the same analysis as HEAR, on the last bars
+  played. The output always passes a trim, a loudness cap and a limiter; watch their gain reduction in
+  live_status and balance with volume_db instead of pushing.
+  Effects: live_track(fx=[...]) sets a track's chain (fx_help; 'track:<name>' copies a project track's chain),
+  live_bus + sends={bus: dB} share one hall/delay across tracks, live_fx(target, index, params, ramp_beats)
+  moves automatable params (a sweep, a fade, a build) without resending the chain. Replaced chains ring out.
+  An effect with no live version is baked into each rendered note (live_status marks it; no live_fx on it).
+  A performer voice (module with perform()) plays overlapping notes as one gesture; clip expr={'bend': [[beat,
+  semitones], ...]} drives its bends and vibrato.
+  Decks: live_load(deck, song=<ismail project folder>, bars=[a, b]) puts a whole song on a deck (cued, off air,
+  while another deck plays); live_listen(deck=...) hears the cued deck; live_transition(to, style, bars) queues
+  the mix (blend | bass_swap | filter | cut); live_deck sets fader, 3-band isolator (kill at -40), filter knob,
+  transpose. live_status shows the mixer load: keep it under ~70%.
+
 RECREATE A REFERENCE (what worked)
   1. analyze_grid -> project_set(bpm, offset_sec); then align(a='track:<drum>', b='ref:drums') and correct
      offset_sec by the reported lag. Timing errors poison every other metric. It also prints the tuning: a record

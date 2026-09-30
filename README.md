@@ -1,6 +1,8 @@
 # ismail
 
-**A DAW for AI agents. It can't hear, so it reads.**
+**A DAW for AI agents. It can't hear, so it reads. And it plays live.**
+
+Your agent writes the song as notes, sounds and code, reads back what it made, and then performs it: DJ decks, transitions, requests taken while the music plays.
 
 [![tests](https://github.com/newsbubbles/ismail/actions/workflows/tests.yml/badge.svg)](https://github.com/newsbubbles/ismail/actions/workflows/tests.yml)
 
@@ -10,6 +12,9 @@
 
 | song | what it is |
 |---|---|
+| [Live set: Clash, Poppycock, Mycelium](https://newsbubbles.github.io/ismail/#liveset) | recorded live: the agent plays three of its songs in full on decks at 150 BPM (orchestral into dubstep into psytrance), each blended into the next, every song re-rendered from its notes |
+| [Tidewater](https://newsbubbles.github.io/ismail/#tidewater) | strings measured from recordings (mimic), piano, taiko and gong; 22 dB from a pianissimo solo cello to the fortissimo tutti |
+| [Mycelium Protocol](https://newsbubbles.github.io/ismail/#mycelium) | psytrance at 145 BPM, sounds fitted to a reference record's drums and bass |
 | [Poppycock](https://newsbubbles.github.io/ismail/#poppycock) | dubstep, one bass voice whose note velocity picks each hit's articulation |
 | [Fantaisie-Impromptu](https://newsbubbles.github.io/ismail/#fantaisie) | Chopin on a piano synthesized from measured notes, no samples |
 | [AstraSMB](https://newsbubbles.github.io/ismail/#astrasmb) | drum and bass at 174 BPM |
@@ -30,6 +35,7 @@ ismail is not a model that turns a prompt into audio, like Suno. It is a set of 
 - **Any sound.** Synths, drum synths, samplers, voices written in Python and speech; any sound can become an instrument.
 - **Local and open.** MIT licensed, runs on your machine, no content filter and no music subscription (you bring the agent).
 - **It improves with your model.** The music is the agent's own work, so a stronger model with the same prompt should write a better song.
+- **It plays live.** The same songs, instruments and effects run in real time: the agent loads finished songs on decks and mixes them, jams with you, and changes the music between its turns while it keeps playing. A text-to-song service hands you a finished file; streaming models such as Lyria RealTime steer a style with prompts, but cannot play the exact song you wrote or change one bar of it.
 
 Suno is still better at realistic sung vocals, a polished song from one sentence in under a minute, and genre sound learned from recorded music. And why not Ableton or FL Studio? They were built for a person with ears and a mouse; an agent can press their buttons through bridges but still can't hear what it did. ismail puts everything an agent needs to write and to perceive into compact text, and if something is missing, your agent can add it. More on the [showcase page](https://newsbubbles.github.io/ismail/#compare).
 
@@ -39,7 +45,7 @@ A DAW built to be operated by an AI agent. Everything goes in as text (notes, in
 
 One set of operations, three ways in:
 
-- **MCP server** for Claude Code, Cursor or any MCP client: `python -m ismail.mcp_server` (stdio, about 70 tools)
+- **MCP server** for Claude Code, Cursor or any MCP client: `python -m ismail.mcp_server` (stdio, 90 tools)
 - **CLI**: `python -m ismail -p <project> <op> [args]`
 - **Python**: `from ismail import api`
 
@@ -53,6 +59,7 @@ cd ismail
 pip install -e .                      # engine, analysis, CLI, MCP server
 pip install -e ".[perceptual]"        # optional: CLAP perceptual metric (torch + transformers, model about 600 MB)
 pip install -e ".[separate]"          # optional: demucs stem separation for reference tracks
+pip install -e ".[live]"              # optional: play live to your speakers (sounddevice)
 ```
 
 If `demucs` fights your torch install, use `pip install --no-deps demucs` and then `pip install dora-search einops julius lameenc openunmix`.
@@ -219,6 +226,35 @@ Every metric sits between two baselines computed from the reference alone: the r
 
 The perceptual group exists because the others can all look fine while the result still sounds different, and the clean group exists because note metrics reward clutter. Use `cmp_run(stems='demucs')` at checkpoints so your render goes through the same separation as the reference. Any change to the scoring should be checked against a known-bad and a known-good draft before you trust it.
 
+## Playing live
+
+The same instruments and effects play in real time while the agent edits the music: a jam, a DJ set, a
+soundtrack that follows a game or an audience. [Hear a recorded set](https://newsbubbles.github.io/ismail/#liveset):
+three whole songs played live on decks, the set written as one script (`live_load`, `live_deck`, `live_transition`). `live_start` runs a separate engine process per folder (a local
+control port, render workers, a mixer and a safety chain), and the agent drives it with ops:
+
+```text
+live_start(bpm) -> live_track(track, instrument, fx) -> live_queue([{track, notes, bars, at: 'next_4'}, ...])
+  -> live_status / live_listen(bars) -> more live_queue, live_fx ramps -> live_stop
+```
+
+- **Clips loop until replaced**, so the music keeps going between the agent's turns. A clip lands on the next
+  beat, bar or phrase; `after:#k` chains a whole arc in one call; `live_fx` ramps sweeps and fades.
+- **Render ahead.** Notes render in worker processes seconds before the playhead and the audio callback only
+  copies, so heavy voices (mimic, code voices, guitar performers) play live. A clip whose first notes cannot
+  render in time lands a bar later, and the reply says so.
+- **It listens to itself.** `live_listen` runs the same analysis as a render on the last bars played.
+- **Safety.** Every output passes a trim, a loudness rider, a lookahead limiter and a ceiling; the limits come
+  from the environment (`ISMAIL_LIVE_TRIM_DB`, `ISMAIL_LIVE_CAP_DB`, `ISMAIL_LIVE_CEILING_DB`), never from the agent.
+- **Decks.** `live_load` puts a whole ismail song on a cued deck while another plays; `live_transition` queues
+  the mix (blend, bass swap, filter, cut) with a DJ strip per deck (isolator, filter knob, fader, transpose).
+- **Studio and live.** The studio code is the source of truth. Effects run live as block-by-block twins held to
+  the studio versions by tests; an effect with no live twin is baked into each rendered note. A voice with
+  `perform()` plays whole phrases live (legato, slides), with bends and vibrato from the clip's `expr` lanes.
+
+The skill reference `skills/ismail/references/live.md` has the method for running a set: read the audience,
+steer with small edits, queue a runway before every question, build and drop.
+
 ## Music videos (optional)
 
 `ismail.video` makes a music video from a finished song, with every cut and glitch placed from the song's own notes (the event list comes from the project, so the sync is frame exact). It needs `pip install -e .[video]`, Blender 5.x and ffmpeg.
@@ -257,9 +293,13 @@ ismail/
   perceptual.py  CLAP similarity
   sounddesign.py one-shot rendering, sound distance, parameter fitting
   trackfit.py    in-context fitting against a reference stem
+  live/          the live engine: timeline, render workers, mixer graph, decks, safety, live_* ops,
+                 block-by-block effect twins (fx_blocks.py, dsp_blocks.py)
   video/         optional music-video pipeline: sync, edit engine, Blender shot kit, CLI
-  voices/        voice modules: grand_piano, additive_piano, growl, sfx
-  api.py, api_cmp.py, api_sound.py   the operations (CLI and MCP tools)
+  mimic.py       instruments measured from recordings (partials, body, noise, vibrato, room)
+  voices/        the voice library in family folders: keys (grand_piano, additive_piano), strings (violin,
+                 cello, contrabass mimic profiles), bass (growl), fx (sfx)
+  api.py, api_cmp.py, api_sound.py, api_measure.py   the operations (CLI and MCP tools)
   mcp_server.py, guide.py
 skills/ismail/   the agent skill (SKILL.md + references)
 .mcp.json, .cursor/   MCP and rule config for Claude Code and Cursor

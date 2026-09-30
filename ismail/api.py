@@ -1323,3 +1323,4 @@ def call(name, **kw):
 from . import api_cmp  # noqa: E402,F401  (registers stem/structure/comparison ops)
 from . import api_sound  # noqa: E402,F401  (registers sound_compare / instrument_fit)
 from . import api_measure  # noqa: E402,F401  (registers tuning, swing, kit, section and level ops)
+from .live import ops as _live_ops  # noqa: E402,F401  (registers the live_* ops)

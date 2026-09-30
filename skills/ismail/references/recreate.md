@@ -24,11 +24,19 @@ Learned from recreating Vitalic's "Allan Dellon". Each step exists because skipp
 - Route one stem's registers to different tracks with low/high (bass C2-A2, stabs A#2-B4, lead C5+). Ignore the lowest octave of a separated stem: it is mostly kick bleed and sub-octaves of distorted synths.
 - Melodic, non-looping parts (a vocal phrase): read `analyze_pitches(per_bar=4)` and write the line yourself; hold notes as long as the formant view says the voice is voiced.
 
+- **Find the phrase length before tiling.** A consensus loop assumes the part repeats every `loop_bars`. A lead over a 2-bar groove was a 16-bar phrase (rests, a run up, different bends each pass): transcribed from 4 bars and tiled, the user heard it "not following the melody" although every note of those 4 bars was right. Read the pitch track over 16 bars or more and compare the blocks before choosing `loop_bars`.
+
 ## 4. Sounds, one instrument and one chunk at a time
 
 Right notes on the wrong instrument still sound wrong. Before arranging the whole song, match each lead instrument on a short passage where it is exposed (the intro, a break), following `references/instruments.md` section 4: spectrogram first, then a voice that has the mechanism the reference uses (a Polyphia guitar part turned out to be mostly touch harmonics, which no amount of note fixing could produce), then the user's ear on that chunk.
 
 For repeated electronic events: `sound_extract` the event averaged over its loop position (`every=8`), then `instrument_fit`. Check the fitted sound in context afterwards. Keep the reference out of the render: extracted sounds are fitting targets, not samples to use.
+
+**A record's drum kit** (hip-hop, G-funk, boom bap): build each piece from its `analyze_kit` component, not with a generic drum fit. A 6-knob kick and snare fit read as "a different kit" to the user; a measured kit passed (distance to the reference kick 16.5 -> 4.9). What worked:
+1. Cut the piece's hits from its component audio at every loop position it plays (sum the components that make one sound, e.g. an 808 and its punch layer), align them, and check how alike they are: a drum-machine sample repeats at ~0.98 correlation, so its average is the sample.
+2. Measure a model: the tonal part from a narrow band around the main mode (band-pass, Hilbert: frequency and amplitude curves, one mode per band) and the noise part from the rest as a 1/6-octave band envelope per ~1.5 ms frame, high-passed below the tonal band. Average the noise as POWER over the hits: averaging waveforms that are not identical cancels their top end.
+3. A code voice resynthesizes it (a sine on the curves plus noise shaped by the envelope), with the pitch picking the piece; velocities per step come from each component's level at that step.
+4. `eq_match` the kit track against the drum stem, then `levels_from_ref`.
 
 ## 5. Compare, then drill down
 
@@ -44,6 +52,8 @@ For repeated electronic events: `sound_extract` the event averaged over its loop
 - **Averages hide the gap.** Long-window spectra can agree within 4 dB while the parts sound different; zoom per 16th, and look at a spectrogram when a section stays bad for no visible reason (a missing low-pass showed up only there).
 - **Never delete a downbeat on one reading.** Before removing a kick on beat 1, confirm with `analyze_envelope(source='ref:drums', band='sub')`: a missing downbeat after a break made the beat come back "mid bar" to a listener.
 - **Metrics tuned on one example lie.** Before trusting a new measure, check it ranks a known-bad draft below a known-good one (re-render old drafts from `comparisons/<id>/project.json`).
+
+- **Fitting targets carry bleed.** A hat extracted from the full drum stem had the 808's tail as its loudest band, and the fit chased it. Extract from the piece's `analyze_kit` component, or restrict `fmin`/`fmax` in the fit to the piece's own range.
 
 ## When is it done
 
