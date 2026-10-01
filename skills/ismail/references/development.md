@@ -1,0 +1,102 @@
+# Developing ismail itself
+
+Read this only when the user has explicitly asked you to change ismail (the engine, its ops, the skill, the
+tests, the README), or to migrate elements a song lists in its `HANDOFF.md`. Making music is the other role, and
+it never changes these files (SKILL.md, "Your role").
+
+Several sessions work on one machine at once: some make songs, one or more develop the engine, and the user moves
+between them. Every rule below exists because breaking it once cost someone work or an afternoon.
+
+## Work on a worktree, never in the shared checkout
+
+The main checkout is shared: other sessions run songs and live engines from it, and some leave uncommitted work in
+it. Engine work happens on a branch in its own worktree:
+
+```bash
+git -C <ismail> status --short          # what is there before you; none of it is yours
+git -C <ismail> worktree list           # who else is working, on what branch
+git -C <ismail> worktree add ../ismail-<topic> -b <topic> main
+```
+
+One topic per worktree, one agent per worktree. Run the tests and write the code there. Song folders are not in a
+worktree (`songs/` is git-ignored), so read a song's files by their path in the main checkout.
+
+## Collaboration must-haves
+
+1. **What is not yours is not touched.** Uncommitted changes you did not make are someone's work in progress: never
+   commit, revert, stash or "clean up" them. If they block you, they belong on their own branch: with the user's
+   OK, save the diff as a patch outside git, apply it on a new worktree branch, commit it there with a message that
+   says where it came from, check the branch copy is identical, and only then restore the checkout.
+2. **Nothing unmerged is deleted.** A worktree is removed and a branch deleted only when its work is in main
+   (`git merge-base --is-ancestor <branch> main` succeeds) and pushed. Look at its untracked files first, and back
+   up anything that is not regenerable. Deleting a folder, a branch or a stash needs the user's yes.
+3. **No stash in a shared repository.** The stash stack is shared by every worktree; another session can pop yours.
+   Park work in a commit on your branch.
+4. **Every commit carries its own proof and its docs:** the full test suite passing in a clean worktree (apply
+   exactly what is staged to a fresh checkout and run it there), a `CHANGELOG.md` entry under Unreleased, and the
+   skill, README and op docstrings updated in the same commit as the behavior they describe.
+5. **Stage your files and hunks only**, never `git add .` or `-a`.
+6. **The user merges.** Push the branch and open a pull request; the user reviews and merges. Push to main only when
+   the user says so. A worktree stays until its pull request is merged.
+7. **Tell the user what changed for the other sessions**: a renamed op, a new rule in the skill, a moved file.
+   Sessions already running read the old skill.
+
+## Studio and live parity
+
+ismail has two players for one music: the studio renders a song offline (`ismail/render.py`, `fx.py`,
+`instruments.py`, the voices), and the live engine plays it block by block (`ismail/live/`). The studio is the
+source of truth; live must sound the same, and a user hears the difference at once ("it sounds nothing like the
+original" was a growl whose velocity articulations came out wrong on a deck).
+
+Every engine change answers three questions in its commit and pull request:
+
+1. **Which side does it touch?** Studio only, live only, or both. A change to an effect, an instrument type, a voice,
+   automation, buses or the render order is a studio change that live must follow.
+2. **How does live follow?** An effect with a live processor needs its twin updated in `ismail/live/fx_blocks.py`;
+   an effect without one is baked (the workers run the studio code on each note); instruments and voices render in
+   the workers through the studio code, but per note or per phrase, not per part, so anything that depends on the
+   whole part (legato, ringing strings, velocity patterns across notes, instrument automation) needs checking.
+3. **What proves it?** Effects: `tests/test_live_parity.py` holds every live processor to its studio twin over a
+   whole window and lists every studio effect without a live path. Instruments, voices and songs on decks: no
+   automated check yet. Until there is one, A/B by measurement: render a few bars in the studio, play the same bars
+   on a deck of a silent engine (`live_start(device='none')`, `live_load`, `live_record`), and compare per track and
+   band (level, bands, onsets, pitches). Report the numbers in the pull request.
+
+A parity bug found while making music is a song agent's finding, not its fix: it goes in the song's `HANDOFF.md`
+with the A/B numbers and the bars, and the engine agent fixes it on a branch with a test that fails before the fix.
+
+## Migrating from a song
+
+A song agent that needed something ismail lacks built it inside its song and listed it in
+`songs/<slug>/HANDOFF.md`. Migrating it:
+
+1. Read the whole handoff. It names the elements, the evidence that they work (blind exams, measurements), the
+   files, a proposed API, tests and skill text.
+2. Copy the files into the engine (never move or delete them from the song: the song must keep working as it is).
+3. Make the tool surface first: op names, arguments, help text and errors that say what to do next. The agent
+   that uses the op has only its docstring and its replies.
+4. Tests: a round trip on known material (synthetic audio with known answers), plus one regression test per bug
+   the handoff describes.
+5. Skill text where an agent will look for it (a route-table row, a section in the matching reference).
+6. Tell the user it is migrated and in which pull request, so the song's handoff can be marked done.
+
+## A song's HANDOFF.md
+
+Written by the song agent, in the song's root folder, so any agent can migrate without the conversation:
+
+```
+# HANDOFF: what can migrate out of <Song> (songs/<slug>)
+## What it is            the capability, the mechanism, the parameters
+## Evidence              blind exam scores, measured errors, what is NOT yet tested
+## Files                 every file in the song folder that belongs to it
+## Proposed integration  module names, ops (name, arguments, reply), tests, skill text
+## Eligible for migration   | element | where | target | state |
+## For the skill         lessons and rules the song learned, in the user's words where possible
+```
+
+## Suggestions
+
+- Read the ops you touch through the agent's eyes: a reply that dumps a wall of text, an error that only says
+  "failed", a parameter whose unit is not in its doc. Fix those before adding features.
+- Write rules where every agent reads them (the skill, the `guide` op, docstrings), not in private memory.
+- Keep the user's words: a lesson quoted from the user's feedback is more useful to the next agent than a summary.

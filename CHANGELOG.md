@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Roles and collaboration
+
+- Skill: "Your role, and where things live": making music is the default role and writes only inside
+  `songs/<slug>/` (no edits to `ismail/`, `skills/`, tests or other songs, no git in the ismail repo); a missing
+  capability is built in the song and listed in its `HANDOFF.md`; one folder layout for every song; song
+  checkpoints with a git repository inside the song folder. The `guide` op opens with the same rule.
+- New `references/development.md` for changing ismail itself (only when the user asks): a worktree per topic, the
+  collaboration must-haves (what is not yours is not touched, nothing unmerged is deleted, no stash in a shared
+  repo, proof and docs in every commit, the user merges), migrating from a song's `HANDOFF.md`, its format,
+  and studio/live parity: every engine change says which side it touches, how live follows, and what proves it.
+- `blind-tests.md`: ear-test pages are always hosted on localhost and opened in the app's browser pane, take answers
+  with a Submit button that writes them to a file, and are checked in the pane before the user sees them.
+
 ### Guitar rig and performers
 
 - Rig effects (`ismail/rig.py`): `fuzz` (Fuzz Face bias shift), `univibe` (four-stage LDR phaser with lamp lag),

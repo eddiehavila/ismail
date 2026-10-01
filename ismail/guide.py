@@ -1,5 +1,10 @@
 GUIDE = """ismail: a DAW you operate with text. You write notes/patches/effects as data, render, and read audio back as text.
 
+ROLE
+- Making music (the default): write only inside songs/<slug>/. Do not edit ismail/, skills/, tests/ or another
+  song, and do not run git in the ismail repo. Missing a capability: build it in the song (voices/, work/) and list
+  it in songs/<slug>/HANDOFF.md. Changing ismail itself only when the user asks: skills/ismail/references/development.md.
+
 CONVENTIONS
 - Every tool takes `project` (a directory). Bars are 1-indexed; ranges [a, b] are inclusive.
 - Note text: '<beat> <pitch> <dur_beats> [vel]' per line or ';'-separated, beats relative to the target bar
