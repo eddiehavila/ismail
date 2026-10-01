@@ -131,6 +131,19 @@ def split_chain(fxs):
     return fxs[:k], fxs[k:]
 
 
+_DN = {}
+
+
+def _anti_denormal(n):
+    """1e-18 of DC plus Nyquist, added at every processor's input: filter and envelope states decaying in silence
+    reach denormal floats otherwise, which run 10-30x slower on x86 (a fuzz left in silence took a guitar chain
+    to 100% of real time). -360 dB; it survives a 280 dB cut either way (high-pass or low-pass)."""
+    a = _DN.get(n)
+    if a is None:
+        a = _DN[n] = np.tile(1e-18 * (1 + (-1.0) ** np.arange(n)), (2, 1))
+    return a
+
+
 class Chain:
     def __init__(self, fxs, bpm, dry_default, bake=None):
         self.fx = fxs
@@ -140,12 +153,14 @@ class Chain:
             dry = float(f['dry']) if f.get('dry') is not None else dry_default
             self.procs.append(F.make(f, F.Env(SR, bpm, dry, 0)))
         self.latency = sum(p.latency for p in self.procs)
+        self.noise = sum(p.noise for p in self.procs)      # self-noise of the chain (amp hiss, tape hiss)
         self.gr = {}
         self.gen = 0                # set when the chain is scheduled to replace another (ramps carry it)
 
     def process(self, x, block_for):
+        dn = _anti_denormal(x.shape[1])
         for i, p in enumerate(self.procs):
-            x = p.process(x, block_for(i))
+            x = p.process(x + dn, block_for(i))
         return x
 
     def describe(self, gr=True):

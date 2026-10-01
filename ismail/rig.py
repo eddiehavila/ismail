@@ -14,6 +14,8 @@ tape     tape machine: soft asymmetric saturation, head bump, top-end loss, wow 
 wah      wah pedal: resonant band-pass swept by a pedal position (automatable) or by the input envelope
 
 All of them take and return stereo (2, n) float64. Parameters and ranges are in DEFAULTS and DOCS.
+Every one is causal and its kernels take their state as an argument, so the live engine runs the same code block
+by block (ismail/live/rig_blocks.py; tests/test_live_parity.py holds the two together).
 """
 import numpy as np
 from numba import njit
@@ -62,15 +64,15 @@ def _curve(v, n):
 # ------------------------------------------------------------------ fuzz
 
 @njit(cache=True)
-def _fuzz_core(x, drive, bias, silicon, sr):
+def _fuzz_core(x, drive, bias, silicon, sr, st):
     # two-transistor feedback fuzz, reduced: a bias point that the signal's own envelope pulls down (the
     # coupling caps charge), so decaying notes cross the knee later and sputter, as the real pedal does
     n = len(x)
     y = np.empty(n)
-    env = 0.0
+    env = st[0]
     a_att = np.exp(-1.0 / (0.001 * sr))
     a_rel = np.exp(-1.0 / (0.040 * sr))
-    dc = 0.0
+    dc = st[1]
     a_dc = np.exp(-1.0 / (0.02 * sr))
     knee_p = 0.55 if silicon else 0.75
     knee_n = 0.9 if silicon else 1.1
@@ -85,6 +87,8 @@ def _fuzz_core(x, drive, bias, silicon, sr):
             o = -knee_n * np.tanh(-z / knee_n) if silicon else -knee_n * (1 - np.exp(z / knee_n))
         dc = a_dc * dc + (1 - a_dc) * o
         y[i] = o - dc
+    st[0] = env
+    st[1] = dc
     return y
 
 
@@ -94,7 +98,8 @@ def fuzz(x, p, sr, P):
     g_in = 10 ** (_curve(P('input_db'), n) / 20)
     drive = 1.0 + 60.0 * float(p['fuzz']) ** 2
     xi = signal.resample_poly(x * g_in, os_, 1, axis=1)
-    y = np.stack([_fuzz_core(ch, drive, float(p['bias']), bool(p['silicon']), sr * os_) for ch in xi])
+    y = np.stack([_fuzz_core(ch, drive, float(p['bias']), bool(p['silicon']), sr * os_, np.zeros(2))
+                  for ch in xi])
     y = signal.resample_poly(y, 1, os_, axis=1)[:, :n]
     sos = np.vstack([signal.butter(1, 70, 'highpass', fs=sr, output='sos'),
                      signal.butter(2, min(p['tone_hz'], sr * 0.45), 'lowpass', fs=sr, output='sos')])
@@ -106,14 +111,12 @@ def fuzz(x, p, sr, P):
 # ------------------------------------------------------------------ univibe
 
 @njit(cache=True)
-def _vibe_core(x, lamp, caps, r_min, r_max, leak, drive):
+def _vibe_core(x, lamp, caps, r_min, r_max, leak, drive, z):
     # lamp -> LDR resistance (log-law), each stage a 1st-order all-pass at 1/(2 pi R C) that leaks some dry
     # signal (unbalanced phase splitter) and clips softly
     n = len(x)
     ns = len(caps)
-    z = np.zeros(ns)
     y = np.empty(n)
-    xin = np.zeros(ns)
     for i in range(n):
         r = r_max * (r_min / r_max) ** lamp[i]
         s = x[i]
@@ -131,18 +134,30 @@ def _vibe_core(x, lamp, caps, r_min, r_max, leak, drive):
 
 
 @njit(cache=True)
-def _lamp(drive_wave, sr, on_s, off_s):
+def _lamp(drive_wave, sr, on_s, off_s, st):
     n = len(drive_wave)
     out = np.empty(n)
     a_on = np.exp(-1.0 / (on_s * sr))
     a_off = np.exp(-1.0 / (off_s * sr))
-    v = 0.0
+    v = st[0]
     for i in range(n):
         d = drive_wave[i]
         a = a_on if d > v else a_off
         v = a * v + (1 - a) * d
         out[i] = v
+    st[0] = v
     return out
+
+
+def vibe_lamp_drive(ph, inten):
+    """The phase-shift oscillator's skewed sine (fast rise, slow fall) as the lamp's drive, from the LFO phase in
+    cycles (cumulative rate / sr)."""
+    s = np.sin(2 * np.pi * ph)
+    skew = 0.5 + 0.5 * np.sign(s) * np.abs(s) ** 0.7
+    return skew * inten + (1 - inten) * 0.15
+
+
+VIBE_CAPS = np.array([15e-9, 220e-9, 470e-12, 4.7e-9])
 
 
 def univibe(x, p, sr, P):
@@ -150,14 +165,11 @@ def univibe(x, p, sr, P):
     rate = _curve(P('rate_hz'), n)
     inten = _curve(P('intensity'), n)
     ph = np.cumsum(rate) / sr
-    # the phase-shift oscillator's skewed sine: fast rise, slow fall, then the bulb's own lag
-    s = np.sin(2 * np.pi * ph)
-    skew = 0.5 + 0.5 * np.sign(s) * np.abs(s) ** 0.7
-    lamp = _lamp(skew * inten + (1 - inten) * 0.15, sr, 0.006, 0.045)
-    caps = np.array([15e-9, 220e-9, 470e-12, 4.7e-9])
+    lamp = _lamp(vibe_lamp_drive(ph, inten), sr, 0.006, 0.045, np.zeros(1))
     # the kernel's bilinear warp uses 48000; scale caps so corner frequencies are right at any sr
-    caps = caps * 48000.0 / sr
-    wet = np.stack([_vibe_core(ch, lamp, caps, 4.0e3, 2.0e5, 0.12, float(p['drive'])) for ch in x])
+    caps = VIBE_CAPS * 48000.0 / sr
+    wet = np.stack([_vibe_core(ch, lamp, caps, 4.0e3, 2.0e5, 0.12, float(p['drive']), np.zeros(len(caps)))
+                    for ch in x])
     wet = signal.sosfilt(signal.butter(1, 25, 'highpass', fs=sr, output='sos'), wet, axis=1)
     if p['mode'] == 'vibrato':
         out = wet
@@ -216,11 +228,11 @@ def _tube(x, drive, bias):
 
 
 @njit(cache=True)
-def _power(x, drive, sag, sr):
+def _power(x, drive, sag, sr, st):
     # push-pull pentodes: symmetric soft clip; supply sag pulls the gain down with the average current
     n = len(x)
     y = np.empty(n)
-    env = 0.0
+    env = st[0]
     a_att = np.exp(-1.0 / (0.012 * sr))
     a_rel = np.exp(-1.0 / (0.180 * sr))
     for i in range(n):
@@ -231,42 +243,71 @@ def _power(x, drive, sag, sr):
         v = abs(o)
         env = a_att * env + (1 - a_att) * v if v > env else a_rel * env + (1 - a_rel) * v
         y[i] = o
+    st[0] = env
     return y
 
 
-def amp(x, p, sr, P):
-    n = x.shape[1]
-    os_ = 2
-    srr = sr * os_
-    gain = float(np.mean(_curve(P('gain'), n)))
-    g1 = 10 ** ((gain * 3.2 - 2) / 20)
-    # bright cap: treble passes the volume pot at low gain settings
+AMP_OS = 2
+
+
+def amp_pre_sos(p, gain, sr):
+    """Input high-pass, plus the bright cap (treble passes the volume pot at low gain settings)."""
     bright = float(p['bright']) * max(0.0, 1.0 - gain / 10.0) * 9.0
     pre = [signal.butter(1, 30, 'highpass', fs=sr, output='sos')]
     if bright > 0.1:
         pre.append(_shelf(3000, bright, sr, high=True))
-    y = signal.sosfilt(np.vstack(pre), x, axis=1)
-    y = signal.resample_poly(y, os_, 1, axis=1)
-    y = np.stack([_tube(ch, 6.0 * g1, 0.25) for ch in y])
-    y = signal.sosfilt(signal.butter(1, 80, 'highpass', fs=srr, output='sos'), y, axis=1)
-    y = np.stack([_tube(ch, 1.0 + gain * 0.8, 0.15) for ch in y]) * 0.5
-    y = signal.sosfilt(_tonestack(p['bass'], p['mid'], p['treble'], srr), y, axis=1) * 3.0
-    vol = float(p['volume'])
-    drive = 10 ** ((vol * 2.8 - 14) / 20)
+    return np.vstack(pre)
+
+
+def amp_stage_sos(p, srr):
+    """The filters inside the oversampled amp, in order: interstage high-pass, tone stack, presence (None when
+    flat), output transformer."""
     pres = (float(p['presence']) - 5) * 1.2
-    if abs(pres) > 0.1:
-        y = signal.sosfilt(_shelf(3500, pres, srr, high=True), y, axis=1)
-    y = np.stack([_power(ch, drive, float(p['sag']), srr) for ch in y])
-    # output transformer
-    y = signal.sosfilt(np.vstack([signal.butter(1, 60, 'highpass', fs=srr, output='sos'),
-                                  signal.butter(2, 11000, 'lowpass', fs=srr, output='sos')]), y, axis=1)
-    y = signal.resample_poly(y, 1, os_, axis=1)[:, :n]
+    return (signal.butter(1, 80, 'highpass', fs=srr, output='sos'), _tonestack(p['bass'], p['mid'], p['treble'], srr),
+            _shelf(3500, pres, srr, high=True) if abs(pres) > 0.1 else None,
+            np.vstack([signal.butter(1, 60, 'highpass', fs=srr, output='sos'),
+                       signal.butter(2, 11000, 'lowpass', fs=srr, output='sos')]))
+
+
+def amp_drives(p, gain):
+    """(first triode drive, second triode drive, power stage drive)."""
+    g1 = 10 ** ((gain * 3.2 - 2) / 20)
+    return 6.0 * g1, 1.0 + gain * 0.8, 10 ** ((float(p['volume']) * 2.8 - 14) / 20)
+
+
+HUM = ((1, 1.0), (2, 0.5), (3, 0.35), (5, 0.15))
+
+
+def amp_hum(t):
+    return sum(a * np.sin(2 * np.pi * 60 * k * t + k) for k, a in HUM)
+
+
+def noise_streams(seed):
+    """One generator per channel: drawn in blocks, the noise is the same as drawn whole."""
+    return [np.random.default_rng([int(seed), c]) for c in (0, 1)]
+
+
+def amp(x, p, sr, P):
+    n = x.shape[1]
+    srr = sr * AMP_OS
+    gain = float(np.mean(_curve(P('gain'), n)))
+    d1, d2, drive = amp_drives(p, gain)
+    hp, tone, pres, xfmr = amp_stage_sos(p, srr)
+    y = signal.sosfilt(amp_pre_sos(p, gain, sr), x, axis=1)
+    y = signal.resample_poly(y, AMP_OS, 1, axis=1)
+    y = np.stack([_tube(ch, d1, 0.25) for ch in y])
+    y = signal.sosfilt(hp, y, axis=1)
+    y = np.stack([_tube(ch, d2, 0.15) for ch in y]) * 0.5
+    y = signal.sosfilt(tone, y, axis=1) * 3.0
+    if pres is not None:
+        y = signal.sosfilt(pres, y, axis=1)
+    y = np.stack([_power(ch, drive, float(p['sag']), srr, np.zeros(1)) for ch in y])
+    y = signal.sosfilt(xfmr, y, axis=1)                                 # output transformer
+    y = signal.resample_poly(y, 1, AMP_OS, axis=1)[:, :n]
     if p['hiss_db'] > -119 or p['hum_db'] > -119:
-        rng = np.random.default_rng(int(p['seed']))
-        t = np.arange(n) / sr
-        hiss = signal.sosfilt(signal.butter(1, 800, 'highpass', fs=sr, output='sos'), rng.standard_normal((2, n)), axis=1)
-        hum = sum(a * np.sin(2 * np.pi * 60 * k * t + k) for k, a in ((1, 1.0), (2, 0.5), (3, 0.35), (5, 0.15)))
-        y = y + 10 ** (p['hiss_db'] / 20) * hiss + 10 ** (p['hum_db'] / 20) * hum[None, :]
+        hiss = np.stack([g.standard_normal(n) for g in noise_streams(p['seed'])])
+        hiss = signal.sosfilt(signal.butter(1, 800, 'highpass', fs=sr, output='sos'), hiss, axis=1)
+        y = y + 10 ** (p['hiss_db'] / 20) * hiss + 10 ** (p['hum_db'] / 20) * amp_hum(np.arange(n) / sr)[None, :]
     return y * 0.5 * 10 ** (p['out_db'] / 20)
 
 
@@ -326,43 +367,53 @@ def _minphase_fir(mag_db, n_fft):
     return h[:n_fft // 2] * np.hanning(n_fft)[n_fft // 2:]
 
 
-def cab(x, p, sr, P):
-    n = x.shape[1]
+def cab_irs(p, mic, sr):
+    """(speaker + mic FIR, [left, right] room reflection FIRs or None)."""
     n_fft = 4096
     f = np.fft.rfftfreq(n_fft, 1 / sr)
-    mic = float(np.mean(_curve(P('mic'), n)))
     kw = dict(low_hz=p['low_hz'], high_hz=p['high_hz'], presence_db=p['presence_db'], breakup=p['breakup'],
               seed=p['seed'])
     h = _minphase_fir(cab_curve(f, mic=mic, **kw), n_fft)
     h /= np.sqrt(np.sum(h ** 2)) * 4
+    if not (mic > 0 and p['width'] > 0):
+        return h, None
+    # room mic pair: a few early reflections, different per side
+    rng = np.random.default_rng(int(p['seed']) + 1)
+    rooms = []
+    for ch in range(2):
+        ir = np.zeros(int(sr * (p['room_ms'] * 4) / 1000) + 2)
+        ir[0] = 1.0
+        for _ in range(6):
+            d = int(rng.uniform(0.3, 4.0) * p['room_ms'] / 1000 * sr)
+            ir[min(d, len(ir) - 1)] += rng.uniform(-0.5, 0.5) * p['width'] * mic
+        rooms.append(ir)
+    return h, rooms
+
+
+def cab(x, p, sr, P):
+    n = x.shape[1]
+    h, rooms = cab_irs(p, float(np.mean(_curve(P('mic'), n))), sr)
     y = signal.fftconvolve(x, h[None, :], axes=1)[:, :n]
-    if mic > 0 and p['width'] > 0:
-        # room mic pair: a few early reflections, different per side
-        rng = np.random.default_rng(int(p['seed']) + 1)
-        out = []
-        for ch in range(2):
-            ir = np.zeros(int(sr * (p['room_ms'] * 4) / 1000) + 2)
-            ir[0] = 1.0
-            for _ in range(6):
-                d = int(rng.uniform(0.3, 4.0) * p['room_ms'] / 1000 * sr)
-                ir[min(d, len(ir) - 1)] += rng.uniform(-0.5, 0.5) * p['width'] * mic
-            out.append(signal.fftconvolve(y[ch], ir)[:n])
-        y = np.stack(out)
+    if rooms is not None:
+        y = np.stack([signal.fftconvolve(y[ch], rooms[ch])[:n] for ch in range(2)])
     return y
 
 
 # ------------------------------------------------------------------ rotary
 
 @njit(cache=True)
-def _ramp_speed(target, slow, fast, ramp_s, sr):
+def _ramp_speed(target, slow, fast, ramp_s, sr, st):
+    # st: [speed, started]: the rotor starts at the speed asked for, then ramps
     n = len(target)
     out = np.empty(n)
     a = np.exp(-1.0 / (ramp_s * sr))
-    v = slow + (fast - slow) * target[0]
+    v = st[0] if st[1] else slow + (fast - slow) * target[0]
     for i in range(n):
         goal = slow + (fast - slow) * target[i]
         v = a * v + (1 - a) * goal
         out[i] = v
+    st[0] = v
+    st[1] = 1.0
     return out
 
 
@@ -392,8 +443,8 @@ def rotary(x, p, sr, P):
     lo = signal.sosfilt(signal.butter(4, p['crossover_hz'], 'lowpass', fs=sr, output='sos'), mono)
     hi = signal.sosfilt(signal.butter(4, p['crossover_hz'], 'highpass', fs=sr, output='sos'), mono)
     spd = np.clip(_curve(P('speed'), n), 0, 1)
-    h_rate = _ramp_speed(spd, p['horn_slow'], p['horn_fast'], p['horn_ramp_s'], sr)
-    d_rate = _ramp_speed(spd, p['drum_slow'], p['drum_fast'], p['drum_ramp_s'], sr)
+    h_rate = _ramp_speed(spd, p['horn_slow'], p['horn_fast'], p['horn_ramp_s'], sr, np.zeros(2))
+    d_rate = _ramp_speed(spd, p['drum_slow'], p['drum_fast'], p['drum_ramp_s'], sr, np.zeros(2))
     h_ph = np.cumsum(h_rate) / sr
     d_ph = np.cumsum(d_rate) / sr + 0.37
     out = []
@@ -412,11 +463,12 @@ def rotary(x, p, sr, P):
 
 # ------------------------------------------------------------------ tape
 
-def tape(x, p, sr, P):
-    n = x.shape[1]
-    d = float(np.mean(_curve(P('drive'), n)))
+def tape_saturate(x, d):
     g = 1 + 4 * d
-    y = (np.tanh(g * x + 0.05 * d) - np.tanh(0.05 * d)) / np.tanh(g) if d > 0 else x.copy()
+    return (np.tanh(g * x + 0.05 * d) - np.tanh(0.05 * d)) / np.tanh(g) if d > 0 else x.copy()
+
+
+def tape_sos(p, sr):
     sos = [signal.butter(2, min(p['hf_hz'], sr * 0.45), 'lowpass', fs=sr, output='sos')]
     if p['bump_db']:
         w0 = 2 * np.pi * p['bump_hz'] / sr
@@ -425,20 +477,34 @@ def tape(x, p, sr, P):
         b = [1 + alpha * A, -2 * np.cos(w0), 1 - alpha * A]
         a = [1 + alpha / A, -2 * np.cos(w0), 1 - alpha / A]
         sos.append(signal.tf2sos(np.array(b) / a[0], np.array(a) / a[0]))
-    y = signal.sosfilt(np.vstack(sos), y, axis=1)
+    return np.vstack(sos)
+
+
+WOW = ((0.55, 'wow', 1.0), (0.23, 'wow', 0.5), (7.3, 'flutter', 1.0), (12.1, 'flutter', 0.4))
+
+
+def tape_wow(p, sr):
+    """(speed deviation at times t -> fraction, the delay offset in samples that keeps the delay >= 2 whatever
+    the phases): the delay is the running sum of the deviation plus that offset, so it is causal."""
+    rng = np.random.default_rng(int(p['seed']))
+    ph = [rng.uniform(0, 6), rng.uniform(0, 6), rng.uniform(0, 6), 0.0]
+
+    def dev(t):
+        return sum(p[k] * a * np.sin(2 * np.pi * f * t + phi) for (f, k, a), phi in zip(WOW, ph)) / 100.0
+    # a running sum of sin(w i + phi) never leaves +-1 / sin(w / 2)
+    bound = sum(p[k] * a / np.sin(np.pi * f / sr) for f, k, a in WOW) / 100.0
+    return dev, bound + 2
+
+
+def tape(x, p, sr, P):
+    n = x.shape[1]
+    y = signal.sosfilt(tape_sos(p, sr), tape_saturate(x, float(np.mean(_curve(P('drive'), n)))), axis=1)
     if p['wow'] > 0 or p['flutter'] > 0:
-        rng = np.random.default_rng(int(p['seed']))
-        t = np.arange(n) / sr
-        wow = np.sin(2 * np.pi * 0.55 * t + rng.uniform(0, 6)) + 0.5 * np.sin(2 * np.pi * 0.23 * t + rng.uniform(0, 6))
-        flut = np.sin(2 * np.pi * 7.3 * t + rng.uniform(0, 6)) + 0.4 * np.sin(2 * np.pi * 12.1 * t)
-        # speed deviation in % -> delay in samples (integrated)
-        dev = (p['wow'] * wow + p['flutter'] * flut) / 100.0
-        dly = np.cumsum(dev) - np.cumsum(dev).mean()
-        dly = dly - dly.min() + 2
+        dev, off = tape_wow(p, sr)
+        dly = np.cumsum(dev(np.arange(n) / sr)) + off          # speed deviation, integrated: delay in samples
         y = np.stack([_frac_delay(ch, dly) for ch in y])
     if p['hiss_db'] > -120:
-        rng = np.random.default_rng(int(p['seed']) + 5)
-        hiss = rng.standard_normal((2, n)) * 10 ** (p['hiss_db'] / 20)
+        hiss = np.stack([g.standard_normal(n) for g in noise_streams(int(p['seed']) + 5)]) * 10 ** (p['hiss_db'] / 20)
         hiss = signal.sosfilt(signal.butter(1, 2000, 'highpass', fs=sr, output='sos'), hiss, axis=1)
         y = y + hiss
     return y
@@ -447,18 +513,35 @@ def tape(x, p, sr, P):
 # ------------------------------------------------------------------ wah
 
 @njit(cache=True)
-def _wah_core(x, fc, q, sr):
+def _wah_core(x, fc, q, sr, st):
     n = len(x)
     y = np.empty(n)
-    lp = 0.0
-    bp = 0.0
+    lp = st[0]
+    bp = st[1]
     for i in range(n):
         f = 2 * np.sin(np.pi * min(fc[i], sr / 6) / sr)
         hp = x[i] - lp - bp / q
         bp += f * hp
         lp += f * bp
         y[i] = bp
+    st[0] = lp
+    st[1] = bp
     return y
+
+
+@njit(cache=True)
+def _peak_norm(e, sr, st):
+    # the envelope over its own recent peak (held, then falling over ~2 s): playing hard reaches the toe whatever
+    # the level, as a percentile over the whole part did, but only from what has already been played
+    n = len(e)
+    out = np.empty(n)
+    r = np.exp(-1.0 / (2.0 * sr))
+    pk = st[0]
+    for i in range(n):
+        pk = e[i] if e[i] > pk else r * pk
+        out[i] = e[i] / (pk + 1e-9)
+    st[0] = pk
+    return out
 
 
 def wah(x, p, sr, P):
@@ -467,10 +550,9 @@ def wah(x, p, sr, P):
     if p['auto'] > 0:
         from .dsp import env_follow
         e = env_follow(np.abs(x).mean(0), p['attack_ms'] / 1000, p['release_ms'] / 1000, sr)
-        e = e / (np.percentile(e, 98) + 1e-9)
-        pos = np.clip(pos + p['auto'] * e, 0, 1)
+        pos = np.clip(pos + p['auto'] * _peak_norm(e, sr, np.zeros(1)), 0, 1)
     fc = p['lo_hz'] * (p['hi_hz'] / p['lo_hz']) ** pos
-    wet = np.stack([_wah_core(ch, fc, p['q'], sr) for ch in x]) * 1.6
+    wet = np.stack([_wah_core(ch, fc, p['q'], sr, np.zeros(2)) for ch in x]) * 1.6
     m = _curve(P('mix'), n)
     return x * (1 - m) + wet * m
 

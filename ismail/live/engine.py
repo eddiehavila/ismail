@@ -550,7 +550,8 @@ class Engine:
             ms = float(np.mean(y ** 2))
             t['ms'] = t['ms'] * a + ms * (1 - a)
             self._hold(t, p0)
-            t['quiet'] = 0 if fed or ms > QUIET * QUIET else t.get('quiet', 0) + n
+            floor = max(QUIET, 4 * path.chain.noise * max(abs(gl1), abs(gr1)))     # an amp's own hiss is not music
+            t['quiet'] = 0 if fed or ms > floor * floor else t.get('quiet', 0) + n
             if not t['quiet']:
                 deck_fed.add(t['deck'])
         for bname, b in buses:
@@ -576,7 +577,8 @@ class Engine:
             ms = float(np.mean(y ** 2))
             b['ms'] = b['ms'] * a + ms * (1 - a)
             self._hold(b, p0)
-            b['quiet'] = 0 if bname in bus_fed or ms > QUIET * QUIET else b.get('quiet', 0) + n
+            floor = max(QUIET, 4 * path.chain.noise * max(abs(gl1), abs(gr1)))
+            b['quiet'] = 0 if bname in bus_fed or ms > floor * floor else b.get('quiet', 0) + n
             if not b['quiet']:
                 deck_fed.add(b['deck'])
         for dn, dk in decks:
@@ -1867,7 +1869,7 @@ def warm_effects():
     """Compile/load every effect kernel once before audio starts: a first numba compile mid-set would hold the GIL
     long enough to starve the device."""
     for t in F.FX_DEFAULTS:
-        if t not in F.PROCS:    # studio-only effects (the guitar rig) bake in the workers
+        if t not in F.PROCS:    # studio-only effects bake in the workers
             continue
         spec = {'type': t}
         if t == 'duck':
