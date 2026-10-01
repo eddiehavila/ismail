@@ -46,18 +46,94 @@ def _alive(project):
         return False
 
 
+def _pid_alive(pid):
+    if os.name == 'nt':
+        import ctypes
+        k = ctypes.windll.kernel32
+        h = k.OpenProcess(0x1000, False, int(pid))         # PROCESS_QUERY_LIMITED_INFORMATION
+        if not h:
+            return False
+        code = ctypes.c_ulong()
+        ok = k.GetExitCodeProcess(h, ctypes.byref(code))
+        k.CloseHandle(h)
+        return bool(ok) and code.value == 259               # STILL_ACTIVE
+    try:
+        os.kill(int(pid), 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+
+
+def _kill_tree(pid):
+    """The engine and its render workers."""
+    if os.name == 'nt':
+        subprocess.run(['taskkill', '/PID', str(int(pid)), '/T', '/F'], capture_output=True)
+    else:
+        import signal
+        try:
+            os.killpg(os.getpgid(int(pid)), signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
+
+
+def _engine_record(project):
+    try:
+        with open(_info_path(project), encoding='utf8') as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
+def _other_engines(project):
+    """Engines still running for other folders (a forgotten set can hold the speakers for hours)."""
+    from .engine import registry_path
+    d = registry_path()
+    out = []
+    try:
+        names = os.listdir(d)
+    except OSError:
+        return out
+    me = os.path.abspath(project)
+    for n in names:
+        p = os.path.join(d, n)
+        try:
+            with open(p, encoding='utf8') as f:
+                rec = json.load(f)
+        except (OSError, ValueError):
+            continue
+        if not _pid_alive(rec.get('pid', -1)):
+            try:
+                os.remove(p)                                 # a note left by an engine that died
+            except OSError:
+                pass
+            continue
+        if os.path.abspath(rec.get('project', '')) != me:
+            out.append(rec)
+    return out
+
+
 @op()
 def live_start(project: str, bpm: float, beats_per_bar: int = 4, device: str = 'default', workers: int = None) -> str:
     """Start the live engine for `project` (any folder; a project.json there lends its sound bank, song voices and
     'track:<name>' instruments). It plays from bar 1 immediately, silent until you queue clips, and keeps playing
     between your calls: clips loop until replaced. Tempo is fixed for the run (live_stop, then start again to change
     it). device: 'default' (speakers), a device name/index, or 'none' (no audio out; for testing and listen-only
-    analysis). workers: render processes (default: cores - 4, from 2 to 4; more for many mimic voices). Output always passes a limiter and loudness cap you cannot raise. Next: live_track, then live_queue."""
+    analysis). workers: render processes (default: cores - 4, from 2 to 4; more for many mimic voices). Output always passes a limiter and loudness cap you cannot raise.
+    The reply names any other live engine still running on this machine (two on one device can freeze both).
+    Next: live_track, then live_queue."""
     root = os.path.abspath(project)
     if workers is None:
         workers = min(4, max(2, (os.cpu_count() or 4) - 4))
     if _alive(project):
         return "already running (live_stop first to change tempo or device)\n" + _call(project, 'status')
+    others = []
+    for rec in _other_engines(project):
+        mins = (time.time() - rec.get('started', time.time())) / 60
+        others.append(f"another live engine is still running: {rec.get('project')} on device {rec.get('device')!r}, "
+                      f"started {mins:.0f} min ago (pid {rec.get('pid')}). Two engines on one device can freeze "
+                      f"both: live_stop(project='{rec.get('project')}') unless it is meant to play")
     if str(device).lower() not in ('none', 'null'):
         try:
             import sounddevice  # noqa: F401
@@ -79,27 +155,52 @@ def live_start(project: str, bpm: float, beats_per_bar: int = 4, device: str = '
         flags = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
     subprocess.Popen([sys.executable, '-m', 'ismail.live.engine', '--project', root, '--bpm', str(bpm),
                       '--bpb', str(beats_per_bar), '--device', str(device), '--workers', str(workers)],
-                     cwd=pkg_root, env=env, stdout=log, stderr=subprocess.STDOUT, creationflags=flags)
+                     cwd=pkg_root, env=env, stdout=log, stderr=subprocess.STDOUT, creationflags=flags,
+                     start_new_session=os.name != 'nt')
     t0 = time.time()
     while time.time() - t0 < 60:
         if os.path.exists(_info_path(project)) and _alive(project):
-            return f"live engine started ({time.time() - t0:.1f} s)\n" + _call(project, 'status')
+            return '\n'.join(others + [f"live engine started ({time.time() - t0:.1f} s)", _call(project, 'status')])
         time.sleep(0.3)
     raise OpError(f"the live engine did not come up in 60 s; read {os.path.join(root, 'live', 'engine.log')}")
 
 
 @op()
 def live_stop(project: str, fade_sec: float = 1.0) -> str:
-    """Fade out and stop the live engine (closes any recording)."""
-    return _call(project, 'stop', fade_s=fade_sec)
+    """Fade out and stop the live engine (closes any recording). Waits until the process has gone; an engine
+    that does not stop (a dead audio device, a hung process) is killed with its render workers."""
+    rec = _engine_record(project)
+    if rec is None:
+        raise OpError(f"no live engine for {project} (nothing to stop)")
+    try:
+        msg = _call(project, 'stop', timeout=5, fade_s=fade_sec)
+    except OpError as e:
+        msg = f"the engine did not answer ({str(e).split(';')[0]})"
+    pid = rec.get('pid')
+    t0 = time.time()
+    while pid and _pid_alive(pid) and time.time() - t0 < float(fade_sec) + 8:
+        time.sleep(0.2)
+    if pid and _pid_alive(pid):
+        _kill_tree(pid)
+        time.sleep(0.5)
+        msg += f"; it did not exit, so it was killed (pid {pid}, with its render workers)"
+        try:
+            os.remove(_info_path(project))
+        except OSError:
+            pass
+    else:
+        msg += f"; stopped ({time.time() - t0:.1f} s)"
+    return msg
 
 
 @op()
 def live_status(project: str, deck: str = None) -> str:
     """Where the live set is: bar heard, each deck (on air or cued, fader, eq, filter, level, song), each track
-    not on a deck (instrument, fader, level, playing/next clip, render cost, errors), the safety chain's gain
-    reduction since the last status, runway (the last scheduled change and what loops after it) and render health
-    (backlog, late events, underruns). deck='B' lists that deck's tracks and buses instead."""
+    not on a deck (instrument, fader, level now and the loudest over the last 10 s, playing/next clip, render
+    cost, errors), the safety chain's gain reduction since the last status, runway (the last scheduled change and
+    what loops after it) and render health (backlog, late events, underruns). A STALLED line means the audio
+    device stopped asking for audio. deck='B' lists that deck's tracks and buses instead. Problems that arrive
+    between calls (a dropped note, a stall) are added to the next reply of any live op."""
     return _call(project, 'status', deck=deck)
 
 
@@ -232,13 +333,29 @@ def live_bus(project: str, bus: str, fx=None, volume_db: float = None, remove: b
 
 
 @op()
-def live_fx(project: str, target: str, index: int, params: dict, ramp_beats: float = 0, at: str = 'now') -> str:
+def live_fx(project: str, target: str = None, index=None, params: dict = None, ramp_beats: float = 0,
+            at: str = 'now', clear: bool = False, moves: list = None) -> str:
     """Change params of one effect in a live chain. target: a track, or 'bus:<name>'; index: 0-based position in
-    its chain (live_status lists chains). Automatable params (fx_help lists them: cutoff, mix, gain_db, depth ...)
+    its chain (live_status lists chains), or the effect's type ('filter'; 'filter:2' = the second filter), which
+    survives edits to the chain. Automatable params (fx_help lists them: cutoff, mix, gain_db, depth ...)
     glide from their current value to the new one over ramp_beats, starting at `at` ('now' or a live_queue
     value): one call = a filter sweep over 8 bars, a fade, a build. Frequencies glide in log space. Other params
-    rebuild that chain at `at` (the old tail rings out)."""
-    return _call(project, 'fx', target=target, index=index, params=params, ramp_beats=ramp_beats, at=at)
+    rebuild that chain at `at` (the old tail rings out).
+    A chain scheduled with live_track(fx=..., at=...) can be swept before it plays: an `at` at or after its swap
+    targets the new chain, and a swap drops the sweeps written for the old one.
+    clear=True cancels the scheduled moves on the target from `at` on (one effect with index, or every effect and
+    the volume without it): each param holds where it is. Use it before a section reuses a track whose old
+    choreography is still scheduled.
+    moves: a list of these calls as dicts, [{target, index, params, ramp_beats, at}, ...], scheduled in one call
+    (a whole cycle of throws, sweeps and gaps; ismail.live.djkit builds them)."""
+    if moves is not None:
+        return _call(project, 'moves', moves=moves)
+    if target is None:
+        raise OpError("live_fx needs a target (or moves=[...])")
+    if not clear and (index is None or not params):
+        raise OpError("live_fx needs index and params (or clear=True to cancel scheduled moves)")
+    return _call(project, 'fx', target=target, index=index, params=params, ramp_beats=ramp_beats, at=at,
+                 clear=clear)
 
 
 @op()

@@ -24,9 +24,10 @@ class GraphError(ValueError):
 class Ramp:
     """A param moving from v0 at sample p0 to v1 at p1 (log-space for frequencies), held after."""
 
-    def __init__(self, p0, v0, p1, v1, log):
+    def __init__(self, p0, v0, p1, v1, log, gen=0):
         self.p0, self.v0, self.p1, self.v1 = int(p0), float(v0), int(max(p1, p0 + 1)), float(v1)
         self.log = log and v0 > 0 and v1 > 0
+        self.gen = gen              # the effect chain this ramp was written for (a chain swap drops the others)
 
     def curve(self, pos, n):
         if pos >= self.p1:
@@ -42,13 +43,26 @@ class Ramp:
 
 
 class Schedule:
-    """Ramps of one param in time order. Like clips: a ramp added at p0 replaces those starting at or after p0."""
+    """Ramps of one param in time order. Like clips: a ramp added at p0 replaces those starting at or after p0
+    (for the same effect chain: ramps written for a chain that is scheduled to replace this one are kept)."""
 
     def __init__(self):
         self.r = []
 
     def add(self, ramp):
-        self.r = [x for x in self.r if x.p0 < ramp.p0] + [ramp]
+        self.r = sorted([x for x in self.r if x.p0 < ramp.p0 or x.gen != ramp.gen] + [ramp], key=lambda x: x.p0)
+
+    def keep_gen(self, gen):
+        """Drop the ramps written for other chains (at a chain swap). Returns whether any are left."""
+        self.r = [x for x in self.r if x.gen == gen]
+        return bool(self.r)
+
+    def hold(self, pos, gen):
+        """Cancel every move of chain `gen` from `pos` on: the param stays where it is then."""
+        v = self.value(pos)
+        self.r = [x for x in self.r if x.p0 < pos or x.gen != gen] + [Ramp(pos, v, pos + 1, v, False, gen)]
+        self.r.sort(key=lambda x: x.p0)
+        return v
 
     def value(self, pos):
         cur = [x for x in self.r if x.p0 <= pos]
@@ -127,6 +141,7 @@ class Chain:
             self.procs.append(F.make(f, F.Env(SR, bpm, dry, 0)))
         self.latency = sum(p.latency for p in self.procs)
         self.gr = {}
+        self.gen = 0                # set when the chain is scheduled to replace another (ramps carry it)
 
     def process(self, x, block_for):
         for i, p in enumerate(self.procs):

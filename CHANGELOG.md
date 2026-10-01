@@ -17,13 +17,31 @@
   fitted in a late-60s guitar record study (20 of 22 single lead notes passed a blind exam). Presets
   `strat70_lead`, `strat70_rhythm`, `strat70_rotary`, `pbass70`, `kit70`; each voice's INFO `rigs` holds the fx
   chain its presets were fitted with, and `voice_help` prints them one line each.
-- Fix: the live engine crashed at startup since the rig effects were registered (its effect warm-up tried to
-  build a live block for studio-only types); it now skips them, and they bake in the workers as before.
 - Skill: `references/blind-tests.md` (the eye exam and the blind exam: fair clips, reading the answers, the
   song-level checks single notes miss), and the guitar study's lessons in sound design (register first, harmonic
   profile, stem bias, rig order, fast rig fit), composition (phrase placement, band feel, bends to chord tones),
   recreate (straighten a drifting record, round-trip every sensor) and listening (spectrogram pairs; long-window
   numbers are blind to fakeness).
+
+### Live, from a one-hour set
+
+- DJ kit, `ismail.live.djkit`: step strings to notes, cycles built bar by bar inside one clip, notes on another
+  metric grid, effect moves (sweep, throw, gap, pump) addressed by effect type, and a `Set` that logs every call
+  with the clip ids per section so a queued section can be cancelled.
+- `live_fx`: `index` may be the effect's type (`'filter'`, `'delay:2'`); `moves=[...]` schedules a whole
+  choreography in one call; `clear=True` cancels a track's scheduled moves (each param holds). A sweep can target
+  a chain scheduled with `live_track(fx=..., at=...)`; the swap drops only the old chain's sweeps and keeps volume
+  moves (it used to drop everything, a loaded song's volume curve included).
+- One `at` vocabulary: `now` and `asap` mean the same in every live op.
+- Problems between calls (a note dropped as too loud, a warm-up error, a stalled device) are added to the next
+  reply of any live op. `live_status` shows each level's loudest over the last 10 s and a STALLED line when the
+  device stops asking for audio.
+- `live_start` names other engines still running on the machine (a registry in `~/.ismail/live`); `live_stop`
+  waits for the engine to exit and kills it with its workers when a dead device would hang it.
+- Skill (`references/live.md`): reading the audience, your latency, the pre-flight, dynamics with the kit, a set's
+  folder layout, playing for a screen recording.
+- Fix: the live engine crashed at startup since the rig effects were registered (its effect warm-up tried to
+  build a live block for studio-only types); it now skips them, and they bake in the workers as before.
 
 ## 0.2.0 (2026-09-30)
 

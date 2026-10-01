@@ -38,6 +38,8 @@ DORMANT_S = 0.5
 AHEAD_S = 0.5           # finished audio kept ahead of the device
 HORIZON_S = 8.0         # how far ahead events are sent to render (slow voices need the head start)
 AIR_S = 120.0           # output history kept for live_listen
+HOLD_S = 10             # live_status also shows each track's loudest level over this many seconds
+STALL_S = 2.0           # the device asking for no audio this long = a stalled output (Bluetooth sleep, a busy device)
 MARGIN_S = 0.5          # render estimate safety margin (quantized launches make this inaudible)
 DEFAULT_RATE = {'mimic': 0.6, 'code': 0.1, 'synth': 0.15, 'sampler': 0.05}   # render s per audio s, until measured
 DRUM_RATE = 0.03
@@ -97,6 +99,7 @@ class Engine:
         self.duck_sources = set()
         self.ramps = {}                 # (target, fx index, param) -> Ramp
         self.swaps = []                 # heap of (sample, seq, fn): chain changes due at a bar line
+        self.chain_gen = 0              # a chain scheduled to replace another gets the next number; ramps carry it
         self.meta = {}                  # clip id -> {'groups', 'placed'}
         self.cache = {}                 # (clip id, event) -> array | 'pending' | 'error'
         self.renders = {}               # content key -> array | 'pending': identical notes render once
@@ -128,6 +131,8 @@ class Engine:
         self._jid = 0
         self._procs = []
         self._fifo = collections.deque()
+        self.last_pull = None           # wall time the device last asked for audio
+        self.news = collections.deque(maxlen=20)    # problems found between calls: the next reply of any op says them
         self._fifo_n = 0
         self._fifo_lock = threading.Lock()
         self._head = 0
@@ -217,6 +222,7 @@ class Engine:
                         tr['est'] = secs / job['audio_s']
                     if err:
                         tr['errors'].append(f"warm-up: {err}")
+                        self.news.append(f"track {track}: warm-up failed: {err}")
                 return
             if tr is not None:
                 r = secs / max(job['audio_s'], 0.05)
@@ -227,6 +233,7 @@ class Engine:
                 self.stats['rejected'] += 1
                 if tr is not None:
                     tr['errors'] = (tr['errors'] + [err])[-3:]
+                    self.news.append(f"track {track}: a note was not played: {err}")
                 for k in users:
                     if k in self.cache:
                         self.cache[k] = 'error'
@@ -426,6 +433,7 @@ class Engine:
             if x is None:
                 if t.get('quiet', 0) > dormant_after and not path.retiring and t['cur'] == (t['gl'], t['gr']):
                     t['ms'] *= a               # dormant: no notes, tails died away; costs nothing until a note
+                    self._hold(t, p0)
                     continue
                 x = np.zeros((2, n))
             fed = name in bufs
@@ -459,6 +467,7 @@ class Engine:
                 bus_fed.add(t['output'])
             ms = float(np.mean(y ** 2))
             t['ms'] = t['ms'] * a + ms * (1 - a)
+            self._hold(t, p0)
             t['quiet'] = 0 if fed or ms > QUIET * QUIET else t.get('quiet', 0) + n
             if not t['quiet']:
                 deck_fed.add(t['deck'])
@@ -466,6 +475,7 @@ class Engine:
             path = b['path']
             if bname not in bus_fed and b.get('quiet', 0) > dormant_after and not path.retiring:
                 b['ms'] *= a
+                self._hold(b, p0)
                 continue
             x = bus_in[bname]
             if path.chain.procs:
@@ -483,6 +493,7 @@ class Engine:
             deck_in.get(b['deck'], master).__iadd__(y)
             ms = float(np.mean(y ** 2))
             b['ms'] = b['ms'] * a + ms * (1 - a)
+            self._hold(b, p0)
             b['quiet'] = 0 if bname in bus_fed or ms > QUIET * QUIET else b.get('quiet', 0) + n
             if not b['quiet']:
                 deck_fed.add(b['deck'])
@@ -542,7 +553,19 @@ class Engine:
             if self.fade is not None and self.fade[0] == 0 and self._fifo_n == 0:
                 self.running = False
 
+    @staticmethod
+    def _hold(node, p0):
+        """Loudest smoothed level per second for the last HOLD_S seconds: a sparse part (a vocal call, a stab)
+        reads silent in a snapshot taken in its rests."""
+        sec = p0 // SR
+        h = node.setdefault('hold', {})
+        h[sec] = max(h.get(sec, 0.0), node['ms'])
+        if len(h) > HOLD_S + 1:
+            for k in [k for k in h if k < sec - HOLD_S]:
+                del h[k]
+
     def _pull(self, frames):
+        self.last_pull = time.time()
         out = np.zeros((frames, 2), dtype=np.float32)
         got = 0
         with self._fifo_lock:
@@ -601,8 +624,19 @@ class Engine:
     def shutdown(self):
         self.running = False
         if getattr(self, 'stream', None) is not None:
-            self.stream.stop()
-            self.stream.close()
+            # a dead device (a Bluetooth speaker gone) can block stop() forever: give it 3 s, then leave it
+            st = self.stream
+
+            def close():
+                try:
+                    st.stop()
+                    st.close()
+                except Exception:
+                    pass
+            t = threading.Thread(target=close, daemon=True)
+            t.start()
+            t.join(3.0)
+            self.device_hung = t.is_alive()
         if self.rec is not None:
             self.rec.close()
             self.rec = None
@@ -661,7 +695,8 @@ class Engine:
                 raise LiveError(f"{where}: a track cannot sidechain, duck or vocode from itself")
             if d not in self.tracks:
                 raise LiveError(f"{where}: an effect reads track {d!r}, which is not a live track; tracks: "
-                                f"{list(self.tracks) or 'none'} (create it first)")
+                                f"{list(self.tracks) or 'none'}. Create {d!r} with live_track first, then this chain (or add "
+                                f"the effect to this track afterwards with live_track(fx=...))")
         try:
             return G.Chain(fxs, self.bpm, dry_default, bake)
         except (F.FxError, ValueError) as e:
@@ -751,7 +786,7 @@ class Engine:
                             f"{G.LAT_BUDGET}")
 
     def _at_sample(self, at):
-        if at in (None, 'now'):
+        if at in (None, 'now', 'asap'):
             return self.pos
         now = self.beat(self.pos)
         try:
@@ -763,6 +798,18 @@ class Engine:
     def _swap_at(self, sample, fn):
         self.seq += 1
         heapq.heappush(self.swaps, (sample, self.seq, fn))
+
+    def _keep_ramps(self, key, gen):
+        """A chain swap: effect ramps written for other chains stop (volume ramps stay)."""
+        for k in [k for k in self.ramps if k[0] == key and k[1] >= 0]:
+            if not self.ramps[k].keep_gen(gen):
+                del self.ramps[k]
+
+    @staticmethod
+    def _chain_at(node, s0):
+        """The chain that will be playing at sample s0: the current one or a scheduled replacement."""
+        due = [p for p in node.get('pending', []) if p[0] <= s0]
+        return max(due, key=lambda p: p[0])[1] if due else node['path'].chain
 
     def _target(self, target):
         if target.startswith('bus:'):
@@ -843,10 +890,14 @@ class Engine:
                     if tr['inst'] is not None:
                         self._rerender_from(track, self.beat(s0), tr['inst'])
 
+                self.chain_gen += 1
+                new_chain.gen = self.chain_gen
+                tr.setdefault('pending', []).append((s0, new_chain))
+
                 def swap(tr=tr, ch=new_chain, name=track):
                     tr['path'].retire_to(ch)
-                    for k in [k for k in self.ramps if k[0] == 'track:' + name]:
-                        del self.ramps[k]
+                    tr['pending'] = [p for p in tr.get('pending', []) if p[1] is not ch]
+                    self._keep_ramps('track:' + name, ch.gen)
                     self._send_lags(tr)
                     self._refresh_graph()
                 self._swap_at(s0, swap)
@@ -917,10 +968,14 @@ class Engine:
                         self._check_latency(t['path'].chain.latency, t['sends'], f"track {k!r}", (bus, chain.latency))
                 s0 = self._at_sample(at)
 
+                self.chain_gen += 1
+                chain.gen = self.chain_gen
+                b.setdefault('pending', []).append((s0, chain))
+
                 def swap(b=b, ch=chain, name=bus):
                     b['path'].retire_to(ch, G.LAT_BUDGET - ch.latency)
-                    for k in [k for k in self.ramps if k[0] == 'bus:' + name]:
-                        del self.ramps[k]
+                    b['pending'] = [p for p in b.get('pending', []) if p[1] is not ch]
+                    self._keep_ramps('bus:' + name, ch.gen)
                     for t in self.tracks.values():
                         if name in t['sends'] or t['output'] == name:
                             self._send_lags(t)
@@ -935,13 +990,30 @@ class Engine:
             msg.append(f"vol {b['volume_db']:g} dB")
             return f"bus {bus}: " + ', '.join(msg)
 
-    def cmd_fx(self, target, index, params, ramp_beats=0, at='now'):
+    def cmd_fx(self, target, index=None, params=None, ramp_beats=0, at='now', clear=False):
         with self.lock:
             node = self._target(target)
-            fxs = node['path'].chain.fx
+            key = ('bus:' + target[4:]) if target.startswith('bus:') else 'track:' + target
+            s0 = self._at_sample(at)
+            chain = self._chain_at(node, s0)
+            fxs = chain.fx
+            later = (f"; from {fmt_bar(self.beat(s0), self.bpb)} the chain scheduled then"
+                     if chain is not node['path'].chain else '')
+            if clear and index is None:
+                return self._clear_ramps(node, key, None, s0, at)
+            if isinstance(index, str):                 # by type: 'filter', or 'filter:2' for the second filter
+                kind, _, nth = index.partition(':')
+                hits = [i for i, x in enumerate(fxs) if x['type'] == kind]
+                k = int(nth) - 1 if nth.isdigit() else 0
+                if not 0 <= k < len(hits):
+                    raise LiveError(f"{target} has no {index!r} effect ({chain.describe(False)}{later}); use a type "
+                                    f"in the chain, 'type:2' for the second of a type, or a 0-based index")
+                index = hits[k]
             if not isinstance(index, int) or not 0 <= index < len(fxs):
-                raise LiveError(f"{target} has {len(fxs)} effects ({node['path'].chain.describe(False)}); index "
+                raise LiveError(f"{target} has {len(fxs)} effects ({chain.describe(False)}{later}); index "
                                 f"{index!r} is out of range (0-based)")
+            if clear:
+                return self._clear_ramps(node, key, index, s0, at)
             f = fxs[index]
             if not isinstance(params, dict) or not params:
                 raise LiveError(f"params: a dict of {f['type']} params, e.g. {{'mix': 0.4}}; valid: "
@@ -950,8 +1022,6 @@ class Engine:
             if bad:
                 raise LiveError(f"{f['type']} has no params {sorted(bad)}; valid: {sorted(F.FX_DEFAULTS[f['type']])}")
             auto = set(F.AUTOMATABLE.get(f['type'], ()))
-            key = ('bus:' + target[4:]) if target.startswith('bus:') else 'track:' + target
-            s0 = self._at_sample(at)
             s1 = s0 + max(int(float(ramp_beats) * self.spb * SR), int(G.MIN_RAMP_S * SR))
             msg = []
             for name, v in params.items():
@@ -964,11 +1034,12 @@ class Engine:
                 sch = self.ramps.get((key, index, name))
                 if sch is None:
                     sch = self.ramps[(key, index, name)] = G.Schedule()
-                    v0 = float(f[name])
-                else:
-                    v0 = sch.value(s0)
+                own = [x for x in sch.r if x.gen == chain.gen]
+                before = [x for x in own if x.p0 <= s0]
+                # where this chain's param is at s0: its last move so far, else held before its first move
+                v0 = before[-1].value(s0) if before else own[0].v0 if own else float(f[name])
                 log = any(k in name for k in G.LOG_PARAMS)
-                sch.add(G.Ramp(s0, v0, s1, v, log))
+                sch.add(G.Ramp(s0, v0, s1, v, log, chain.gen))
                 f[name] = v
                 msg.append(f"{name} {v0:g} -> {v:g}" + (f" over {float(ramp_beats):g} beats" if ramp_beats else ''))
             rebuild = {k: v for k, v in params.items() if k not in auto}
@@ -985,8 +1056,44 @@ class Engine:
                     self.cmd_track(target, fx=new, at=at)
             msg.append(f"rebuilt {f['type']} with {rebuild} (not automatable: the effect restarts; its old tail "
                        f"rings out)")
-        start = 'now' if at in (None, 'now') else fmt_bar(self.beat(s0), self.bpb)
-        return f"{target} fx[{index}] {f['type']} ({start}): " + '; '.join(msg)
+        start = 'now' if at in (None, 'now', 'asap') else fmt_bar(self.beat(s0), self.bpb)
+        return f"{target} fx[{index}] {f['type']} ({start}): " + '; '.join(msg) + later
+
+    def cmd_moves(self, moves):
+        """Many live_fx moves in one call (a whole cycle of choreography): applied in order; a bad one stops the
+        batch and says which, after the ones before it."""
+        if not isinstance(moves, list) or not moves:
+            raise LiveError("moves: a list of {target, index, params, ramp_beats, at} (live_fx arguments)")
+        out = []
+        for i, m in enumerate(moves):
+            if not isinstance(m, dict) or 'target' not in m:
+                raise LiveError(f"move [{i}]: a dict with target, index, params (ramp_beats, at, clear optional); "
+                                f"{len(out)} moves before it were scheduled")
+            bad = set(m) - {'target', 'index', 'params', 'ramp_beats', 'at', 'clear'}
+            if bad:
+                raise LiveError(f"move [{i}]: unknown keys {sorted(bad)}; {len(out)} moves before it were scheduled")
+            try:
+                out.append(self.cmd_fx(**m))
+            except LiveError as e:
+                raise LiveError(f"move [{i}] ({m.get('target')} {m.get('index')!r}): {e}. {len(out)} moves before it "
+                                f"were scheduled; fix it and send the rest")
+        return f"{len(out)} moves scheduled\n" + '\n'.join(out)
+
+    def _clear_ramps(self, node, key, index, s0, at):
+        """Cancel the scheduled moves on a track or bus from s0 on (every effect, or one index, plus the volume
+        when index is None): each param holds the value it has then."""
+        held = []
+        for k in [k for k in self.ramps if k[0] == key and (index is None or k[1] == index)]:
+            sch = self.ramps[k]
+            if not any(x.p1 > s0 for x in sch.r):
+                continue
+            gen = self._chain_at(node, s0).gen if k[1] >= 0 else 0
+            v = sch.hold(s0, gen)
+            held.append(f"{'volume' if k[1] < 0 else f'fx[{k[1]}].'}{'' if k[1] < 0 else k[2]} holds {v:g}")
+        when = 'now' if at in (None, 'now', 'asap') else fmt_bar(self.beat(s0), self.bpb)
+        if not held:
+            return f"{key[key.index(':') + 1:]}: nothing scheduled to clear from {when}"
+        return f"{key[key.index(':') + 1:]}: cleared the scheduled moves from {when}: " + '; '.join(held)
 
     # ------------------------------------------------------------------ decks
     def _deck(self, name, create=False):
@@ -1032,7 +1139,7 @@ class Engine:
             new = deck not in self.decks
             dk = self._deck(deck, create=True)
             s0 = self._at_sample(at)
-            when = 'now' if at in (None, 'now') else fmt_bar(self.beat(s0), self.bpb)
+            when = 'now' if at in (None, 'now', 'asap') else fmt_bar(self.beat(s0), self.bpb)
             msg = [f"new deck {deck}"] if new else []
             for k, v, lo, hi in (('volume_db', volume_db, -120, 6), ('low_db', low_db, -120, 6),
                                  ('mid_db', mid_db, -120, 6), ('high_db', high_db, -120, 6), ('filter', filter, -1, 1)):
@@ -1105,7 +1212,7 @@ class Engine:
                     for (x0, v0), (x1, v1) in zip(knots, knots[1:]):
                         s0, s1 = self.sample(base + x0), self.sample(base + x1)
                         if s1 > s0:
-                            sch.add(G.Ramp(s0, v0, s1, v1, log))
+                            sch.add(G.Ramp(s0, v0, s1, v1, log, node['path'].chain.gen if idx >= 0 else 0))
                 if idx >= 0:
                     node['path'].chain.fx[idx][param] = knots[0][1]
         return bad
@@ -1450,6 +1557,32 @@ class Engine:
             return f"runway: nothing scheduled to change; {tail}"
         return f"runway: last scheduled change at {fmt_bar(last, self.bpb)} (in {(last - now) * self.spb:.1f} s); {tail}"
 
+    @staticmethod
+    def _held_db(node):
+        return 10 * math.log10(max(node.get('hold', {}).values(), default=node['ms']) + 1e-12)
+
+    def _stalled(self):
+        """A device that stopped asking for audio: the playhead freezes while everything else looks fine."""
+        if getattr(self, 'stream', None) is None or self.last_pull is None or not self.running:
+            return None
+        quiet = time.time() - self.last_pull
+        if quiet < STALL_S:
+            return None
+        return (f"STALLED: the audio device has asked for no audio for {quiet:.0f} s, so nothing is heard and the "
+                f"playhead is frozen (a Bluetooth speaker asleep, or another program or engine holding the device). "
+                f"live_stop, then live_start again (another device: device='<name>')")
+
+    def drain_news(self):
+        """Problems that arrived since the last reply, said once."""
+        out = []
+        stall = self._stalled()
+        if stall and not getattr(self, '_stall_said', False):
+            out.append(stall)
+        self._stall_said = bool(stall)
+        while self.news:
+            out.append(self.news.popleft())
+        return out
+
     def cmd_status(self, deck=None):
         if deck is not None and deck not in self.decks:
             raise LiveError(f"no deck {deck!r}; decks: {list(self.decks) or 'none'}")
@@ -1459,6 +1592,9 @@ class Engine:
             lines = [f"live {fmt_num(self.bpm)} BPM {self.bpb}/4 | heard {fmt_bar(math.floor(heard), self.bpb)} "
                      f"({self.played / SR:.0f} s) | mixed ahead {max(0.0, (self.pos - self.played) / SR):.2f} s | "
                      f"device {self.device}" + (f" | recording {os.path.basename(self.rec_path)}" if self.rec else '')]
+            stall = self._stalled()
+            if stall:
+                lines.append(stall)
             lines.append("safety: " + self.safety.report())
             for dn, dk in self.decks.items():
                 n_tr = sum(1 for t in self.tracks.values() if t['deck'] == dn)
@@ -1491,7 +1627,8 @@ class Engine:
                     seg += f", stop at {fmt_bar(stops[0], self.bpb)}"
                 est = f"renders {1 / max(t['est'], 1e-3):.0f}x realtime" if t['est'] is not None else "no renders yet"
                 lines.append(f"  {name:<10} {what:<22} vol {t['volume_db']:+g} pan {t['pan']:+g} "
-                             f"level {lvl:6.1f} dBFS | {seg} | {est}" + (" | WARMING" if t['warming'] else ''))
+                             f"level {lvl:6.1f} dBFS (max {HOLD_S} s {self._held_db(t):6.1f}) | {seg} | {est}" +
+                             (" | WARMING" if t['warming'] else ''))
                 ch = t['path'].chain
                 if ch.procs or t['sends'] or t['path'].retiring:
                     fxl = f"      fx {ch.describe()}"
@@ -1509,7 +1646,7 @@ class Engine:
                 lvl = 10 * math.log10(b['ms'] + 1e-12)
                 users = [k for k, t in self.tracks.items() if name in t['sends']]
                 lines.append(f"  bus {name:<6} fx {b['path'].chain.describe()} | vol {b['volume_db']:+g} | level "
-                             f"{lvl:6.1f} dBFS | fed by {', '.join(users) or 'nothing yet'}")
+                             f"{lvl:6.1f} dBFS (max {HOLD_S} s {self._held_db(b):6.1f}) | fed by {', '.join(users) or 'nothing yet'}")
                 b['path'].chain.gr = {}
             def ahead(sch):                            # a loaded song's automation can hold hundreds: show two
                 fut = [r for r in sch.r if r.p1 > self.pos]
@@ -1613,10 +1750,19 @@ class Engine:
         return f"fading out over {fade_s:g} s and stopping"
 
     def _finish(self):
-        while self.running and not (self.fade and self.fade[0] == 0):
+        # the fade advances only while the device takes audio: a stalled device would never finish it
+        deadline = time.time() + (self.fade[1] / SR if self.fade else 1.0) + 3.0
+        while self.running and not (self.fade and self.fade[0] == 0) and time.time() < deadline:
             time.sleep(0.05)
         time.sleep(AHEAD_S + 0.3)
         self.shutdown()
+
+
+def registry_path(pid=None):
+    """Every running engine leaves a note here (any project folder), so live_start can name the ones still
+    holding a device."""
+    d = os.environ.get('ISMAIL_LIVE_REGISTRY') or os.path.join(os.path.expanduser('~'), '.ismail', 'live')
+    return d if pid is None else os.path.join(d, f"{pid}.json")
 
 
 def warm_effects():
@@ -1645,7 +1791,7 @@ def serve(engine, port=0, idle_min=None):
     idle_min = float(os.environ.get('ISMAIL_LIVE_IDLE_MIN', 60)) if idle_min is None else idle_min
     ops = {'status': engine.cmd_status, 'track': engine.cmd_track, 'queue': engine.cmd_queue,
            'bus': engine.cmd_bus, 'fx': engine.cmd_fx, 'deck': engine.cmd_deck, 'load': engine.cmd_load,
-           'transition': engine.cmd_transition,
+           'transition': engine.cmd_transition, 'moves': engine.cmd_moves,
            'cancel': engine.cmd_cancel, 'view': engine.cmd_view, 'listen': engine.cmd_listen_dump,
            'record': engine.cmd_record, 'stop': engine.cmd_stop}
 
@@ -1669,6 +1815,10 @@ def serve(engine, port=0, idle_min=None):
             except Exception as e:
                 traceback.print_exc()
                 res = {'ok': False, 'error': f"engine error {type(e).__name__}: {e}"}
+            news = engine.drain_news()
+            if news:
+                k = 'result' if res['ok'] else 'error'
+                res[k] = f"{res[k]}\nNEW since your last call:\n" + '\n'.join('  ' + x for x in news)
             body = json.dumps(res).encode()
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
@@ -1709,9 +1859,17 @@ def main():
     d = os.path.join(eng.root, 'live')
     os.makedirs(d, exist_ok=True)
     info = os.path.join(d, 'engine.json')
+    rec = {'port': httpd.server_address[1], 'pid': os.getpid(), 'bpm': a.bpm, 'bpb': a.bpb,
+           'device': a.device, 'started': time.time(), 'project': eng.root}
     with open(info, 'w', encoding='utf8') as f:
-        json.dump({'port': httpd.server_address[1], 'pid': os.getpid(), 'bpm': a.bpm, 'bpb': a.bpb,
-                   'device': a.device, 'started': time.time()}, f)
+        json.dump(rec, f)
+    reg = registry_path(os.getpid())
+    try:
+        os.makedirs(os.path.dirname(reg), exist_ok=True)
+        with open(reg, 'w', encoding='utf8') as f:
+            json.dump(rec, f)
+    except OSError:
+        reg = None
     print(f"live engine on 127.0.0.1:{httpd.server_address[1]} ({a.bpm:g} BPM)", flush=True)
     try:
         eng.stopped.wait()
@@ -1719,10 +1877,15 @@ def main():
         eng.shutdown()
     finally:
         httpd.shutdown()
-        try:
-            os.remove(info)
-        except OSError:
-            pass
+        for p in (info, reg):
+            try:
+                if p:
+                    os.remove(p)
+            except OSError:
+                pass
+    if getattr(eng, 'device_hung', False):
+        print("the audio device did not close; exiting without waiting for it", flush=True)
+        os._exit(0)
 
 
 if __name__ == '__main__':

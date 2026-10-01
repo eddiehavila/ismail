@@ -82,7 +82,7 @@ class Timeline:
         can be rendered by. Returns (beat, note or None)."""
         at = (at or 'next_bar').strip()
         floor = max(now, ready)
-        if at == 'asap':
+        if at in ('asap', 'now'):         # one vocabulary for every live op: both mean the first quarter beat ready
             return math.ceil(floor * 4 - EPS) / 4, None
         if at in QUANTA:
             q = QUANTA[at]
@@ -124,7 +124,7 @@ class Timeline:
             if c.end < ready - EPS:
                 note = f"{cid} ends sooner than the render estimate; the first notes may start late"
             return c.end, note
-        raise QueueError(f"at={at!r}: use next_beat | next_bar | next_2 | next_4 | next_8 | next_16 | asap | "
+        raise QueueError(f"at={at!r}: use next_beat | next_bar | next_2 | next_4 | next_8 | next_16 | now (= asap) | "
                          f"bar:<n> | after:<clip id>")
 
     def claim(self, track, beat):

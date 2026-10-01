@@ -24,8 +24,10 @@ section costs a minute or more. Compose whole sections only for real changes, an
    counts; phrase starts with `next_4` / `next_8`. End on clips that loop `forever` or on a final chord. The
    reply's landing bars are the truth: when a clip is "moved" later, its first notes needed the render time.
 3. **Sweeps and builds**: `live_fx(target, index, params, ramp_beats, at='bar:N')`, with N taken from the queue
-   reply. Ramps on one param form a schedule: a later ramp does not erase an earlier one. A snap then a sweep =
-   two calls, the second a beat later (`bar:N.25`).
+   reply. `index` may be the effect's type (`'filter'`, `'delay:2'` for the second delay), which survives edits
+   to the chain. Ramps on one param form a schedule: a later ramp does not erase an earlier one. A snap then a
+   sweep = two moves, the second a beat later (`bar:N.25`). A whole cycle of moves goes in one call:
+   `live_fx(moves=[...])` (the DJ kit builds them). `at` takes the same words everywhere (`now` = `asap`).
 4. **Listen every turn**: `live_status` (levels per track and bus, runway, late events, underruns, safety gain
    reduction) and `live_listen(bars=4, view=...)` (on the live output `bars` is a count of the last bars; a
    `[a, b]` range only works with `recording=`). Write the Listening Report lines as for a render.
@@ -64,9 +66,9 @@ camera, facial expression categories); treat it the same way.
   take minutes (a static loop ran 9 minutes once). Before asking, queue changes that keep moving for longer than
   you expect to wait, and near the end of a timed set queue a fallback ending, so the set lands on time without
   you. New clips replace queued ones on their tracks, so the runway costs nothing when you override it.
-- **Keep a control module, not one script.** A long set is many small tool calls: keep the parts and helpers
-  in `songs/<slug>/set/ctl.py` (pattern functions, a `q()` that queues and appends to a `setlog.md`) and call it
-  from short commands each turn. The log says what was queued when.
+- **Keep a control module, not one script**, laid out as in "A set's folder" below, and build it on the DJ kit
+  (`ismail.live.djkit`): its `Set` logs every call with the clip ids per section, and its note and move builders
+  replace the helpers every section used to rewrite.
 - **Check after every addition**: the new track's level (a track reading -120 dBFS while "playing" is silent,
   see below), the master `limiter` (layers add up: pull faders when it reads more than ~3 dB), late events.
 
@@ -77,6 +79,91 @@ triplets first announces the new grid; then drop. 2T and T/2 (half-time) work th
 
 Phrase boundaries: `next_16` and friends count from bar 1 of the run, not from where a playing part's phrase
 began. When a new part must line up with a 16-bar phrase that started on bar 37, use `bar:<37 + 16k>`.
+
+### Reading the audience
+
+Learned from a one-hour set steered by one listener; the same reading applies to any audience feed.
+
+- **They judge change over time, not static balance.** "It didn't really change much" was about contrast, not the
+  mix. A drop lands when the bar before it is emptied: the one that worked measured -27 dB with no sub in the bar
+  before, then -19 dB with the sub 30 dB up, plus a silence gap. Meter the bar before a drop against the drop and
+  aim for 6 to 8 dB of difference and a clear swing in the sub band.
+- **Dynamics come from effects, not EQ and not more layers:** delay throws, reverb washes, filter sweeps, stutter
+  gates, bitcrush, sidechain pumping, and silence. Faders and EQ are housekeeping; effects are the performance.
+- **Invented melodies fail; derived ones win.** A generic pentatonic acid line was "all over the place". A call
+  taken from the reference's vocal, callbacks to earlier sections' bell, cello and violin lines, and the opening
+  progression reused all worked. New melodic material comes from the reference or from earlier in the set.
+- **Measured beats guessed, and the listener hears it.** A guessed gnawa groove (four strokes on clean triplets)
+  was "cool"; the measured one (three strokes at 0, 0.32 and 0.74 of a beat, its timbres fitted from the stems)
+  was "I love it... closer". Measuring mid-set is fine at idle priority.
+- **Feedback is short and directional** ("busy", "more bass", "move on", "sounds like shit"). Answer with one or
+  two named moves, not a menu. "Move on" means a new section, not a tweak. Something bad comes out at once (the
+  acid line was gone within seconds), then the bigger fix follows.
+- **Ask about the culture, not the knobs:** "does it read as gnawa?" got a useful answer where a technical
+  question would not.
+- **Endings are emotional arcs** ("full circle", "crescendo", then peace). Plan the last 15 minutes early as an
+  arc, but keep the ending swappable: do not queue it until it is close.
+
+### Your latency is the risk
+
+A section written from scratch took 5 to 10 minutes; a request for a new ending arrived after the queued section
+it replaced had already started.
+
+- When a message arrives, read `live_status` (heard bar, runway) before writing anything, and cancel what no
+  longer fits: `Set.cancel('<section>')` takes back the clips logged for it.
+- Build each move from the kit so the visible work is short calls, not long file writes.
+- Judge a sparse part by `live_status`'s "max 10 s" level, not the snapshot: a vocal call read -70 dB when the
+  snapshot fell in its rest.
+
+### Dynamics with the kit
+
+```python
+from ismail.live.djkit import Set, steps, per_bar, notes, metric, sweep, throw, gap, pump, with_gain
+S = Set('songs/<slug>')
+S.start(84)                                       # set loudness + the pre-flight lines
+S.track('kick', instrument={'type': 'kick'}, fx=with_gain([{'type': 'filter', 'cutoff': 18000}]))
+r = metric(126, 84)                               # house beats on the 84 grid
+S.q([{'track': 'kick', 'notes': notes(per_bar(24, lambda b: [] if 16 <= b < 20 else steps('X...X...X...X...')), r),
+      'bars': 16, 'loop': 'forever', 'at': 'next_8'}], section='s04_house')
+o = S.next_boundary(start=41, every=16)           # the next cycle bar that can still land in time
+S.moves([sweep('kick', 'filter', 'cutoff', 400, 30, o + 8), gap(['kick', 'bass', 'stab'], o + 16),
+         sweep('kick', 'filter', 'cutoff', 18000, 0, o + 16), throw('stab', at=o + 15.5), pump('pad', o + 16)])
+```
+
+`steps` turns step strings into notes (X x o g, swing, lag), `per_bar` builds a cycle bar by bar inside one clip,
+`notes(..., ratio)` places a feel on another metric grid, and the move builders (`sweep`, `throw`, `gap`, `pump`)
+return `live_fx` moves addressed by effect type. `with_gain` puts a gain first in a chain, which gaps and fades
+use.
+
+## A set's folder
+
+```
+songs/<slug>/
+  project.json          project_new; the engine runs in this folder
+  SET.md                the Set Sheet and the running order, kept as the set goes: one row per section
+                        (# | name | start bar | grid, e.g. 84 or 126 = 1.5x | key | tracks added / stopped | what
+                        the user said that caused it)
+  set/
+    ctl.py              plumbing only, no notes: a djkit Set, the rig helpers
+    s01_triphop.py      one module per section, numbered in play order, named by style: rig() makes its
+    s02_minimal.py        tracks, clips(start) returns the queue batch, choreo(start) the moves, run(start)
+    ...                   does all three; seeded, so it regenerates exactly
+    setlog.md           written by the kit: every call, landing bars, clip ids per section
+  voices/               code voices made for the set; each docstring cites the measurement it came from
+  ref/
+    SOURCES.md          per reference: title, URL, date, who supplied or approved it, "analysis only"
+    <name>.wav          the reference
+    <name>/             its analysis project (excerpt, stems)
+  work/                 measurement scripts and their saved output (groove.txt, timbre.txt): voices and
+                        sections cite these numbers
+  notes/feedback.md     bar or time | the user's words verbatim | what changed | the measured result
+  takes/                live_record wavs and sidecars, when recorded
+```
+
+- **A rebuilt part gets a new track name with the section number** (`gmb2` -> `gmb3`), and each section module
+  lists the old tracks it stops. To reuse a name, `live_fx(track, clear=True)` first: scheduled moves outlive
+  clip changes.
+- Temp files go to your scratchpad, not `set/`. Measurements are saved as files, not only printed.
 
 ## Performers and phrase voices
 
@@ -143,8 +230,32 @@ hole at the bass swap. Pick `bars` so the section starts on its downbeat hit.
   with metric modulation instead (above).
 - **Gliding parts** (a portamento synth lead, a Moog bass) belong on the synth engine (`mono`, `glide`) with
   measured harmonics (an `additive` osc or a fitted filter): mimic renders each note alone and does not glide.
+- **Pre-flight.** `live_start` names any other engine still running on the machine (a forgotten set held a
+  Bluetooth speaker for hours and froze the next one): stop it unless it should play. After the first clip,
+  check that the heard bar moves; a `STALLED` line in `live_status` (or in any reply) means the device stopped
+  asking for audio: `live_stop`, then `live_start`, or another device. `live_stop` waits for the engine to exit
+  and kills it with its workers when a dead device would hang it.
+- **Heavy jobs before the set.** Stem separation during a set caused 1,654 underruns; measurement scripts at idle
+  priority were fine.
+- **Mixer budget.** About 18 tracks in a crescendo peaked at 71% of real time and dropped out. Share reverbs on
+  buses (a reverb per track is expensive) and stop parts you no longer hear; removing tracks barely helps.
+- **A new voice's first pass**: check its level at once (a first qraqeb sat 30 dB under the part it answered). A
+  single event above +12 dBFS is dropped as a broken voice, and the next reply of any op says so ("NEW since
+  your last call"). A code voice's randomness is seeded by pitch and velocity: vary them for stroke variety.
+- **Chain swaps and sweeps.** `live_fx` at or after a scheduled `live_track(fx=...)` swap targets the new chain;
+  the swap drops the sweeps written for the old one and keeps volume moves. A sidechain or duck source must be a
+  live track before the chain that reads it.
 - **Recording a long set** takes disk: 24-bit stereo is ~16 MB a minute (~480 MB for 30 minutes). Check free
   space first, or skip the take and use `live_listen` on the live output.
+
+## Playing for a screen recording
+
+When the session itself is the show (the viewer sees your turns and hears the set):
+
+- Each turn, one short line: what is queued and which bar to listen for what ("bar 97: the kick drops out, the
+  guembri goes into the delay; bar 105: the drop").
+- One concrete question at a time, with the default you will take if there is no answer.
+- Visible work stays short: kit calls, not long file writes.
 
 ## What is and is not live yet
 
