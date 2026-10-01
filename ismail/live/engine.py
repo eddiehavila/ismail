@@ -189,8 +189,7 @@ class Engine:
                 self._tasks.append(q)
                 self._procs.append({'p': p, 'out': 0})
         else:
-            bank = worker.SoundBank(self.root)
-            instruments.set_resolvers(bank.sound, bank.table)
+            self._banks = {self.root: worker.SoundBank(self.root)}     # per song, as each worker keeps them
 
     # ------------------------------------------------------------------ time
     def beat(self, pos):
@@ -214,8 +213,12 @@ class Engine:
                           'est_s': self._rate(tr) * audio_s}
         if self.n_workers == 0:
             t0 = time.time()
+            root = tr['root'] or self.root
+            if root not in self._banks:
+                self._banks[root] = worker.SoundBank(root)
+            instruments.set_resolvers(self._banks[root].sound, self._banks[root].table)
             try:
-                y = worker.render_event(inst, notes_s, lead_s, self.bpm, tr['root'] or self.root)
+                y = worker.render_event(inst, notes_s, lead_s, self.bpm, root)
                 err = worker.check(y)
             except Exception as e:
                 y, err = None, f"{type(e).__name__}: {e}"
@@ -414,7 +417,7 @@ class Engine:
                         self.cache[key] = 'pending'
                         g = self.meta[c.id]['groups'][ei]
                         tr = self.tracks[c.track]
-                        extra = {}
+                        extra = {'_bpb': self.bpb}
                         if isinstance(g, _Span):
                             # a performer's bar chunk: the notes before it render as context and are dropped
                             t0, ns, chunk = self._chunk(c, ei, k)
