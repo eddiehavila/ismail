@@ -85,6 +85,13 @@ def _level(v):
     return (v / 127.0) ** 2.2
 
 
+def _rng(seed, beat0, t, bpm, salt, extra=0):
+    """A generator for one note: keyed on the seed, where the note sits in the song (beat0 = the song beat at
+    sample 0, t = seconds from there) and a salt, never on how many notes came before it in this render."""
+    tick = int(round((beat0 + t * bpm / 60.0) * 960)) + (1 << 40)
+    return np.random.default_rng([int(seed) & 0xFFFFFFFF, tick, int(salt) & 0xFFFF, int(extra) & 0xFFFF])
+
+
 def _cymbal_modes(rng, n, lo, hi, cluster=0.0):
     f = np.sort(lo * (hi / lo) ** rng.random(n))
     if cluster:
@@ -92,13 +99,24 @@ def _cymbal_modes(rng, n, lo, hi, cluster=0.0):
     return f
 
 
+def _wire_noise(seed, beat0, bpm, sr, n, B=8192):
+    """White noise for samples [s0, s0 + n) of the song, drawn per block of the song's own timeline: any slice
+    of a render gets the same noise as the whole."""
+    s0 = int(round(beat0 * 60.0 / bpm * sr))
+    q0, q1 = s0 // B, (s0 + n - 1) // B
+    z = np.concatenate([np.random.default_rng([int(seed) & 0xFFFFFFFF, q + (1 << 40), 99]).standard_normal(B)
+                        for q in range(q0, q1 + 1)])
+    return z[s0 - q0 * B:s0 - q0 * B + n]
+
+
 def perform(notes, total_n, sr, bpm=120.0, lanes=None, kick_hz=58.0, snare_hz=190.0,
             tom_hz=(150.0, 118.0, 92.0, 80.0), wires=1.0, cym_bright=0.6, ride_t60=4.5, hat_open_t60=1.0,
-            buzz=0.15, humanize_ms=3.0, seed=5, level=1.0, **_):
-    rng = np.random.default_rng(int(seed))
+            buzz=0.15, humanize_ms=3.0, seed=5, level=1.0, beat0=0.0, **_):
+    """beat0: the song beat at sample 0. Every hit's randomness is keyed on where it sits in the song, so a slice
+    of the part (the live engine renders bar by bar) plays exactly as it does in the whole part."""
     by = {}
     for st, m, d, v in notes:
-        st = max(0.0, st + rng.normal(0, humanize_ms / 1000.0))
+        st = max(0.0, st + _rng(seed, beat0, st, bpm, m, 1).normal(0, humanize_ms / 1000.0))
         by.setdefault(int(m), []).append((st, v))
     L = np.zeros(total_n)
     R = np.zeros(total_n)
@@ -109,7 +127,7 @@ def perform(notes, total_n, sr, bpm=120.0, lanes=None, kick_hz=58.0, snare_hz=19
         L[:len(y)] += y[:total_n] * gl
         R[:len(y)] += y[:total_n] * gr
 
-    def exc_stream(hits, width_lo, width_hi, click=0.0, noise_ms=0.0, noise_hp=2000.0):
+    def exc_stream(hits, width_lo, width_hi, click=0.0, noise_ms=0.0, noise_hp=2000.0, salt=0):
         e = np.zeros(total_n)
         for st, v in hits:
             i = int(st * sr)
@@ -122,7 +140,7 @@ def perform(notes, total_n, sr, bpm=120.0, lanes=None, kick_hz=58.0, snare_hz=19
             e[i:j] += p[:j - i]
             if noise_ms:
                 nn = int(noise_ms / 1000 * sr)
-                z = rng.standard_normal(nn) * np.exp(-np.arange(nn) / (nn / 4)) * a * click
+                z = _rng(seed, beat0, st, bpm, salt, 2).standard_normal(nn) * np.exp(-np.arange(nn) / (nn / 4)) * a * click
                 z = signal.lfilter(*signal.butter(1, noise_hp / (sr / 2), 'high'), z)
                 j = min(total_n, i + nn)
                 e[i:j] += z[:j - i]
@@ -143,7 +161,7 @@ def perform(notes, total_n, sr, bpm=120.0, lanes=None, kick_hz=58.0, snare_hz=19
     # ---- kick: membrane modes with a pitch drop, beater click, the front head's ring
     hits = by.get(36, [])
     if hits:
-        e = exc_stream(hits, 0.0015, 0.004, click=0.6, noise_ms=4, noise_hp=1500)
+        e = exc_stream(hits, 0.0015, 0.004, click=0.6, noise_ms=4, noise_hp=1500, salt=36)
         fr = kick_hz * np.array([1.0, 1.52, 1.98, 2.44, 2.9])
         y = _bank(e, fr, np.array([0.42, 0.22, 0.15, 0.1, 0.07]), np.array([1.0, 0.45, 0.3, 0.2, 0.12]),
                   one, glide_stream(hits, 0.55, 0.012), float(sr))
@@ -157,7 +175,7 @@ def perform(notes, total_n, sr, bpm=120.0, lanes=None, kick_hz=58.0, snare_hz=19
         hits = by.get(pitch, [])
         if not hits:
             continue
-        e = exc_stream(hits, 0.0008, 0.003, click=0.3, noise_ms=3, noise_hp=2500)
+        e = exc_stream(hits, 0.0008, 0.003, click=0.3, noise_ms=3, noise_hp=2500, salt=pitch)
         fr = f0 * MEMBRANE[:6]
         y = _bank(e, fr, np.array([0.7, 0.35, 0.25, 0.2, 0.15, 0.12]) * (130 / f0) ** 0.4,
                   np.array([1.0, 0.6, 0.45, 0.35, 0.25, 0.2]), one, glide_stream(hits, 0.12, 0.05), float(sr))
@@ -170,14 +188,14 @@ def perform(notes, total_n, sr, bpm=120.0, lanes=None, kick_hz=58.0, snare_hz=19
         [(s, v) for s, v in by.get(40, [])]
     if hits or buzz:
         hits.sort()
-        e = exc_stream(hits, 0.0004, 0.002, click=0.5, noise_ms=3, noise_hp=3000)
+        e = exc_stream(hits, 0.0004, 0.002, click=0.5, noise_ms=3, noise_hp=3000, salt=38)
         fr = snare_hz * MEMBRANE
         head = _bank(e, fr, np.array([0.28, 0.18, 0.14, 0.12, 0.1, 0.08, 0.07, 0.06]),
                      np.array([1.0, 0.8, 0.7, 0.55, 0.45, 0.4, 0.3, 0.25]), one,
                      glide_stream(hits, 0.05, 0.02), float(sr)) * 0.03
         drive = np.abs(head) + buzz * low_env
         env = signal.lfilter([1 - 0.9985], [1, -0.9985], drive)          # the wires follow the head
-        noise = rng.standard_normal(total_n)
+        noise = _wire_noise(seed, beat0, bpm, sr, total_n)
         wire = signal.lfilter(*signal.butter(2, [1800 / (sr / 2), 9000 / (sr / 2)], 'band'), noise) * env * 2.2 * wires
         # rimshots: a metallic crack
         rim = by.get(40, [])
@@ -200,8 +218,9 @@ def perform(notes, total_n, sr, bpm=120.0, lanes=None, kick_hz=58.0, snare_hz=19
         damp = signal.lfilter([0.02], [1, -0.98], damp)                 # the pedal moves in a few ms
         fr = _cymbal_modes(np.random.default_rng(13), 90, 700, 16500)
         t60 = hat_open_t60 * (fr / 3000.0) ** -0.35
-        g = (fr / 3000.0) ** (1.2 * cym_bright) * rng.uniform(0.4, 1.0, len(fr))
-        e = exc_stream([(s, v) for s, v, m in hh if m != 44], 0.00004, 0.0002, click=1.0, noise_ms=6, noise_hp=5000)
+        g = (fr / 3000.0) ** (1.2 * cym_bright) * np.random.default_rng([int(seed) & 0xFFFFFFFF, 7]).uniform(0.4, 1.0, len(fr))
+        e = exc_stream([(s, v) for s, v, m in hh if m != 44], 0.00004, 0.0002, click=1.0, noise_ms=6, noise_hp=5000,
+                       salt=42)
         e += exc_stream([(s, v * 0.6) for s, v, m in hh if m == 44], 0.001, 0.002)
         y = _bank(e, fr, t60, g, damp, one, float(sr)) * 0.02 * 0.18
         add(y, -0.45)
@@ -212,7 +231,7 @@ def perform(notes, total_n, sr, bpm=120.0, lanes=None, kick_hz=58.0, snare_hz=19
         fr = _cymbal_modes(np.random.default_rng(21), 120, 420, 16500)
         t60 = ride_t60 * (fr / 2000.0) ** -0.45
         g = (fr / 2000.0) ** (1.0 * cym_bright) * np.random.default_rng(22).uniform(0.3, 1.0, len(fr))
-        e = exc_stream(rd, 0.00005, 0.0003, click=0.6, noise_ms=4, noise_hp=4000)
+        e = exc_stream(rd, 0.00005, 0.0003, click=0.6, noise_ms=4, noise_hp=4000, salt=51)
         y = _bank(e, fr, t60, g, one, one, float(sr)) * 0.008 * 0.28
         bell = by.get(53, [])
         if bell:
@@ -229,7 +248,7 @@ def perform(notes, total_n, sr, bpm=120.0, lanes=None, kick_hz=58.0, snare_hz=19
         fr = _cymbal_modes(np.random.default_rng(sd), 120, 250, 17000)
         t60 = 2.4 * (fr / 2000.0) ** -0.3
         g = (fr / 2000.0) ** (1.0 * cym_bright) * np.random.default_rng(sd + 1).uniform(0.3, 1.0, len(fr))
-        e = exc_stream(hits, 0.0001, 0.0005, click=1.5, noise_ms=25, noise_hp=1500)
+        e = exc_stream(hits, 0.0001, 0.0005, click=1.5, noise_ms=25, noise_hp=1500, salt=pitch)
         y = _bank(e, fr, t60, g, one, one, float(sr)) * 0.006 * 0.32
         add(y, pan)
 
@@ -239,7 +258,8 @@ def perform(notes, total_n, sr, bpm=120.0, lanes=None, kick_hz=58.0, snare_hz=19
         hits = by.get(pitch, [])
         if not hits:
             continue
-        e = exc_stream(hits, 0.0012 - 0.0009 * slap, 0.004, click=0.4 + slap, noise_ms=5, noise_hp=1500 + 1500 * slap)
+        e = exc_stream(hits, 0.0012 - 0.0009 * slap, 0.004, click=0.4 + slap, noise_ms=5, noise_hp=1500 + 1500 * slap,
+                       salt=pitch)
         fr = f0 * np.array([1.0, 1.5, 1.98, 2.44, 2.9, 3.4])
         y = _bank(e, fr, t * np.array([1.0, 0.6, 0.45, 0.35, 0.25, 0.2]), np.array([1.0, 0.5, 0.35, 0.25, 0.2, 0.15]),
                   one, glide_stream(hits, 0.04, 0.03), float(sr)) * 0.02

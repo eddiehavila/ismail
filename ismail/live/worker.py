@@ -68,13 +68,16 @@ def _lane_curve(points, n):
     return np.interp(np.arange(n), t, v)
 
 
-def _perform(inst, notes, total, bpm, root, expr):
-    """A performer voice (module with perform(notes, total_n, sr, bpm, lanes, **params)) plays the whole event."""
+def _perform(inst, notes, total, bpm, root, expr, beat0=0.0):
+    """A performer voice (module with perform(notes, total_n, sr, bpm, lanes, **params)) plays the whole event.
+    beat0: the song beat at sample 0, for a voice that keys its randomness on it."""
     from .. import dsp, voices
     mod = voices.load(inst['voice'], root)
     lanes = {k: _lane_curve(p, total) for k, p in (expr or {}).items()}
-    y = np.asarray(mod.perform(notes, total, SR, bpm=bpm, lanes=lanes, **(inst.get('params') or {})),
-                   dtype=np.float64)
+    kw = dict(inst.get('params') or {})
+    if instruments.takes_beat0(mod.perform):
+        kw['beat0'] = beat0
+    y = np.asarray(mod.perform(notes, total, SR, bpm=bpm, lanes=lanes, **kw), dtype=np.float64)
     y = np.stack([y, y]) if y.ndim == 1 else y
     out = np.zeros((2, total))
     out[:, :min(total, y.shape[1])] = y[:, :total]
@@ -104,17 +107,23 @@ def _auto_curves(lanes, lead_s, total):
 def render_event(inst, notes, lead_s, bpm, root):
     """notes: [(start_s, midi, dur_s, vel)] relative to the event onset; lead_s: where the onset sits inside the
     bar (keeps drum noise seeds and bar-locked LFO phase as offline). Returns float32 (2, n) from the onset.
-    inst may carry '_bake' (studio effects run on this event), '_expr' (lanes for a performer voice) and '_tail'
-    (seconds rendered after the last note ends, MAX_TAIL_S if absent)."""
+    inst may carry '_bake' (studio effects run on this event), '_expr' (lanes for a performer voice), '_tail'
+    (seconds rendered after the last note ends, MAX_TAIL_S if absent), '_beat0' (the song beat at the onset, for
+    a performer) and '_chunk' (a slice of a performer's part: {'pre': seconds of earlier notes rendered as context
+    and dropped, 'len': seconds kept, 'xf': crossfade seconds, 'fade_in', 'cut'}; a cut chunk stops at len + xf,
+    fading out, because the next chunk plays what still rings)."""
     bake, expr, iauto = inst.get('_bake') or [], inst.get('_expr'), inst.get('_auto') or {}
     tail = float(inst.get('_tail', MAX_TAIL_S))
-    inst = {k: v for k, v in inst.items() if k not in ('_bake', '_expr', '_auto', '_whole', '_tail')}
+    beat0, chunk = float(inst.get('_beat0', 0.0)), inst.get('_chunk')
+    inst = {k: v for k, v in inst.items() if k not in ('_bake', '_expr', '_auto', '_whole', '_tail', '_beat0', '_chunk')}
     lead = int(round(lead_s * SR))
     span = max(s + d for s, _, d, _ in notes)
     total = lead + int((span + tail) * SR)
+    if chunk and chunk.get('cut'):
+        total = lead + int(round((chunk['pre'] + chunk['len'] + chunk['xf']) * SR))
     shifted = [(s + lead_s, m, d, v) for s, m, d, v in notes]
     if inst.get('performer'):
-        y = _perform(inst, shifted, total, bpm, root, expr)
+        y = _perform(inst, shifted, total, bpm, root, expr, beat0 - lead_s * bpm / 60.0)
     else:
         y = instruments.render_instrument(inst, shifted, total, _auto_curves(iauto, lead_s, total) or None, bpm,
                                           SR, root)
@@ -124,6 +133,17 @@ def render_event(inst, notes, lead_s, bpm, root):
         for i, f in enumerate(bake):
             y = studio_fx.apply_fx(y, f, ctx, i)
     y = y[:, lead:]
+    if chunk:
+        y = y[:, int(round(chunk['pre'] * SR)):].copy()
+        x = int(round(chunk['xf'] * SR))
+        if chunk.get('cut'):
+            y = y[:, :int(round((chunk['len'] + chunk['xf']) * SR))]
+            if x:
+                y[:, -x:] *= np.linspace(1.0, 0.0, x)
+        if chunk.get('fade_in') and x:
+            y[:, :x] *= np.linspace(0.0, 1.0, x)
+        if chunk.get('cut'):            # its length is the bar: the next chunk takes over at the line
+            return np.ascontiguousarray(y, dtype=np.float32)
     lvl = np.max(np.abs(y), axis=0)
     idx = np.nonzero(lvl > 1e-5)[0]
     y = y[:, :idx[-1] + 64] if len(idx) else y[:, :64]

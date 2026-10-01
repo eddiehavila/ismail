@@ -8,6 +8,8 @@ For acoustic and electric instruments (guitar, strings, piano, brass, voice, cro
 
 `voices_list` first: a built-in voice (grand_piano, growl, sfx ...) may already be the sound you need, and `voice_help(name)` shows what its velocity does. When you engineer an instrument as code that the song will reuse, write it as a voice module in `<project>/voices/<name>.py` (a `voice(freq, t, vel, gate, sr)` function plus an `INFO` dict), not as a `code` string in the track: the project stays portable, edits re-render automatically, and the voice can later move into the library. Never paste absolute paths or `sys.path` hacks into a `code` instrument.
 
+A **performer** voice plays a whole part: `perform(notes, total_n, sr, bpm=120, lanes=None, beat0=0.0, **params)` and no `voice()`. Take `beat0` (the song beat at sample 0) and draw each note's randomness (humanize, pick, drift, noise) from a generator keyed on the note's song beat and pitch, as `voices/guitar/electric.py` `_rng` does, never from one generator drawn note after note: a render of any slice of the part (a bar range, the live engine's bar chunks) then plays exactly as the whole part does. Noise that runs under the whole part (a snare's wires) is drawn per block of the song's own timeline (`kit70._wire_noise`).
+
 ## Gain staging
 
 One synth voice peaks near -9 dBFS and one drum hit near -6 dBFS at full velocity, so faders at 0 dB are a sane start. Chords of 4 notes with unison add up: pads usually sit at -8 to -12 dB. Check `render` output: every track peak under 0 dBFS, master limiter gain reduction under ~6 dB. A limiter pulling 10+ dB means your faders are too hot; turn tracks down, not the limiter.

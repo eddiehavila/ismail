@@ -31,7 +31,16 @@ def test_a_track_whose_amp_only_hisses_goes_dormant(tmp_path):
     e = Engine(str(tmp_path), bpm=120, bpb=4, workers=0, device='none')
     e.cmd_track('g', instrument='preset:pluck', fx=[{'type': 'amp', 'hiss_db': -75, 'hum_db': -82}, {'type': 'cab'}])
     assert e.tracks['g']['path'].chain.noise > 0
+    from ismail.live.engine import DORMANT_NOISY_S
     for _ in range(int(2.0 * SR / BLOCK)):
         e.tick()
         e.mix_block()
-    assert e.tracks['g']['quiet'] > 0              # no notes and only its own hiss: asleep, costs nothing
+    assert e.tracks['g']['quiet'] > 0              # only its own hiss counts as quiet
+    assert e.tracks['g']['ms'] > 0                 # but it keeps hissing through a rest, as in the studio
+    for _ in range(int(DORMANT_NOISY_S * SR / BLOCK)):
+        e.tick()
+        e.mix_block()
+    lvl = e.tracks['g']['ms']
+    e.tick()
+    e.mix_block()
+    assert e.tracks['g']['ms'] < lvl               # then it sleeps: costs nothing, its level decays

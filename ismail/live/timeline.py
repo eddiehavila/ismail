@@ -29,6 +29,8 @@ class Clip:
         self.at = at
         self.cut = None                  # beat where a later clip or stop takes over
         self.expr = None                 # {lane: [(beat_in_clip, value)]} for performer voices (bend, vib, ...)
+        self.beat0 = 0.0                 # the song beat of the clip's beat 0 (a deck's window start), for performers
+        self.context = []                # [(beat < 0, midi, dur, vel)]: what a performer played before the clip
 
     @property
     def natural_end(self):
@@ -179,7 +181,7 @@ class Timeline:
         k0 = max(0, int(math.floor((lo - clip.start) / clip.length)))
         k1 = int(math.ceil((hi - clip.start) / clip.length))
         if getattr(clip, '_ons_for', None) is not groups:     # groups are in onset order
-            clip._ons = [clip.notes[g[0]][0] for g in groups]
+            clip._ons = [g.on if hasattr(g, 'on') else clip.notes[g[0]][0] for g in groups]
             clip._ons_for = groups
         ons = clip._ons
         for k in range(k0, k1 + 1):

@@ -195,12 +195,20 @@ def _pick(L, vel, bright, pluck, rng, sr, strength=1.0, click_lvl=0.3, pick_ms=0
     return e * vel * strength
 
 
+def _rng(seed, beat0, t, bpm, salt, extra=0):
+    """A generator for one note: keyed on the seed, where the note sits in the song (beat0 = the song beat at
+    sample 0, t = seconds from there) and a salt, never on how many notes came before it in this render."""
+    tick = int(round((beat0 + t * bpm / 60.0) * 960)) + (1 << 40)
+    return np.random.default_rng([int(seed) & 0xFFFFFFFF, tick, int(salt) & 0xFFFF, int(extra) & 0xFFFF])
+
+
 def perform(notes, total_n, sr, bpm=120.0, lanes=None, kind='strat', mode='poly', seed=1, humanize_ms=4.0,
-            **params):
+            beat0=0.0, **params):
+    """beat0: the song beat at sample 0. Each note's randomness is keyed on where it sits in the song, so a slice
+    of the part (the live engine renders bar by bar) plays exactly as it does in the whole part."""
     P = dict(KINDS[kind])
     P.update({k: v for k, v in params.items() if v is not None})
     lanes = lanes or {}
-    rng = np.random.default_rng(int(seed))
     tuning = list(P['tuning'])
     out = np.zeros(total_n)
 
@@ -252,7 +260,7 @@ def perform(notes, total_n, sr, bpm=120.0, lanes=None, kind='strat', mode='poly'
                         s = c
                         break
                 used.add(s)
-                st2 = st + rank * P['strum_ms'] / 1000.0 * (0.8 + 0.4 * rng.random())
+                st2 = st + rank * P['strum_ms'] / 1000.0 * (0.8 + 0.4 * _rng(seed, beat0, st, bpm, m, 1).random())
                 ci = last_chain_on.get(s)
                 if ci is not None:
                     pst, pm, pd, pv = chains[ci][-1]
@@ -279,6 +287,7 @@ def perform(notes, total_n, sr, bpm=120.0, lanes=None, kind='strat', mode='poly'
     pickups = np.array(P['pickup'], dtype=np.float64)
     for k, ch in enumerate(chains):
         st0 = ch[0][0]
+        rng = _rng(seed, beat0, st0, bpm, ch[0][1], 2)
         jitter = rng.normal(0, humanize_ms / 1000.0)
         st0 = max(0.0, st0 + jitter)
         end = ch[-1][0] + ch[-1][2] + jitter

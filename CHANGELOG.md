@@ -69,6 +69,19 @@
 - Studio rig changes so a live twin can be exact (all inaudible): amp and tape hiss draw one noise stream per
   channel (a different noise, same level); tape wow is a causal running delay (the output sits 14 samples later);
   auto-wah follows its recent peak instead of the whole part's 98th percentile (within 0.1 dB).
+- Performer voices play live in bar chunks: each bar renders with the second of the part before it as context
+  (held notes from their real start), cut and crossfaded at the bar line; a looping clip takes context from its
+  previous pass, a deck's section from the 8 beats before its window (a held note is no longer struck again on the
+  window's first beat). Crossroads on a deck against the studio: envelope correlation 0.999-1.000 and bands
+  within 0.5 dB on bass, rhythm, lead and drums (0.96-0.99 before; the lead lost 21 dB at 125 Hz at the window
+  edge). kit70 renders at 5x realtime instead of 0.5x (no 8 s tail per hit).
+- `electric` and `kit70` key their randomness per note on the song beat (`perform(..., beat0=)`), so any slice of
+  a part, a studio bar range included, plays exactly as the whole part. One generator drawn note after note gave
+  every slice a different performance (a kit's hi-hat changed timbre with the number of notes). Studio renders of
+  songs using them get a new realization of the same humanization. `skills/.../sound-design.md` says how to write
+  a performer this way.
+- Deck notes keep 10 significant digits (6 rounded long sections' timing).
+- A track whose amp or tape hisses keeps hissing through rests up to 8 s before it sleeps, as in the studio.
 - The live mixer keeps every effect's state out of denormal floats (a fuzz left in silence decayed into them and
   took a guitar chain to 100% of real time), and a track whose amp only hisses goes dormant like a silent one.
 
