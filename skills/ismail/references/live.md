@@ -170,10 +170,13 @@ songs/<slug>/
 A code voice renders one note at a time, so legato, slides and bends between notes need another shape.
 
 **Performer voices.** A voice module with `perform(notes, total_n, sr, bpm, lanes, **params)` and no `voice()`
-plays a whole part (a guitar with hammer-ons and slides, strings that ring on). `live_track` detects it, and live
-renders each group of overlapping notes as one event, so legato and slides work. Bends and vibrato come from the
-clip's `expr` lanes, `{"bend": [[beat, semitones], ...], "vib": [[beat, cents], ...]}` with beats from the clip
-start; the voice's INFO lists its lanes.
+plays a whole part (a guitar with hammer-ons and slides, strings that ring on, a kit that resonates). `live_track`
+detects it, and live renders it a bar at a time, each bar with the second of the part before it as context, cut and
+crossfaded at the bar line, so legato, slides and ringing strings carry across bars; a looping clip takes its
+context from the previous pass, and a deck's section from the 8 beats before its window. A voice that keys its
+variation on the song beat (`electric`, `kit70`) plays live as in the studio render, sample for sample. Bends and
+vibrato come from the clip's `expr` lanes, `{"bend": [[beat, semitones], ...], "vib": [[beat, cents], ...]}` with
+beats from the clip start; the voice's INFO lists its lanes.
 
 **Phrase voices** are the older trick for a performer that is not written that way: make **one note = one whole
 phrase**. The voice takes a `phrases` param, `{"<velocity>": {"notes": [...], "bend":

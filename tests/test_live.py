@@ -426,7 +426,7 @@ def test_performer_plays_phrases_with_expression(eng, tmp_path):
     out = eng.cmd_queue([{'track': 'g', 'notes': '0 A4 1.5; 1 A4 1', 'loop': 1,
                           'expr': {'bend': [[0, 0], [1.0, 0], [1.01, 12]]}}])
     cid = out.split()[0]
-    assert eng.meta[cid]['groups'] == [[0, 1]]              # overlapping notes = one phrase event
+    assert [(g.on, g.end) for g in eng.meta[cid]['groups']] == [(0, 4)]   # a performer renders in bar chunks
     run(eng, 4.0)
     a = eng.air[0, int(2.1 * SR):int(2.4 * SR)]            # before the bend: 440 Hz
     b = eng.air[0, int(2.6 * SR):int(2.9 * SR)]            # after: an octave up
