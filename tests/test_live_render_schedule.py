@@ -81,3 +81,27 @@ def test_a_deck_loaded_on_air_waits_off_air_for_its_renders(tmp_path):
     run(e, 2.0)
     assert not e.decks['A'].cue and e.decks['A'].held is None
     assert any('on air from bar 3' in n for n in e.drain_news())
+
+
+def test_a_big_queue_is_placed_over_several_passes_each_event_once(tmp_path):
+    from ismail.live.engine import TICK_EVENTS
+    e = Engine(str(tmp_path), bpm=120, bpb=4, workers=0, device='none')
+    e.cmd_track('p', instrument='preset:pluck')
+    # 600 events in threes: 128 per pass would cut inside a chord, so the cut moves back to the chord's start
+    notes = '; '.join(f"{k * 0.25:g} C4 0.1; {k * 0.25:g} E4 0.1; {k * 0.25:g} G4 0.1" for k in range(200))
+    passes = []
+    orig = e._place
+
+    def place(cid, track, on, y):
+        passes[-1].append(on)
+        return orig(cid, track, on, y)
+    e._place = place
+    passes.append([])
+    e.cmd_queue([{'track': 'p', 'notes': notes, 'beats': 50, 'loop': 1, 'at': 'bar:2'}])
+    for _ in range(8):
+        passes.append([])
+        e.tick()
+    sizes = [len(p) for p in passes if p]
+    assert max(sizes) <= TICK_EVENTS and len(sizes) >= 3            # spread over passes, none over the cap
+    placed = sorted(on for p in passes for on in p)
+    assert len(placed) == 600 and all(placed.count(on) == 3 for on in set(placed))   # each event once

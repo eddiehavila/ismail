@@ -82,6 +82,11 @@
   a performer this way.
 - Deck notes keep 10 significant digits (6 rounded long sections' timing).
 - A track whose amp or tape hisses keeps hissing through rests up to 8 s before it sleeps, as in the studio.
+- A big `live_queue` no longer stalls the mixer: the batch's render estimates and event groups are planned before
+  the engine lock is taken, the scheduler places at most 128 events per pass (earliest first), everything alive at
+  engine start is frozen out of the garbage collector's full sweeps, and the GIL switch interval is 1 ms. An
+  8000-note queue: the mixer's longest wait for the lock 256 ms -> under 25 ms, collector pauses 133 ms -> 20 ms,
+  mixer peak about 1000% -> 130-180% of real time.
 - The live mixer keeps every effect's state out of denormal floats (a fuzz left in silence decayed into them and
   took a guitar chain to 100% of real time), and a track whose amp only hisses goes dormant like a silent one.
 

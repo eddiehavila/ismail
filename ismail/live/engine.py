@@ -10,13 +10,16 @@ Normally started by the live_start op, which also writes <project>/live/engine.j
 import argparse
 import collections
 import copy
+import gc
 import heapq
 import json
 import math
 import os
+import sys
 import threading
 import time
 import traceback
+import types
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import numpy as np
@@ -47,6 +50,7 @@ CHUNK_PRE_S = 1.0       # a performer's bar chunk renders this much of the part 
 CHUNK_XF_S = 0.01       # chunks crossfade at the bar line
 CHUNK_LOOK_S = 0.05     # and render the notes just after it: a pick's scrape or a pushed note sounds before its beat
 CHUNK_REACH_S = 8.0     # a note held across a bar line from longer ago keeps the bars it spans in one chunk
+TICK_EVENTS = 128       # events placed per scheduler pass at most, earliest first: a big queue spreads over passes
 WARM_TAIL_S = 0.25      # a warm-up pays first-use costs; rendering the full tail through a rig only delays real renders
 MARGIN_S = 0.5          # render estimate safety margin (quantized launches make this inaudible)
 DEFAULT_RATE = {'mimic': 0.6, 'code': 0.1, 'synth': 0.15, 'sampler': 0.05}   # render s per audio s, until measured
@@ -388,7 +392,17 @@ class Engine:
                 for k, ei, on in self.tl.events(c, b0, h, m['groups']):
                     todo.append((on, c, ei, k))
                 m['placed'] = h
-            for on, c, ei, k in sorted(todo, key=lambda x: x[0]):     # render in the order they will sound
+            todo.sort(key=lambda x: x[0])
+            if len(todo) > TICK_EVENTS:
+                # a big batch spreads over passes (20 ms apart): each clip resumes at its first event not placed.
+                # The cut falls between onsets, so the next pass never yields an event this one placed.
+                cut = todo[TICK_EVENTS][0]
+                n = sum(1 for x in todo if x[0] < cut - EPS) or sum(1 for x in todo if x[0] <= cut + EPS)
+                for on, c, _, _ in todo[n:]:
+                    m = self.meta[c.id]
+                    m['placed'] = min(m['placed'], on)
+                todo = todo[:n]
+            for on, c, ei, k in todo:     # render in the order they will sound
                 tp = self._transpose(c.track, on)
                 key = (c.id, ei, tp) + self._variant(c, ei, k)
                 have = self.cache.get(key)
@@ -736,6 +750,13 @@ class Engine:
         return time.time() - t0
 
     def start(self):
+        # everything alive now (imports, compiled kernels, the engine) leaves the collector's view: a full collection
+        # scanned ~170k objects and stopped every thread, the mixer's included, for ~100 ms after a big queue
+        gc.collect()
+        gc.freeze()
+        # the mixer's numpy calls each take the GIL back; while another thread runs Python (a big queue being
+        # parsed) each could wait out the default 5 ms switch interval
+        sys.setswitchinterval(0.001)
         threads = [self._schedule_loop, self._mix_loop]
         if self.n_workers:
             threads.append(self._collect)
@@ -1561,13 +1582,15 @@ class Engine:
             return tr['est']
         return DEFAULT_RATE.get(tr['inst'].get('type'), DRUM_RATE)
 
-    def _lead_beats(self, track, events, extra_s=0.0):
+    def _lead_beats(self, track, events, extra_s=0.0, queued=None):
         """Beats a new clip on `track` must start after now so that each event ((onset, dur) in beats from the clip
         start, sorted) is rendered before it sounds; events render in onset order across the workers, behind the
-        render seconds already queued (extra_s: earlier clips of the same batch)."""
+        render seconds already queued (extra_s: earlier clips of the same batch; queued: the jobs' sum, if known)."""
         tr = self.tracks[track]
         w = max(1, self.n_workers)
-        queued = sum(j['est_s'] for j in self.jobs.values()) + extra_s     # warm-ups occupy workers too
+        if queued is None:
+            queued = sum(j['est_s'] for j in self.jobs.values())                 # warm-ups occupy workers too
+        queued += extra_s
         warm = 1.0 if tr['warming'] else 0.0                                # compile time not in est_s
         need, acc = 0.0, 0.0
         for on, d in events[:64]:
@@ -1662,8 +1685,21 @@ class Engine:
         parsed = [self._parse_clip(i, it) + (it.get('at') or 'next_bar', float(it.get('beat0') or 0.0),
                                              [tuple(float(x) for x in n) for n in it.get('context') or []])
                   for i, it in enumerate(clips)]
+        # the slow part of planning a batch (render estimates, event groups) runs before the engine lock is taken:
+        # the mixer takes that lock every block, and a 4000-note batch once held it for 150 ms
+        plans = []
+        for track, notes, length, loop, expr, at, beat0, context in parsed:
+            inst = self.tracks[track]['inst']
+            if not notes:
+                plans.append(([], [], None))
+                continue
+            evs = self._events_of(notes, inst)
+            shape = types.SimpleNamespace(notes=sorted(notes), length=length,
+                                          context=[n for n in context if n[0] < 0])
+            plans.append((evs, [self._event_s(track, d) for _, d in evs if d is not None], self._groups(shape, inst)))
         with self.lock:
             now = self.beat(self.pos)
+            queued = sum(j['est_s'] for j in self.jobs.values())
             tl = self.tl.copy()
             claims, lines, added = [], [], []
             extra = 0.0                      # render seconds of earlier clips in this batch
@@ -1678,10 +1714,9 @@ class Engine:
                         raise LiveError(f"clip [{i}] at={at!r}: item [{k}] is not an earlier clip of this batch "
                                         f"(stops have no end). Nothing was queued.")
                     at = 'after:' + batch_ids[k]
-                inst = self.tracks[track]['inst']
-                evs = self._events_of(notes, inst) if notes else []
-                ready = now + self._lead_beats(track, evs, extra)
-                extra += sum(self._event_s(track, d) for _, d in evs if d is not None)
+                evs, costs, _ = plans[i]
+                ready = now + self._lead_beats(track, evs, extra, queued)
+                extra += sum(costs)
                 try:
                     beat, note = tl.resolve_at(at, now, ready if notes else now)
                 except QueueError as e:
@@ -1699,6 +1734,7 @@ class Engine:
                                  + (f"\n  note: {note}" if note else ''))
                     continue
                 c = tl.add(track, notes, length, loop, beat, at)
+                c._groups = plans[i][2]
                 c.expr = expr
                 c.beat0 = beat0
                 c.context = [(s, int(m), d, int(v)) for s, m, d, v in context if s < 0]
@@ -1715,7 +1751,9 @@ class Engine:
                     if s.cid in ids and s.on >= beat - EPS:
                         s.dead = True
             for c in added:
-                self.meta[c.id] = {'groups': self._groups(c, self.tracks[c.track]['inst']), 'placed': None}
+                g = c.__dict__.pop('_groups', None)
+                self.meta[c.id] = {'groups': g if g is not None else self._groups(c, self.tracks[c.track]['inst']),
+                                   'placed': None}
             for cid in list(self.meta):
                 if cid not in self.tl.clips:
                     self.meta.pop(cid)
