@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="12 22 196 150" width="392" height="300"><title>ismail</title><desc>Four automaton musicians on a boat, after al-Jazari (1206).</desc><style>.k{fill:#1F2A44}.b{fill:#B8862B}.s{fill:#3E8A8A}</style>
+<rect class="k" x="41" y="68" width="14" height="32" rx="3"/><circle class="k" cx="48" cy="56" r="8"/>
+<rect class="k" x="77" y="46" width="14" height="54" rx="3"/><circle class="k" cx="84" cy="34" r="8"/>
+<rect class="k" x="113" y="74" width="14" height="26" rx="3"/><circle class="k" cx="120" cy="62" r="8"/>
+<rect class="k" x="149" y="58" width="14" height="42" rx="3"/><circle class="k" cx="156" cy="46" r="8"/>
+<circle class="b" cx="40" cy="84" r="9"/>
+<path class="b" d="M90.5 38.5 L93.5 36.5 L108 57 L105 59 Z"/>
+<path class="b" d="M130 98 L130 70 Q143 76 146 98 Z"/>
+<path class="b" d="M151 82 L173 82 C173 92 168 98 162 98 C156 98 151 92 151 82 Z"/>
+<path class="b" d="M16 90 C20 96 24 100 32 100 L168 100 C177 100 182 93 185 84 C188 75 195 70 200 74 C203 77 201 83 196 83 C198 80 196 77 193 79 C189 82 191 96 181 110 C170 124 144 131 100 131 C58 131 34 123 25 109 C21 103 18 97 16 90 Z"/>
+<rect class="b" x="191" y="47" width="10" height="10"/><path class="b" d="M196 44.9 L203.1 52 L196 59.1 L188.9 52 Z"/>
+<path class="s" d="M22 146 C36 138 48 138 60 144 C72 150 84 150 96 144 C108 138 120 138 132 144 C144 150 156 150 170 143 L174 146 C160 153 148 153 136 147 C124 141 112 141 100 147 C88 153 76 153 64 147 C52 141 40 141 26 149 Z"/>
+<path class="s" opacity=".55" d="M52 162 C64 155 76 155 88 160 C100 165 112 165 124 160 C136 155 146 155 156 159 L160 162 C150 158 140 158 128 163 C116 168 104 168 92 163 C80 158 68 158 56 165 Z"/>
+</svg>
