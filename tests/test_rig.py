@@ -69,18 +69,24 @@ def test_wah_position_automation_moves_the_tone(proj):
     assert centroid(sweep[half:]) > centroid(sweep[:half])
 
 
-def test_live_startup_warmup_skips_studio_only_effects():
-    # the rig types are registered in FX_DEFAULTS but have no live block: the warm-up at engine start crashed on them
+def test_live_startup_warmup_skips_studio_only_effects(monkeypatch):
+    # an effect type in FX_DEFAULTS with no live block (the rig was one): the warm-up at engine start crashed on it
     from ismail.live import fx_blocks
     from ismail.live.engine import warm_effects
-    assert any(t not in fx_blocks.PROCS for t in rig.DEFAULTS)
+    warm_effects()
+    monkeypatch.delitem(fx_blocks.PROCS, 'tape')
     warm_effects()
 
 
-def test_live_bakes_rig_effects(tmp_path):
+def test_live_runs_rig_effects_and_still_bakes_a_studio_only_one(tmp_path, monkeypatch):
+    from ismail.live import fx_blocks
     from ismail.live.engine import Engine
     eng = Engine(str(tmp_path), bpm=120, bpb=4, workers=0, device='none')
     out = eng.cmd_track('g', instrument={'type': 'synth', 'oscs': [{'wave': 'saw'}]},
                         fx=[{'type': 'fuzz'}, {'type': 'amp'}, {'type': 'cab'}])
     assert out.startswith('g: new track')
-    assert 'baked' in eng.tracks['g']['path'].chain.describe() or eng.tracks['g'].get('bake')
+    assert 'baked' not in eng.tracks['g']['path'].chain.describe()
+    monkeypatch.delitem(fx_blocks.PROCS, 'amp')                     # as if amp had no live twin
+    eng.cmd_track('h', instrument={'type': 'synth', 'oscs': [{'wave': 'saw'}]},
+                  fx=[{'type': 'fuzz'}, {'type': 'amp'}, {'type': 'cab'}])
+    assert 'baked' in eng.tracks['h']['path'].chain.describe()

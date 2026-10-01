@@ -88,6 +88,20 @@ CASES = [
     {'type': 'limiter', 'gain_db': 12, 'ceiling_db': -1},
     {'type': 'formant', 'vowel': 'a'},
     {'type': 'vocoder', 'modulator': 'k', 'bands': 12},
+    {'type': 'fuzz'},
+    {'type': 'fuzz', 'silicon': False, 'input_db': -6, 'tone_hz': 4000, 'mix': 0.7},
+    {'type': 'univibe'},
+    {'type': 'univibe', 'mode': 'vibrato', 'rate_hz': 6.0},
+    {'type': 'amp'},
+    {'type': 'amp', 'gain': 2.0, 'presence': 8, 'hiss_db': -75, 'hum_db': -82},
+    {'type': 'cab'},
+    {'type': 'cab', 'mic': 0.7},
+    {'type': 'rotary'},
+    {'type': 'rotary', 'speed': 1.0, 'drive': 0.4},
+    {'type': 'tape'},
+    {'type': 'tape', 'wow': 0.0, 'flutter': 0.0, 'drive': 0.8},
+    {'type': 'wah', 'pos': 0.3},
+    {'type': 'wah', 'auto': 0.6},
 ]
 
 

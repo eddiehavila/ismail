@@ -12,7 +12,10 @@ from test_fx_blocks import BPM, CASES, N, signal_pair
 LOOSE = {'hall': 1e-6,                  # FFT partitioned convolution vs one FFT: rounding
          'distortion:asym': None,       # live uses a 10 Hz DC blocker; studio subtracts the whole-window mean
          }
-WARMUP = {'distortion': 300}            # oversampling filters differ at the window edges only: compare inside
+# oversampling filters differ at the window edges only (the studio's zero-phase resampler drops the filter's
+# pre-ringing before t=0, the causal live one plays it): compare inside. fuzz and amp have state after their
+# nonlinear stage (bias tracking, supply sag) that carries that edge for a few hundred ms, then match to 1e-13
+WARMUP = {'distortion': 300, 'fuzz': 12000, 'amp': 18000}
 
 
 class Ctx:
