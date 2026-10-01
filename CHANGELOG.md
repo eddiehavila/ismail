@@ -43,6 +43,24 @@
 - Fix: the live engine crashed at startup since the rig effects were registered (its effect warm-up tried to
   build a live block for studio-only types); it now skips them, and they bake in the workers as before.
 
+### Live and studio parity
+
+- Fix: a note still sounding when a window starts (a drone, a pad, a held string) now plays in a studio render of
+  a bar range and on a deck loaded with `bars`; both dropped it, and the deck said "silent in range". A note that
+  rings on at least a beat into the window comes in on its first beat.
+- A deck loaded straight on air is held off air until a whole bar of it is rendered, then goes on air on that bar
+  line; it used to go on air with nothing rendered and lose its first bars in silence. `live_status` shows the
+  hold, and the next reply says when it slipped and when it went on air.
+- Renders go to the workers earliest-needed first, from an engine-side list, and a render no queued clip wants any
+  more is dropped before a worker spends time on it. A clip queued for later renders its first pass from the
+  moment it is queued, so loading ahead buys render time.
+- Notes that never sounded because their render came back too late are counted (`live_status`: "never sounded")
+  and said per track in the next reply; the late counter used to read 0 while bars played silent.
+- Warm-ups render a short tail: each one had rendered 8 s through the track's baked rig on every worker, ahead of
+  every real render, and a 23-track deck spent half a minute warming up.
+- Fix: a deck's cue flips (`live_deck(cue=...)`, a transition's on-air) now land on the bar line the listener
+  hears; they came about 90 ms early.
+
 ## 0.2.0 (2026-09-30)
 
 ### Live

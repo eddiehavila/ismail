@@ -37,9 +37,12 @@ QUIET = 1e-6            # a path whose input stops and whose output stays below 
 DORMANT_S = 0.5
 AHEAD_S = 0.5           # finished audio kept ahead of the device
 HORIZON_S = 8.0         # how far ahead events are sent to render (slow voices need the head start)
+PRELOAD_S = 60.0        # a clip queued for later renders up to this much of its first pass from the moment it is queued
+FEED_PER_WORKER = 2     # render jobs handed to each worker at a time; the rest wait in the engine, earliest-needed first
 AIR_S = 120.0           # output history kept for live_listen
 HOLD_S = 10             # live_status also shows each track's loudest level over this many seconds
 STALL_S = 2.0           # the device asking for no audio this long = a stalled output (Bluetooth sleep, a busy device)
+WARM_TAIL_S = 0.25      # a warm-up pays first-use costs; rendering the full tail through a rig only delays real renders
 MARGIN_S = 0.5          # render estimate safety margin (quantized launches make this inaudible)
 DEFAULT_RATE = {'mimic': 0.6, 'code': 0.1, 'synth': 0.15, 'sampler': 0.05}   # render s per audio s, until measured
 DRUM_RATE = 0.03
@@ -131,8 +134,11 @@ class Engine:
         self._jid = 0
         self._procs = []
         self._fifo = collections.deque()
+        self._backlog = []              # heap of (sample the notes are needed at, seq, job id, payload) not yet sent
+        self._inflight = 0              # render jobs handed to the shared worker queue and not back yet
         self.last_pull = None           # wall time the device last asked for audio
         self.news = collections.deque(maxlen=20)    # problems found between calls: the next reply of any op says them
+        self._lost_since = {}           # track -> beats of notes whose render came back after they had passed
         self._fifo_n = 0
         self._fifo_lock = threading.Lock()
         self._head = 0
@@ -160,7 +166,8 @@ class Engine:
         return int(round(beat * self.spb * SR))
 
     # ------------------------------------------------------------------ rendering
-    def _submit(self, key, track, notes_s, lead_s, warm=False, expr=None, iauto=None):
+    def _submit(self, key, track, notes_s, lead_s, warm=False, expr=None, iauto=None, need=0):
+        """need: the sample where the first of these notes must sound (renders go out earliest-needed first)."""
         tr = self.tracks[track]
         inst = self._job_inst(tr, expr, iauto)
         self._jid += 1
@@ -177,7 +184,28 @@ class Engine:
                 y, err = None, f"{type(e).__name__}: {e}"
             self._result(jid, None if err else y, time.time() - t0, err)
             return
-        self._shared.put((jid, inst, notes_s, lead_s, self.bpm, tr['root'] or self.root))
+        self.seq += 1
+        heapq.heappush(self._backlog, (int(need), self.seq, jid, (jid, inst, notes_s, lead_s, self.bpm,
+                                                                   tr['root'] or self.root)))
+        self._feed()
+
+    def _feed(self):
+        """Hand the workers the earliest-needed renders, a few at a time. A render whose notes no queued clip wants
+        any more (cancelled, replaced, ended) is dropped here, so old clips cannot clog the workers."""
+        while self._backlog and self._inflight < FEED_PER_WORKER * max(1, self.n_workers):
+            _, _, jid, payload = heapq.heappop(self._backlog)
+            job = self.jobs.get(jid)
+            if job is None:
+                continue
+            if not job['warm'] and not any(k[0] in self.tl.clips for k in self.rwait.get(job['key'], [])):
+                self.jobs.pop(jid, None)
+                self.renders.pop(job['key'], None)
+                self.rwait.pop(job['key'], None)
+                self.stats['skipped'] += 1
+                continue
+            job['sent'] = True
+            self._inflight += 1
+            self._shared.put(payload)
 
     def _warm(self, track):
         """A short throwaway note on every worker (first-use compilation happens off the air), then one 1 s note
@@ -192,12 +220,13 @@ class Engine:
             self._submit(('warm', track), track, full, 0.0, warm=True)
             return
         tr['warming'] += self.n_workers + 1
+        winst = dict(inst, _tail=WARM_TAIL_S)
         for i in range(self.n_workers):
             self._jid += 1
             self.jobs[self._jid] = {'key': ('warm', track), 'track': track, 'warm': True, 'wi': i, 'gen': tr['gen'],
-                                    'audio_s': 0.1 + _tail_s(inst), 'est_s': guess * (0.1 + _tail_s(inst))}
+                                    'audio_s': 0.1 + WARM_TAIL_S, 'est_s': guess * (0.1 + WARM_TAIL_S)}
             self._procs[i]['out'] += 1
-            self._tasks[i].put((self._jid, inst, short, 0.0, self.bpm, tr['root'] or self.root))
+            self._tasks[i].put((self._jid, winst, short, 0.0, self.bpm, tr['root'] or self.root))
         self._submit(('warm', track), track, full, 0.0, warm='measure')
 
     def _result(self, jid, y, secs, err):
@@ -208,6 +237,9 @@ class Engine:
             key, track, warm = job['key'], job['track'], job['warm']
             if job['wi'] is not None:
                 self._procs[job['wi']]['out'] -= 1
+            if job.get('sent'):
+                self._inflight -= 1
+                self._feed()
             tr = self.tracks.get(track)
             if tr is None or job['gen'] != tr['gen']:      # rendered with an instrument the track no longer has
                 if not warm:
@@ -279,6 +311,8 @@ class Engine:
             self.stats['late'] += 1
             self.last_late = f"{track} {fmt_bar(on, self.bpb)} by {(self.pos - start) / SR * 1000:.0f} ms"
             if start + y.shape[1] <= self.pos:
+                self.stats['lost'] += 1
+                self._lost_since.setdefault(track, []).append(on)
                 return
         self.seq += 1
         heapq.heappush(self.pending, (start, self.seq, Seg(start, y, track, cid, on)))
@@ -288,18 +322,30 @@ class Engine:
         with self.lock:
             now = self.beat(self.pos)
             horizon = self.beat(self.pos + int(HORIZON_S * SR))
-            gone = set(self.tl.clips)
+            gone = {c.id: c.track for c in self.tl.clips.values()}
             self.tl.prune(now)
-            gone -= set(self.tl.clips)
-            for cid in gone:
+            gone = {cid: t for cid, t in gone.items() if cid not in self.tl.clips}
+            for cid, track in gone.items():
                 self.meta.pop(cid, None)
+                lost = []
                 for key in [k for k in self.cache if k[0] == cid]:
+                    lost += self.waiting.pop(key, [])
                     del self.cache[key]
+                if lost:
+                    # the clip ended before these notes' renders came back: they never sounded
+                    self.stats['late'] += len(lost)
+                    self.stats['lost'] += len(lost)
+                    self.last_late = f"{track} from {fmt_bar(min(lost), self.bpb)}: never rendered in time"
+                    self.news.append(self._lost_line(track, lost))
             todo = []
             for c in list(self.tl.clips.values()):
                 m = self.meta[c.id]
                 b0 = m['placed'] if m['placed'] is not None else c.start
                 h = horizon
+                if c.start > now + EPS:
+                    # queued for later: render its first pass now, so loading ahead buys render time
+                    h = max(h, min(c.start + c.length, c.start + PRELOAD_S / self.spb,
+                                   c.end if c.end is not None else c.start + c.length))
                 tr = self.tracks.get(c.track)
                 if tr and tr['inst'] and tr['inst'].get('_whole'):
                     # a whole-section event can be minutes of audio: send it one pass ahead, not HORIZON_S ahead
@@ -342,7 +388,43 @@ class Engine:
                         else:
                             self.renders[ck] = 'pending'
                             self.rwait[ck] = [key]
-                            self._submit(ck, c.track, notes_s, lead, expr=expr, iauto=iauto)
+                            self._submit(ck, c.track, notes_s, lead, expr=expr, iauto=iauto, need=self.sample(on))
+            self._feed()
+            for dn, dk in self.decks.items():
+                if dk.held:
+                    self._release(dn, dk, now)
+
+    def _unrendered(self, deck, b0, b1):
+        """Tracks of `deck` with events in [b0, b1) still waiting for their render."""
+        out = set()
+        for key, ons in self.waiting.items():
+            c = self.tl.clips.get(key[0])
+            if c is not None and self.tracks.get(c.track, {}).get('deck') == deck and \
+                    any(b0 - EPS <= o < b1 - EPS for o in ons):
+                out.add(c.track)
+        return out
+
+    def _release(self, dn, dk, now):
+        """A held deck goes on air on the first bar line whose whole bar is rendered; it is decided in the bar
+        before, so a bar never starts with some tracks and not others."""
+        b, first, _ = dk.held
+        if now < b - self.bpb:
+            return
+        late = self._unrendered(dn, b, b + self.bpb)
+        if not late:
+            def on_air(dk=dk):
+                dk.cue = False
+            self._swap_at(self.sample(b) + G.LAT_BUDGET, on_air)     # deck audio runs the path budget behind
+            dk.held = None
+            if b > first + EPS:
+                self.news.append(f"deck {dn}: on air from {fmt_bar(b, self.bpb)}, {(b - first) / self.bpb:g} bars "
+                                 f"after it started (held off air until a whole bar was rendered; its first bars "
+                                 f"played cued). Load further ahead next time")
+        elif now >= b - 0.5:
+            if b <= first + EPS:
+                self.news.append(f"deck {dn}: held off air at {fmt_bar(b, self.bpb)}: not rendered yet "
+                                 f"({', '.join(sorted(late))}). It goes on air on the first bar line that is")
+            dk.held = (b + self.bpb, first, fmt_bar(b + self.bpb, self.bpb))
 
     def _transpose(self, track, beat):
         """Semitones the track's deck transposes by at `beat` (drums never transpose)."""
@@ -1162,9 +1244,11 @@ class Engine:
                         self._rerender_from(k, beat)
                 msg.append(f"transpose {tp:+d} (drums stay)")
             if cue is not None:
+                dk.held = None
+
                 def flip(dk=dk, c=bool(cue)):
                     dk.cue = c
-                self._swap_at(s0, flip)
+                self._swap_at(s0 + G.LAT_BUDGET, flip)              # deck audio runs the path budget behind
                 msg.append('cued (off air)' if cue else 'on air')
             return f"deck {deck} ({when}): " + (', '.join(msg) or 'unchanged') + f"\n  {dk.describe(False)}"
 
@@ -1236,7 +1320,7 @@ class Engine:
                                     f"off air first (live_transition away from it, or live_deck(cue=True))")
                 self.cmd_deck(deck, remove=True)
             dk = self._deck(deck, create=True)
-            others = [d for n, d in self.decks.items() if n != deck and not d.cue]
+            others = [d for n, d in self.decks.items() if n != deck and (not d.cue or d.held)]
             dk.cue = bool(others) if cue is None else bool(cue)
             dk.song = info
         for name, fxs, vol in buses:
@@ -1293,6 +1377,8 @@ class Engine:
                               for c in clips])
         with self.lock:
             auto_note = self._deck_automation(info, beat, loop)
+            if not dk.cue:
+                dk.cue, dk.held = True, (beat, beat, fmt_bar(beat, self.bpb))
         auto_note = auto_note + lane_note
         if auto_note:
             skipped.setdefault('automation', [])
@@ -1301,11 +1387,12 @@ class Engine:
         head = (f"deck {deck}: loaded {info['name']} bars {info['bars'][0]}-{info['bars'][1]} "
                 f"({info['bars'][1] - info['bars'][0] + 1} bars, {len(tracks)} tracks, {len(buses)} buses), starts "
                 f"{fmt_bar(beat, self.bpb)}, {'loops' if loop else 'plays once'}, "
-                f"{'CUED: off air, live_listen(deck=...) hears it' if dk.cue else 'ON AIR'}")
+                f"{'ON AIR once its first bar is rendered (until then held cued; it says so if it slips)' if dk.held else 'CUED: off air, live_listen(deck=...) hears it'}")
         if info.get('bpm') and abs(float(info['bpm']) - self.bpm) > 0.01:
             head += f"\n  song tempo {info['bpm']:g} BPM plays at the house {self.bpm:g} (re-rendered, not stretched)"
         if note:
-            head += f"\n  note: {note}"
+            head += f"\n  note: {note}" + ("; the deck stays off air until a whole bar is rendered, then goes on air on "
+                                         "that bar line" if dk.held else '')
         if sk:
             head += "\n  not live: " + '; '.join(sk)
         return head + '\n' + '\n'.join(ln for ln in out.splitlines() if ln.startswith('runway'))
@@ -1315,7 +1402,7 @@ class Engine:
             now = self.beat(self.pos)
             self._deck(to)
             if from_deck is None:
-                live = [n for n, d in self.decks.items() if n != to and not d.cue and
+                live = [n for n, d in self.decks.items() if n != to and (not d.cue or d.held) and
                         any(self.tl.playing(k, now) for k, t in self.tracks.items() if t['deck'] == n)]
                 if len(live) != 1:
                     raise LiveError(f"from_deck: {'no other deck is on air' if not live else f'several decks are on air {live}'}"
@@ -1352,10 +1439,11 @@ class Engine:
                              + (f"{v0:g} -> " if v0 is not None else '') + f"{v1:g}"
                              + (f" over {dur:g} beats" if dur else ''))
             dk = self.decks[to]
+            dk.held = None
 
             def on_air(dk=dk):
                 dk.cue = False
-            self._swap_at(self.sample(beat), on_air)
+            self._swap_at(self.sample(beat) + G.LAT_BUDGET, on_air)
             lines.insert(1, f"  {fmt_bar(beat, self.bpb)}: deck {to} goes on air")
         if stop_from:
             stops = [{'track': k, 'stop': True, 'at': f'bar:{(beat + L) / self.bpb + 1:g}'}
@@ -1572,9 +1660,18 @@ class Engine:
                 f"playhead is frozen (a Bluetooth speaker asleep, or another program or engine holding the device). "
                 f"live_stop, then live_start again (another device: device='<name>')")
 
+    def _lost_line(self, track, beats):
+        t = self.tracks.get(track)
+        speed = f"; it renders {1 / max(t['est'], 1e-3):.1f}x realtime" if t and t.get('est') else ''
+        return (f"track {track}: {len(beats)} notes from {fmt_bar(min(beats), self.bpb)} never sounded: their "
+                f"renders came back too late{speed}. Queue or load further ahead, or lighten the track (fewer studio-"
+                f"only effects, shorter notes)")
+
     def drain_news(self):
         """Problems that arrived since the last reply, said once."""
-        out = []
+        with self.lock:                                 # the mixer and scheduler write these
+            out = [self._lost_line(track, beats) for track, beats in self._lost_since.items()]
+            self._lost_since.clear()
         stall = self._stalled()
         if stall and not getattr(self, '_stall_said', False):
             out.append(stall)
@@ -1667,7 +1764,8 @@ class Engine:
             if self.n_workers and len(self.ready) < self.n_workers:
                 lines.append(f"workers warming up: {len(self.ready)}/{self.n_workers} ready")
             lines.append(f"render: {self.n_workers or 'inline'} workers, backlog {backlog}, late events "
-                         f"{self.stats['late']}" + (f" (last: {self.last_late})" if self.last_late else '') +
+                         f"{self.stats['late']} (never sounded {self.stats['lost']}; dropped unneeded renders "
+                         f"{self.stats['skipped']})" + (f" (last: {self.last_late})" if self.last_late else '') +
                          f", rejected {self.stats['rejected']}, underruns {self.stats['underruns']}" +
                          (f" (last at {self.last_underrun})" if self.last_underrun else ''))
             return '\n'.join(lines)

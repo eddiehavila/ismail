@@ -104,12 +104,14 @@ def _auto_curves(lanes, lead_s, total):
 def render_event(inst, notes, lead_s, bpm, root):
     """notes: [(start_s, midi, dur_s, vel)] relative to the event onset; lead_s: where the onset sits inside the
     bar (keeps drum noise seeds and bar-locked LFO phase as offline). Returns float32 (2, n) from the onset.
-    inst may carry '_bake' (studio effects run on this event) and '_expr' (lanes for a performer voice)."""
+    inst may carry '_bake' (studio effects run on this event), '_expr' (lanes for a performer voice) and '_tail'
+    (seconds rendered after the last note ends, MAX_TAIL_S if absent)."""
     bake, expr, iauto = inst.get('_bake') or [], inst.get('_expr'), inst.get('_auto') or {}
-    inst = {k: v for k, v in inst.items() if k not in ('_bake', '_expr', '_auto', '_whole')}
+    tail = float(inst.get('_tail', MAX_TAIL_S))
+    inst = {k: v for k, v in inst.items() if k not in ('_bake', '_expr', '_auto', '_whole', '_tail')}
     lead = int(round(lead_s * SR))
     span = max(s + d for s, _, d, _ in notes)
-    total = lead + int((span + MAX_TAIL_S) * SR)
+    total = lead + int((span + tail) * SR)
     shifted = [(s + lead_s, m, d, v) for s, m, d, v in notes]
     if inst.get('performer'):
         y = _perform(inst, shifted, total, bpm, root, expr)
