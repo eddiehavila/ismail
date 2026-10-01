@@ -48,6 +48,32 @@ bass and lead one at a time, the user's ear on each A/B) and take the matched in
 console sounds is not rescued by arrangement. Set faders from the reference's stem balance (`levels_from_ref` offline,
 then carry the faders into the set), and swing from `analyze_swing`, not by feel.
 
+**Only proven sounds go on air.** That means library voices with their fitted rigs, measured mimic profiles, and the
+instruments of finished songs. A voice written while preparing the set and never fitted to a recording or ear-tested
+does not play live. In a 40-minute blues set, a 12-string and a harmonica built from textbook numbers, with their
+references downloaded and separated but never used, drew "sounds like a kids piano... we have no guitar style,
+nothing". When the set needs an instrument the project does not have (an acoustic guitar, a harmonica), say so
+before the set and offer the choice: measure it first from the references (mimic, an ear test), or play the
+nearest proven instrument and name it.
+
+**First sound within minutes.** Open with a short arc built from proven parts, then build the later sections while it
+plays and the audience reacts. The same blues set spent 40 minutes preparing seven eras before the user heard a
+note, and one sentence of feedback condemned all of it.
+
+**Never downgrade in silence.** When a constraint forces a worse sound (a fitted guitar rig too slow to render live,
+a voice that fails its warm-up), say so before it plays and offer the options: fewer tracks on that rig, a simpler
+chain, a pre-rendered clip. The blues set swapped the fitted guitar for an untested one without a word, and the
+user caught it by ear.
+
+**A song plays live through `live_load`, never rebuilt by hand.** A hand port drops the song's automation (a growl's
+filter sat open at 20 kHz), its buses, its master chain and its held notes, and then it "sounds nothing like the
+original". Load the song, or a `bars` window of it, on a deck. When `live_load` refuses (a bus effect with no live
+version) or cannot keep up, that is an engine gap: measure it (studio render against a silent deck, per track and
+band) and write it in the song's `HANDOFF.md`.
+
+**Other songs stay untouched.** Loading a song on a deck reads it. Anything that writes (a test render, a parity
+check) runs on a copy in your own song folder: a render in the original's `proj/` overwrites its `latest.wav`.
+
 ## Running a set: the DJ loop
 
 A long set (a DJ set, a party, a 30-minute jam) is a loop between you and the audience, and the user's messages

@@ -12,6 +12,9 @@
   collaboration must-haves (what is not yours is not touched, nothing unmerged is deleted, no stash in a shared
   repo, proof and docs in every commit, the user merges), migrating from a song's `HANDOFF.md`, its format,
   and studio/live parity: every engine change says which side it touches, how live follows, and what proves it.
+- `live.md`, from a 40-minute blues set: only proven sounds go on air (no voice written during set prep and never
+  fitted or ear-tested), first sound within minutes, never downgrade a sound in silence, a song plays live through
+  `live_load` and is never rebuilt by hand, and anything that writes runs on a copy, never in another song's folder.
 - `blind-tests.md`: ear-test pages are always hosted on localhost and opened in the app's browser pane, take answers
   with a Submit button that writes them to a file, and are checked in the pane before the user sees them.
 
