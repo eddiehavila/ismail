@@ -90,6 +90,7 @@ class Deck:
         self.song = None                # what live_load put here: {'name', 'bars', 'tracks'}
         self.tp = []                    # [(beat, semitones)]: transpose from that beat on
         self.quiet = 0                  # samples since the deck last had input (dormant when long)
+        self.held = None                # (bar line beat, first bar beat, 'bar N'): cued until that bar is rendered
 
     def describe(self, level=True, values=None):
         v = values or self.values
@@ -98,7 +99,10 @@ class Deck:
             db = v[b + '_db']
             return f"{b[0].upper()} " + ('KILL' if db <= KILL_DB else f"{db:+g}")
         fader = 'off' if v['volume_db'] <= SILENT_DB else f"{v['volume_db']:+g} dB"
-        s = (('CUE (off air)' if self.cue else 'on air') + f" | fader {fader} | eq "
+        state = 'CUE (off air)' if self.cue else 'on air'
+        if self.held:
+            state = f"HELD off air: on air at {self.held[2]} if that whole bar is rendered by then, else a bar later"
+        s = (state + f" | fader {fader} | eq "
              + ' '.join(band(b) for b in ('low', 'mid', 'high')) + f" | filter {v['filter']:+.2f}"
              + (f" | transpose {self.transpose:+d}" if self.transpose else ''))
         if level:

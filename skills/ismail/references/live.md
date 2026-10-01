@@ -197,7 +197,12 @@ air; only you hear it, through `live_listen(deck=...)`.
    fade) and its group buses. It is cued while another deck is on air. The reply lists what did not come over
    (placed audio clips, the master effect chain, effects whose source track was muted). A track with instrument
    automation renders its whole section as one event: load the deck several bars before it plays. A performer
-   voice's studio lanes (`inst.lane.bend` ...) arrive as its clip's `expr`, so a guitar keeps its bends.
+   voice's studio lanes (`inst.lane.bend` ...) arrive as its clip's `expr`, so a guitar keeps its bends. A drone
+   or pad already sounding at the window's first bar comes in on its first beat, as in a studio render of those
+   bars.
+   A deck loaded straight on air waits off air until a whole bar of it is rendered, then goes on air on that bar
+   line: load too close and the audience hears it start bars late, and the next reply says so. A big song (20+
+   tracks, baked rigs) wants 10 to 20 bars of lead; load it while the other deck plays, and keep it cued.
    Before a set, A/B each song on a deck against its render (a silent engine, `live_start(device='none')`, plus
    `live_record`): a drum bus that had lost its dry signal left only the bass audible, and only the user heard it.
 2. Listen to deck B while deck A plays; fix it there (`live_deck` eq/transpose, `live_fx` on `B.<track>`).
