@@ -18,6 +18,7 @@ from ..dsp import SR
 
 KILL_DB = -40.0              # an isolator band at or below this is off
 SILENT_DB = -60.0            # a deck fader at or below this is off
+HELD_MIN_BEATS = 1.0         # a note sounding into a deck window with this much left comes in on its first beat
 PARAMS = {'volume_db': 0.0, 'low_db': 0.0, 'mid_db': 0.0, 'high_db': 0.0, 'filter': 0.0}
 STYLES = ('blend', 'bass_swap', 'filter', 'cut')
 
@@ -188,7 +189,11 @@ def read_song(path, deck, bars, house_bpb):
                 auto.setdefault(f"track:{deck}.{name}", {})[key] = pts
             else:
                 skipped['automation'].append(f"{name} {key}")
-        notes =[(n[0] - beat0, n[1], n[2], n[3]) for n in t.get('notes', []) if beat0 <= n[0] < beat1]
+        notes = [(n[0] - beat0, n[1], n[2], n[3]) for n in t.get('notes', []) if beat0 <= n[0] < beat1]
+        # a note still sounding at the window's start (a drone, a pad, a held string) comes in on its first beat with
+        # what is left of it, as in a studio render of the same window; one with less than a beat left is a tail
+        notes += [(0.0, n[1], min(n[0] + n[2], beat1) - beat0, n[3]) for n in t.get('notes', [])
+                  if n[0] < beat0 and n[0] + n[2] - beat0 >= HELD_MIN_BEATS]
         full = f"{deck}.{name}"
         out = t.get('output', 'master')
         tracks.append({'track': full, 'instrument': t['instrument'], 'fx': _rename_fx(t.get('fx'), deck, tnames),
