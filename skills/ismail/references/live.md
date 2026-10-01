@@ -28,8 +28,9 @@ section costs a minute or more. Compose whole sections only for real changes, an
    to the chain. Ramps on one param form a schedule: a later ramp does not erase an earlier one. A snap then a
    sweep = two moves, the second a beat later (`bar:N.25`). A whole cycle of moves goes in one call:
    `live_fx(moves=[...])` (the DJ kit builds them). `at` takes the same words everywhere (`now` = `asap`).
-4. **Listen every turn**: `live_status` (levels per track and bus, runway, late events, underruns, safety gain
-   reduction) and `live_listen(bars=4, view=...)` (on the live output `bars` is a count of the last bars; a
+4. **Listen every turn**: `live_status` (levels per track and bus, runway, late events, notes that "never
+   sounded" because their render came back too late, a deck held off air until it is rendered, underruns, safety
+   gain reduction) and `live_listen(bars=4, view=...)` (on the live output `bars` is a count of the last bars; a
    `[a, b]` range only works with `recording=`). Write the Listening Report lines as for a render.
 5. **Change on phrase boundaries** (`next_4`, `next_8`), not mid-phrase, unless the cut is the point.
 6. **Record** with `live_record`: the take starts on a downbeat and has a `.json` sidecar;
@@ -60,19 +61,21 @@ nearest proven instrument and name it.
 plays and the audience reacts. The same blues set spent 40 minutes preparing seven eras before the user heard a
 note, and one sentence of feedback condemned all of it.
 
-**Never downgrade in silence.** When a constraint forces a worse sound (a fitted guitar rig too slow to render live,
-a voice that fails its warm-up), say so before it plays and offer the options: fewer tracks on that rig, a simpler
-chain, a pre-rendered clip. The blues set swapped the fitted guitar for an untested one without a word, and the
+**Never downgrade in silence.** When a constraint forces a worse sound (a voice that renders too slowly for the
+set, a voice that fails its warm-up), say so before it plays and offer the options: fewer tracks on that voice, a
+simpler patch, a pre-rendered clip. The blues set swapped the fitted guitar for an untested one without a word, and the
 user caught it by ear.
 
 **A song plays live through `live_load`, never rebuilt by hand.** A hand port drops the song's automation (a growl's
 filter sat open at 20 kHz), its buses, its master chain and its held notes, and then it "sounds nothing like the
-original". Load the song, or a `bars` window of it, on a deck. When `live_load` refuses (a bus effect with no live
-version) or cannot keep up, that is an engine gap: measure it (studio render against a silent deck, per track and
-band) and write it in the song's `HANDOFF.md`.
+original". Load the song, or a `bars` window of it, on a deck. When its reply lists parts as "not live", when it
+cannot keep up, or when a part sounds different, that is an engine gap: run `live_parity(song, bars=[a, b])` (the
+studio against a silent deck of its own, per track, bus and the mix) and write what it marks DIFFERS, with its
+numbers, in the song's `HANDOFF.md`.
 
-**Other songs stay untouched.** Loading a song on a deck reads it. Anything that writes (a test render, a parity
-check) runs on a copy in your own song folder: a render in the original's `proj/` overwrites its `latest.wav`.
+**Other songs stay untouched.** Loading a song on a deck reads it, and so does `live_parity`. Anything that writes
+(a test render) runs on a copy in your own song folder: a render in the original's `proj/` overwrites its
+`latest.wav`.
 
 ## Running a set: the DJ loop
 
@@ -195,21 +198,24 @@ songs/<slug>/
 
 A code voice renders one note at a time, so legato, slides and bends between notes need another shape.
 
-**Performer voices.** A voice module with `perform(notes, total_n, sr, bpm, lanes, **params)` and no `voice()`
+**Performer voices.** A voice module with `perform(notes, total_n, sr, bpm, lanes, beat0, **params)` and no
+`voice()`
 plays a whole part (a guitar with hammer-ons and slides, strings that ring on, a kit that resonates). `live_track`
 detects it, and live renders it a bar at a time, each bar with the second of the part before it as context, cut and
 crossfaded at the bar line, so legato, slides and ringing strings carry across bars; a looping clip takes its
 context from the previous pass, and a deck's section from the 8 beats before its window. A voice that keys its
 variation on the song beat (`electric`, `kit70`) plays live as in the studio render, sample for sample. Bends and
 vibrato come from the clip's `expr` lanes, `{"bend": [[beat, semitones], ...], "vib": [[beat, cents], ...]}` with
-beats from the clip start; the voice's INFO lists its lanes.
+beats from the clip start; the voice's INFO lists its lanes. A guitar is the `electric` performer with its rig in
+the track's `fx` (`voice_help(name='electric')` lists the fitted rigs): the rig runs live block by block, as in the
+studio.
 
-**Phrase voices** are the older trick for a performer that is not written that way: make **one note = one whole
+**Phrase voices** are the older trick for a performer that is not written as one: make **one note = one whole
 phrase**. The voice takes a `phrases` param, `{"<velocity>": {"notes": [...], "bend":
 [[beat, semitones], ...], "vib": [[beat, cents], ...]}}`, and the note's velocity picks the phrase; the note's
-pitch can transpose it against a `root`. Inside, call the performer on the phrase's notes and lanes and run any
-offline effect chain on the result. Phrases render once and are cached, so they can be slow (a physical guitar
-with an amp rig renders at ~1 to 3x realtime).
+pitch can transpose it against a `root`. Inside, call the performer on the phrase's notes and lanes. Keep effects
+on the track, not inside the voice: an amp run on each phrase stacks one amp's hiss per phrase and renders slowly
+(a guitar baked that way played at ~1x realtime and lost a deck's first bars).
 
 The instrument, params included, is captured when the track is made. After you add a phrase to the dict,
 re-send `live_track(name, instrument=...)`; a note whose phrase is missing plays silence.
@@ -226,14 +232,16 @@ air; only you hear it, through `live_listen(deck=...)`.
    fade) and its group buses. It is cued while another deck is on air. The reply lists what did not come over
    (placed audio clips, the master effect chain, effects whose source track was muted). A track with instrument
    automation renders its whole section as one event: load the deck several bars before it plays. A performer
-   voice's studio lanes (`inst.lane.bend` ...) arrive as its clip's `expr`, so a guitar keeps its bends. A drone
+   voice's studio lanes (`inst.lane.bend` ...) arrive as its clip's `expr`, so a guitar keeps its bends; other
+   `inst.*` automation on a performer, and `inst.lane.*` on a voice that is not one, stay behind (listed under
+   "not live"). A drone
    or pad already sounding at the window's first bar comes in on its first beat, as in a studio render of those
    bars.
    A deck loaded straight on air waits off air until a whole bar of it is rendered, then goes on air on that bar
    line: load too close and the audience hears it start bars late, and the next reply says so. A big song (20+
    tracks) wants 10 to 20 bars of lead; load it while the other deck plays, and keep it cued.
-   Before a set, A/B each song on a deck against its render (a silent engine, `live_start(device='none')`, plus
-   `live_record`): a drum bus that had lost its dry signal left only the bass audible, and only the user heard it.
+   Before a set, check each song's sections with `live_parity(song, bars=[a, b])`: a drum bus that had lost its
+   dry signal left only the bass audible, and only the user heard it.
 2. Listen to deck B while deck A plays; fix it there (`live_deck` eq/transpose, `live_fx` on `B.<track>`).
    Key-match with `live_deck(transpose=...)` (drums stay).
 3. `live_transition(to='B', style=..., bars=16, at='next_8')` queues the whole mix: `blend` (B up without bass,
@@ -320,8 +328,8 @@ lanes on a performer), tempo changes inside a run, placed audio clips and the ma
 - `live_status` shows each track's render speed ("renders 3x realtime"). Drums and code voices run 20 to 50x,
   synths 4 to 7x, mimic 1 to 3x (low notes are the slowest: more harmonics). A clip's first pass waits for its
   renders, so the reply moves slow first launches a bar or two later; every later pass reuses them, and
-  identical notes (a repeated chord) render once. Phrase voices (a whole guitar phrase through an amp rig) run
-  ~1 to 3x: queue them a phrase ahead.
+  identical notes (a repeated chord) render once. Performers render a bar at a time with a second of context:
+  `kit70` about 5x realtime; check `live_status` for `electric` with your part. Queue them a phrase ahead.
 - `live_start` takes ~20 to 30 s: the render workers warm up every instrument kind and every mimic profile in
   the folder before it returns, so the first clips land on time.
 - Mimic profiles come out quiet next to synths and code voices (about 9 dB): check their level in

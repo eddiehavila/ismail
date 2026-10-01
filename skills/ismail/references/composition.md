@@ -7,6 +7,7 @@
 - `notes_copy(from_bars, to_bar, times, to_track, transpose)`: repeat sections, move a line to another instrument, make an octave layer.
 - `notes_transform(bars, transpose, velocity, vel_scale, shift_beats, quantize, dur_scale, legato, pitches)`: variation without rewriting.
 - `automation_set(track, param, points=[[bar, value], ...])`: fractional bars (17.5 = beat 3 of bar 17). Filter sweeps: `inst.filter.cutoff`, log interpolated. Fades: `volume_db` (an offset on the fader) or `track='master'`.
+- A performer voice's expression (`electric`: bend, vib, slide, mute, level; `voice_help` lists each voice's lanes) is automation `inst.lane.<name>` with the same `[bar, value]` points, e.g. `automation_set('lead', 'inst.lane.bend', [[17, 0], [17.5, 2], [18, 2], [18.25, 0]])` for a whole-step bend on beat 3. A deck plays these lanes too.
 
 ## Rhythm
 
@@ -42,7 +43,8 @@ Rules of thumb: accents (X) on no more than 4 steps per bar per part; a part tha
 
 For parts meant to sound played (guitar, bass, live drums), placement matters more than notes. Learned on a 1970 guitar band pastiche; the per-part checks are in `references/blind-tests.md` section 4.
 
-- **No per-note random jitter.** It is what an amateur sounds like; keep it to a few ms. Place whole phrases instead: landing notes tight to the band (within about 8 ms), phrase entries free (on the grid, 35-75 ms late or 25-50 ms early), and the run between re-spaced evenly (a lazy start rushing into the landing, or a push). Move the notes and every expression lane (bend, vibrato, wah, level) together with one time warp.
+- **No per-note random jitter.** It is what an amateur sounds like; keep it to a few ms. Place whole phrases instead: landing notes tight to the band (within about 8 ms), phrase entries free (on the grid, 35-75 ms late or 25-50 ms early), and the run between re-spaced evenly (a lazy start rushing into the landing, or a push). Move the notes and every expression lane (bend, vib, slide, mute, level) and every effect sweep (a wah's
+`fx.<i>.pos`) together with one time warp.
 - **The band has a feel too:** a shared slow push and pull per bar, 16ths a little late, a little looseness. That alone moved drums, bass and rhythm guitar from "digital" to "organic".
 - **Bends land on chord tones** of the chord sounding when they land, or on a scale tone that is no semitone from a chord tone (which keeps the blues bend from the minor 3rd to the 4th); never more than a whole step. A half-step bend onto the major 3rd over a minor chord sours it for as long as it is held.
 - **Each chord its own scale.** One mode over the whole song put a G natural under Ebm9. A double-stop under a held melody note moves by scale steps, as a pair.

@@ -52,15 +52,19 @@ Every engine change answers three questions in its commit and pull request:
 
 1. **Which side does it touch?** Studio only, live only, or both. A change to an effect, an instrument type, a voice,
    automation, buses or the render order is a studio change that live must follow.
-2. **How does live follow?** An effect with a live processor needs its twin updated in `ismail/live/fx_blocks.py`;
-   an effect without one is baked (the workers run the studio code on each note); instruments and voices render in
-   the workers through the studio code, but per note or per phrase, not per part, so anything that depends on the
-   whole part (legato, ringing strings, velocity patterns across notes, instrument automation) needs checking.
+2. **How does live follow?** Every built-in effect has a live twin (`ismail/live/fx_blocks.py`, the guitar rig in
+   `rig_blocks.py`) running the studio kernel block by block; a change to the effect changes its twin. A new effect
+   type without a twin is baked (the workers run the studio code on each event). Instruments and voices render in
+   the workers through the studio code, per note, per mono phrase, or for a performer per bar with a second of
+   context, so anything that depends on more than that needs checking: a mono synth's glide from the last phrase,
+   a drone that began long before a deck's window, randomness keyed on anything but the song position (synths and
+   drums seed on the note's place in its bar, performers on `beat0`), work that depends on the length of the
+   buffer (code voices get each note whole).
 3. **What proves it?** Effects: `tests/test_live_parity.py` holds every live processor to its studio twin over a
-   whole window and lists every studio effect without a live path. Instruments, voices and songs on decks: no
-   automated check yet. Until there is one, A/B by measurement: render a few bars in the studio, play the same bars
-   on a deck of a silent engine (`live_start(device='none')`, `live_load`, `live_record`), and compare per track and
-   band (level, bands, onsets, pitches). Report the numbers in the pull request.
+   whole window. Instruments and voices: `tests/test_live_song_parity.py` plays every instrument type and library
+   voice on a deck against the studio (sample for sample, performers by ear); add a case for a new type or voice.
+   Songs: `live_parity(song, bars=[a, b])` compares a real section per track, bus and the mix. Put its table for a
+   song the change affects in the pull request.
 
 A parity bug found while making music is a song agent's finding, not its fix: it goes in the song's `HANDOFF.md`
 with the A/B numbers and the bars, and the engine agent fixes it on a branch with a test that fails before the fix.

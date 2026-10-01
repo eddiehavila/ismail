@@ -32,7 +32,8 @@ songs/                   git-ignored by the ismail repo, always: no song is ever
 songs/<slug>/            everything one song owns
   HANDOFF.md             what can migrate into ismail: elements, evidence, files, proposed ops, tests, skill text
   build.py               rebuilds proj/ (never deletes: an old proj/ moves to backups/)
-  voices/                the song's voices, profiles and song-local engine modules
+  voices/                the song's voices, profiles and song-local engine modules (build.py copies them
+                         into proj/voices/, where the engine looks)
   work/                  analysis, measurement and exam scripts, and their saved output
   ref/                   reference audio (analysis only) and SOURCES.md (where from, licence)
   notes/                 the Session Sheet, feedback.md (the user's words, verbatim)
@@ -51,6 +52,12 @@ anything big or regenerable: `*.wav *.mp3 *.flac *.ogg`, `ref/`, `proj/`, `backu
 
 **Words**: "the engine" is `ismail/` on main; "song code" is anything under `songs/<slug>/`. A song never modifies
 the engine; it adds song code.
+
+**Use what ismail has before writing a script.** Call `guide` (the op) at the start and again after a long
+stretch of work: it lists the ops, and about 20 of them measure audio (grids, drums, swing, sections, envelopes per
+band, spectra, timbre, comparisons). They take a path as a source, not only project tracks. A song that wrote its
+own drum scanner and band comparisons had all of them available. A measuring script a song still needs is a
+`HANDOFF.md` item.
 
 ## The loop (every piece, every time)
 

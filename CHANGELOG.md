@@ -17,6 +17,15 @@
   `live_load` and is never rebuilt by hand, and anything that writes runs on a copy, never in another song's folder.
 - `blind-tests.md`: ear-test pages are always hosted on localhost and opened in the app's browser pane, take answers
   with a Submit button that writes them to a file, and are checked in the pane before the user sees them.
+- Skill brought up to date with the live parity work: phrase voices no longer run an amp inside the voice (a
+  guitar is `electric` with its rig on the track, live as in the studio); the performer signature takes `beat0`;
+  how to write a performer's expression in the studio (`inst.lane.<name>` automation); the rig effects, presets,
+  `electric`'s half-step-down tuning and `kit70`'s drum map; five rules for a voice that renders the same in a
+  window, live and in the whole song (from `songs/tambopata`); `live_parity` for checking a song on a deck; what
+  `live_status` and a deck's "not live" list now say; render speeds of the library performers. Fixed: the limiter
+  ceiling (-1.0 dB for mp3 everywhere), the eye-exam page (Submit, not a copy button), wah as an effect sweep, not
+  a lane, and where the engine looks for a song's voices. SKILL.md: call `guide` before writing a measuring
+  script. The `guide` op's live text matches.
 
 ### Guitar rig and performers
 
