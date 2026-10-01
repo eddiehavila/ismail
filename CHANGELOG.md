@@ -7,7 +7,7 @@
 - Rig effects (`ismail/rig.py`): `fuzz` (Fuzz Face bias shift), `univibe` (four-stage LDR phaser with lamp lag),
   `amp` (Marshall-style tone stack after Yeh and Smith 2006, push-pull power stage with sag), `cab` (min-phase
   cabinet with a mic blend), `rotary` (Leslie with ramping rotors), `tape` (head bump, wow, flutter, hiss), `wah`
-  (resonant band-pass). `fx_help(type=...)` documents each. Live runs them baked into each rendered note.
+  (resonant band-pass). `fx_help(type=...)` documents each. Live runs them as block-by-block twins (below).
 - Performer voices in the studio: a voice module with `perform()` and no `voice()` renders a whole part at once
   (strings that ring on, legato, slides, whammy), with expression lanes from automation `inst.lane.<name>`. Live
   already played them from clip `expr` lanes; one mechanism now: a deck turns a song's `inst.lane.*` automation
@@ -60,6 +60,17 @@
   every real render, and a 23-track deck spent half a minute warming up.
 - Fix: a deck's cue flips (`live_deck(cue=...)`, a transition's on-air) now land on the bar line the listener
   hears; they came about 90 ms early.
+- The guitar rig runs live: fuzz, univibe, amp, cab, rotary, tape and wah have block-by-block twins
+  (`ismail/live/rig_blocks.py`) running the studio kernels, held to the studio by `tests/test_live_parity.py`.
+  They were baked into every rendered note: a guitar rendered at 0.8x realtime and a deck of Crossroads never got
+  on air (219 notes lost); now it plays from its first bar with nothing late and the mixer at about 31%. Per-note
+  baking also stacked one amp's hiss per note (+7 to +9 dB on the noise floor; now equal to the studio's), and a
+  song with `tape` on a bus can load on a deck. Rig params move with `live_fx` (wah `pos`, rotary `speed`).
+- Studio rig changes so a live twin can be exact (all inaudible): amp and tape hiss draw one noise stream per
+  channel (a different noise, same level); tape wow is a causal running delay (the output sits 14 samples later);
+  auto-wah follows its recent peak instead of the whole part's 98th percentile (within 0.1 dB).
+- The live mixer keeps every effect's state out of denormal floats (a fuzz left in silence decayed into them and
+  took a guitar chain to 100% of real time), and a track whose amp only hisses goes dormant like a silent one.
 
 ## 0.2.0 (2026-09-30)
 

@@ -202,7 +202,7 @@ air; only you hear it, through `live_listen(deck=...)`.
    bars.
    A deck loaded straight on air waits off air until a whole bar of it is rendered, then goes on air on that bar
    line: load too close and the audience hears it start bars late, and the next reply says so. A big song (20+
-   tracks, baked rigs) wants 10 to 20 bars of lead; load it while the other deck plays, and keep it cued.
+   tracks) wants 10 to 20 bars of lead; load it while the other deck plays, and keep it cued.
    Before a set, A/B each song on a deck against its render (a silent engine, `live_start(device='none')`, plus
    `live_record`): a drum bus that had lost its dry signal left only the bass audible, and only the user heard it.
 2. Listen to deck B while deck A plays; fix it there (`live_deck` eq/transpose, `live_fx` on `B.<track>`).
@@ -267,13 +267,15 @@ When the session itself is the show (the viewer sees your turns and hears the se
 Live: every instrument type including mimic profiles and performer voices, every effect, send buses,
 sidechain/duck/vocoder from live tracks, ramps on every automatable fx param.
 
-Effects run two ways. An effect with a live processor (every built-in type today) runs block by block on the
-mixer and matches the studio version (held by tests). An effect that exists only in the studio (a new type, a
-guitar rig) is **baked**: the render workers run it on each note or phrase before the mix. `live_status` marks it
-`(baked)`. A baked effect cannot be moved with `live_fx`, restarts its LFOs and tails per note, and hears each
-note alone (a fuzz on a chord distorts each note, not the sum; on a mono line it is exact). Everything up to the
-last studio-only effect in a chain is baked, so order is kept; a sidechain or duck cannot sit before one, and a bus
-cannot bake at all (put the effect on the tracks).
+Effects run two ways. An effect with a live processor (every built-in type today, the guitar rig included) runs
+block by block on the mixer and matches the studio version (held by tests): a wah's `pos`, a rotary's `speed`, a
+univibe's `rate_hz` move with `live_fx` like any filter. An amp or tape with hiss on keeps hissing while its track
+plays, as in the studio, and sleeps with the track when its notes stop. An effect that exists only in the studio
+(a new type nobody has written a live twin for) is **baked**: the render workers run it on each note or phrase
+before the mix. `live_status` marks it `(baked)`. A baked effect cannot be moved with `live_fx`, restarts its LFOs
+and tails per note, and hears each note alone (a fuzz on a chord distorts each note, not the sum). Everything up to
+the last studio-only effect in a chain is baked, so order is kept; a sidechain or duck cannot sit before one, and a
+bus cannot bake at all (put the effect on the tracks).
 
 Not yet: master-bus effects (the safety chain is the master), vocoder modulators from sound-bank sounds,
 instrument-param automation on your own live tracks (a deck's song has it; otherwise use fx params, or expr
