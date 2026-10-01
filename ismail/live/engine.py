@@ -35,6 +35,7 @@ from .timeline import EPS, QueueError, Timeline, fmt_bar
 BLOCK = 1024
 QUIET = 1e-6            # a path whose input stops and whose output stays below this goes dormant
 DORMANT_S = 0.5
+DORMANT_NOISY_S = 8.0     # a path that hisses (amp, tape) keeps hissing through rests this long, as in the studio
 AHEAD_S = 0.5           # finished audio kept ahead of the device
 HORIZON_S = 8.0         # how far ahead events are sent to render (slow voices need the head start)
 PRELOAD_S = 60.0        # a clip queued for later renders up to this much of its first pass from the moment it is queued
@@ -551,6 +552,7 @@ class Engine:
         a = math.exp(-n / SR / 0.3)
         retired = lambda ch: (lambda i: G.LiveBlock(self, 'retired', ch, i, p0, n, post, onsets))  # noqa: E731
         dormant_after = int(DORMANT_S * SR) + G.LAT_BUDGET
+        noisy_after = int(DORMANT_NOISY_S * SR) + G.LAT_BUDGET
         for name in order:
             t = tracks.get(name)
             if t is None:
@@ -558,7 +560,8 @@ class Engine:
             path = t['path']
             x = bufs.get(name)
             if x is None:
-                if t.get('quiet', 0) > dormant_after and not path.retiring and t['cur'] == (t['gl'], t['gr']):
+                if t.get('quiet', 0) > (noisy_after if path.chain.noise else dormant_after) and not path.retiring \
+                        and t['cur'] == (t['gl'], t['gr']):
                     t['ms'] *= a               # dormant: no notes, tails died away; costs nothing until a note
                     self._hold(t, p0)
                     continue
@@ -601,7 +604,8 @@ class Engine:
                 deck_fed.add(t['deck'])
         for bname, b in buses:
             path = b['path']
-            if bname not in bus_fed and b.get('quiet', 0) > dormant_after and not path.retiring:
+            if bname not in bus_fed and b.get('quiet', 0) > (noisy_after if path.chain.noise else dormant_after) \
+                    and not path.retiring:
                 b['ms'] *= a
                 self._hold(b, p0)
                 continue
