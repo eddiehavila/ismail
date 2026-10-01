@@ -155,6 +155,7 @@ class Engine:
         self.gain = 1.0
         self.rec = None
         self.rec_path = None
+        self.tap = None                 # tap(key, p0, y, lag): track and bus outputs, deck inputs (live.parity)
         self.stats = collections.Counter()
         self.last_late = None
         self.mix_load = None            # mixer time / audio time, smoothed
@@ -598,6 +599,8 @@ class Engine:
             if vsch is not None:                       # a loaded song's volume automation: dB offset on the fader
                 g = g * 10 ** (np.asarray(vsch.curve(p0, n)) / 20)
             y = x * g
+            if self.tap is not None:
+                self.tap('track:' + name, p0, y, path.chain.latency)
             ret = path.run_retiring(n, retired)
             dest = deck_in.get(t['deck'], master)
             if t['output'] in bus_in:
@@ -639,6 +642,8 @@ class Engine:
             vsch = self.ramps.get(('bus:' + bname, -1, 'volume_db'))
             if vsch is not None:                       # a loaded song's bus volume automation
                 y = y * 10 ** (np.asarray(vsch.curve(p0, n)) / 20)
+            if self.tap is not None:
+                self.tap('bus:' + bname, p0, y, G.LAT_BUDGET)
             deck_in.get(b['deck'], master).__iadd__(y)
             ms = float(np.mean(y ** 2))
             b['ms'] = b['ms'] * a + ms * (1 - a)
@@ -656,6 +661,8 @@ class Engine:
                 if j - i < n:
                     dk.air[:, :n - (j - i)] = 0
                 continue
+            if self.tap is not None:
+                self.tap('deck:' + dn, p0, deck_in[dn], G.LAT_BUDGET)
             y = dk.strip.process(deck_in[dn], {k: self._deck_param(dn, k, p0, n) for k in D.PARAMS})
             dk.quiet = 0 if dn in deck_fed else dk.quiet + n
             dk.ms = dk.ms * a + float(np.mean(y ** 2)) * (1 - a)

@@ -280,6 +280,14 @@ and tails per note, and hears each note alone (a fuzz on a chord distorts each n
 the last studio-only effect in a chain is baked, so order is kept; a sidechain or duck cannot sit before one, and a
 bus cannot bake at all (put the effect on the tracks).
 
+`live_parity(song, bars=[a, b])` checks a song section: it renders the bars in the studio, plays them on a silent
+engine of its own (no `live_start`, nothing late) and compares each track, bus and the mix, from the window's
+second bar (the first is the window's edge: the studio rings in what came before, a deck starts clean). A part
+marked DIFFERS sounds different on a deck than in a render: write it in the song's HANDOFF.md for the dev agent;
+do not change the song to hide it. Known gaps it shows: a mono synth's glide between phrases, a drone that began
+long before the window (it comes in with a fresh attack), a track with no notes in the window (its tail and hiss
+from earlier bars are not played).
+
 Not yet: master-bus effects (the safety chain is the master), vocoder modulators from sound-bank sounds,
 instrument-param automation on your own live tracks (a deck's song has it; otherwise use fx params, or expr
 lanes on a performer), tempo changes inside a run, placed audio clips and the master effect chain on a deck.
