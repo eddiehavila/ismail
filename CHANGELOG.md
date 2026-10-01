@@ -23,7 +23,7 @@
 - Rig effects (`ismail/rig.py`): `fuzz` (Fuzz Face bias shift), `univibe` (four-stage LDR phaser with lamp lag),
   `amp` (Marshall-style tone stack after Yeh and Smith 2006, push-pull power stage with sag), `cab` (min-phase
   cabinet with a mic blend), `rotary` (Leslie with ramping rotors), `tape` (head bump, wow, flutter, hiss), `wah`
-  (resonant band-pass). `fx_help(type=...)` documents each. Live runs them baked into each rendered note.
+  (resonant band-pass). `fx_help(type=...)` documents each. Live runs them as block-by-block twins (below).
 - Performer voices in the studio: a voice module with `perform()` and no `voice()` renders a whole part at once
   (strings that ring on, legato, slides, whammy), with expression lanes from automation `inst.lane.<name>`. Live
   already played them from clip `expr` lanes; one mechanism now: a deck turns a song's `inst.lane.*` automation
@@ -58,6 +58,53 @@
   folder layout, playing for a screen recording.
 - Fix: the live engine crashed at startup since the rig effects were registered (its effect warm-up tried to
   build a live block for studio-only types); it now skips them, and they bake in the workers as before.
+
+### Live and studio parity
+
+- Fix: a note still sounding when a window starts (a drone, a pad, a held string) now plays in a studio render of
+  a bar range and on a deck loaded with `bars`; both dropped it, and the deck said "silent in range". A note that
+  rings on at least a beat into the window comes in on its first beat.
+- A deck loaded straight on air is held off air until a whole bar of it is rendered, then goes on air on that bar
+  line; it used to go on air with nothing rendered and lose its first bars in silence. `live_status` shows the
+  hold, and the next reply says when it slipped and when it went on air.
+- Renders go to the workers earliest-needed first, from an engine-side list, and a render no queued clip wants any
+  more is dropped before a worker spends time on it. A clip queued for later renders its first pass from the
+  moment it is queued, so loading ahead buys render time.
+- Notes that never sounded because their render came back too late are counted (`live_status`: "never sounded")
+  and said per track in the next reply; the late counter used to read 0 while bars played silent.
+- Warm-ups render a short tail: each one had rendered 8 s through the track's baked rig on every worker, ahead of
+  every real render, and a 23-track deck spent half a minute warming up.
+- Fix: a deck's cue flips (`live_deck(cue=...)`, a transition's on-air) now land on the bar line the listener
+  hears; they came about 90 ms early.
+- The guitar rig runs live: fuzz, univibe, amp, cab, rotary, tape and wah have block-by-block twins
+  (`ismail/live/rig_blocks.py`) running the studio kernels, held to the studio by `tests/test_live_parity.py`.
+  They were baked into every rendered note: a guitar rendered at 0.8x realtime and a deck of Crossroads never got
+  on air (219 notes lost); now it plays from its first bar with nothing late and the mixer at about 31%. Per-note
+  baking also stacked one amp's hiss per note (+7 to +9 dB on the noise floor; now equal to the studio's), and a
+  song with `tape` on a bus can load on a deck. Rig params move with `live_fx` (wah `pos`, rotary `speed`).
+- Studio rig changes so a live twin can be exact (all inaudible): amp and tape hiss draw one noise stream per
+  channel (a different noise, same level); tape wow is a causal running delay (the output sits 14 samples later);
+  auto-wah follows its recent peak instead of the whole part's 98th percentile (within 0.1 dB).
+- Performer voices play live in bar chunks: each bar renders with the second of the part before it as context
+  (held notes from their real start), cut and crossfaded at the bar line; a looping clip takes context from its
+  previous pass, a deck's section from the 8 beats before its window (a held note is no longer struck again on the
+  window's first beat). Crossroads on a deck against the studio: envelope correlation 0.999-1.000 and bands
+  within 0.5 dB on bass, rhythm, lead and drums (0.96-0.99 before; the lead lost 21 dB at 125 Hz at the window
+  edge). kit70 renders at 5x realtime instead of 0.5x (no 8 s tail per hit).
+- `electric` and `kit70` key their randomness per note on the song beat (`perform(..., beat0=)`), so any slice of
+  a part, a studio bar range included, plays exactly as the whole part. One generator drawn note after note gave
+  every slice a different performance (a kit's hi-hat changed timbre with the number of notes). Studio renders of
+  songs using them get a new realization of the same humanization. `skills/.../sound-design.md` says how to write
+  a performer this way.
+- Deck notes keep 10 significant digits (6 rounded long sections' timing).
+- A track whose amp or tape hisses keeps hissing through rests up to 8 s before it sleeps, as in the studio.
+- A big `live_queue` no longer stalls the mixer: the batch's render estimates and event groups are planned before
+  the engine lock is taken, the scheduler places at most 128 events per pass (earliest first), everything alive at
+  engine start is frozen out of the garbage collector's full sweeps, and the GIL switch interval is 1 ms. An
+  8000-note queue: the mixer's longest wait for the lock 256 ms -> under 25 ms, collector pauses 133 ms -> 20 ms,
+  mixer peak about 1000% -> 130-180% of real time.
+- The live mixer keeps every effect's state out of denormal floats (a fuzz left in silence decayed into them and
+  took a guitar chain to 100% of real time), and a track whose amp only hisses goes dormant like a silent one.
 
 ## 0.2.0 (2026-09-30)
 

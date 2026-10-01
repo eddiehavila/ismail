@@ -11,6 +11,7 @@ from . import dsp, fx as fxmod, instruments, voices
 
 LOG_PARAMS = ('cutoff', 'freq', '_hz')
 PRE_ROLL_BEATS = 8  # rendered before a partial window so tails/sidechains settle
+HELD_MIN_BEATS = 1.0  # a note sounding into a partial window with this much left still plays (drones, pads)
 
 
 class RenderError(ValueError):
@@ -146,7 +147,13 @@ class Renderer:
                 continue
             s = self.beat_to_win_sec(st)
             if s < 0:
-                continue  # started before render window
+                # started before the render window: a note still sounding there with at least HELD_MIN_BEATS left
+                # (a drone, a pad, a held string) comes in at the window's first sample with what is left of it; the
+                # re-attack falls in the pre-roll, before the output starts
+                left = d - (self.r_b0 - st)
+                if left < HELD_MIN_BEATS:
+                    continue
+                s, d = 0.0, left
             out.append((s, int(p), d * self.spb, int(v)))
         return out
 
@@ -221,7 +228,8 @@ class Renderer:
         if inst is not None:
             notes = self.track_notes_sec(tr)
             if notes:
-                y += instruments.render_instrument(inst, notes, n, inst_auto, self.bpm, self.sr, self.root)
+                y += instruments.render_instrument(inst, notes, n, inst_auto, self.bpm, self.sr, self.root,
+                                                  self.r_b0 if not self.full else -self.offset / self.spb)
         for clip in tr.get('audio', []):
             snd = self.load_sound(clip['sound'])
             s0 = int(round(self.beat_to_win_sec(clip['at_beat']) * self.sr))

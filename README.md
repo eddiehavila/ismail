@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/logo/ismail-dark.svg">
+    <img src="assets/logo/ismail.svg" alt="ismail logo: four automaton musicians on a boat" width="260">
+  </picture>
+</p>
+
 # ismail
 
 **A DAW for AI agents. It can't hear, so it reads. And it plays live.**

@@ -18,6 +18,8 @@ from ..dsp import SR
 
 KILL_DB = -40.0              # an isolator band at or below this is off
 SILENT_DB = -60.0            # a deck fader at or below this is off
+HELD_MIN_BEATS = 1.0         # a note sounding into a deck window with this much left comes in on its first beat
+LEAD_IN_BEATS = 8.0          # a performer's notes this far before its window ring into it (rendered as context)
 PARAMS = {'volume_db': 0.0, 'low_db': 0.0, 'mid_db': 0.0, 'high_db': 0.0, 'filter': 0.0}
 STYLES = ('blend', 'bass_swap', 'filter', 'cut')
 
@@ -89,6 +91,7 @@ class Deck:
         self.song = None                # what live_load put here: {'name', 'bars', 'tracks'}
         self.tp = []                    # [(beat, semitones)]: transpose from that beat on
         self.quiet = 0                  # samples since the deck last had input (dormant when long)
+        self.held = None                # (bar line beat, first bar beat, 'bar N'): cued until that bar is rendered
 
     def describe(self, level=True, values=None):
         v = values or self.values
@@ -97,7 +100,10 @@ class Deck:
             db = v[b + '_db']
             return f"{b[0].upper()} " + ('KILL' if db <= KILL_DB else f"{db:+g}")
         fader = 'off' if v['volume_db'] <= SILENT_DB else f"{v['volume_db']:+g} dB"
-        s = (('CUE (off air)' if self.cue else 'on air') + f" | fader {fader} | eq "
+        state = 'CUE (off air)' if self.cue else 'on air'
+        if self.held:
+            state = f"HELD off air: on air at {self.held[2]} if that whole bar is rendered by then, else a bar later"
+        s = (state + f" | fader {fader} | eq "
              + ' '.join(band(b) for b in ('low', 'mid', 'high')) + f" | filter {v['filter']:+.2f}"
              + (f" | transpose {self.transpose:+d}" if self.transpose else ''))
         if level:
@@ -136,7 +142,7 @@ def _sum_lanes(a, b):
     return [[float(x), float(u + v)] for x, u, v in zip(xs, ia, ib)]
 
 
-def read_song(path, deck, bars, house_bpb):
+def read_song(path, deck, bars, house_bpb, performers=()):
     """-> (song summary, buses [(name, fx, volume_db)], tracks [dict], clip specs, notes on what was skipped)."""
     root = os.path.abspath(path)
     fn = os.path.join(root, 'project.json')
@@ -188,7 +194,18 @@ def read_song(path, deck, bars, house_bpb):
                 auto.setdefault(f"track:{deck}.{name}", {})[key] = pts
             else:
                 skipped['automation'].append(f"{name} {key}")
-        notes =[(n[0] - beat0, n[1], n[2], n[3]) for n in t.get('notes', []) if beat0 <= n[0] < beat1]
+        notes = [(n[0] - beat0, n[1], n[2], n[3]) for n in t.get('notes', []) if beat0 <= n[0] < beat1]
+        context = []
+        if name in performers and notes:
+            # a performer renders what came before as context: held notes keep their real start, short ones ring in
+            context = [(n[0] - beat0, n[1], n[2], n[3]) for n in t.get('notes', [])
+                       if beat0 - LEAD_IN_BEATS <= n[0] < beat0 or (n[0] < beat0 < n[0] + n[2])]
+        else:
+            # a note still sounding at the window's start (a drone, a pad, a held string) comes in on its first beat
+            # with what is left of it, as in a studio render of the same window; one with less than a beat left is
+            # a tail
+            notes += [(0.0, n[1], min(n[0] + n[2], beat1) - beat0, n[3]) for n in t.get('notes', [])
+                      if n[0] < beat0 and n[0] + n[2] - beat0 >= HELD_MIN_BEATS]
         full = f"{deck}.{name}"
         out = t.get('output', 'master')
         tracks.append({'track': full, 'instrument': t['instrument'], 'fx': _rename_fx(t.get('fx'), deck, tnames),
@@ -196,8 +213,8 @@ def read_song(path, deck, bars, house_bpb):
                        'sends': {f"{deck}.{b}": float(v) for b, v in (t.get('sends') or {}).items()},
                        'output': None if out in (None, 'master') else f"{deck}.{out}", 'root': root})
         if notes:
-            clips.append({'track': full, 'notes': '; '.join(f"{s:g} {m} {du:g} {v}" for s, m, du, v in notes),
-                          'beats': beat1 - beat0})
+            clips.append({'track': full, 'notes': '; '.join(f"{s:.10g} {m} {du:.10g} {v}" for s, m, du, v in notes),
+                          'beats': beat1 - beat0, **({'context': sorted(context)} if context else {})})
         else:
             skipped['silent in range'].append(name)
     tracks, dropped = _order_tracks(tracks)
