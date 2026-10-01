@@ -1623,6 +1623,8 @@ def warm_effects():
     """Compile/load every effect kernel once before audio starts: a first numba compile mid-set would hold the GIL
     long enough to starve the device."""
     for t in F.FX_DEFAULTS:
+        if t not in F.PROCS:    # studio-only effects (the guitar rig) bake in the workers
+            continue
         spec = {'type': t}
         if t == 'duck':
             spec['every_beats'] = 1

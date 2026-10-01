@@ -17,6 +17,8 @@
   fitted in a late-60s guitar record study (20 of 22 single lead notes passed a blind exam). Presets
   `strat70_lead`, `strat70_rhythm`, `strat70_rotary`, `pbass70`, `kit70`; each voice's INFO `rigs` holds the fx
   chain its presets were fitted with, and `voice_help` prints them one line each.
+- Fix: the live engine crashed at startup since the rig effects were registered (its effect warm-up tried to
+  build a live block for studio-only types); it now skips them, and they bake in the workers as before.
 - Skill: `references/blind-tests.md` (the eye exam and the blind exam: fair clips, reading the answers, the
   song-level checks single notes miss), and the guitar study's lessons in sound design (register first, harmonic
   profile, stem bias, rig order, fast rig fit), composition (phrase placement, band feel, bends to chord tones),

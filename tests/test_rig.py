@@ -69,6 +69,14 @@ def test_wah_position_automation_moves_the_tone(proj):
     assert centroid(sweep[half:]) > centroid(sweep[:half])
 
 
+def test_live_startup_warmup_skips_studio_only_effects():
+    # the rig types are registered in FX_DEFAULTS but have no live block: the warm-up at engine start crashed on them
+    from ismail.live import fx_blocks
+    from ismail.live.engine import warm_effects
+    assert any(t not in fx_blocks.PROCS for t in rig.DEFAULTS)
+    warm_effects()
+
+
 def test_live_bakes_rig_effects(tmp_path):
     from ismail.live.engine import Engine
     eng = Engine(str(tmp_path), bpm=120, bpb=4, workers=0, device='none')
