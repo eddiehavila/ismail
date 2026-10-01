@@ -1,10 +1,23 @@
 [project]
 name = "ismail"
-version = "0.2.0"
-description = "An agent-operated DAW: text in, audio as text out, with an MCP server"
+version = "0.3.0"
+description = "A DAW for AI agents: write music as text, read the audio back as text, and play it live. MCP server, CLI and an agent skill."
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.10"
+authors = [{name = "Nate Codes (newsbubbles)"}]
+keywords = ["daw", "music", "mcp", "mcp-server", "ai-agents", "agent-skills", "claude-code", "synthesizer",
+            "audio-analysis", "live-coding"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Topic :: Multimedia :: Sound/Audio :: Analysis",
+    "Topic :: Multimedia :: Sound/Audio :: Sound Synthesis",
+    "Topic :: Multimedia :: Sound/Audio :: Editors",
+]
 dependencies = [
     "numpy>=2.0",
     "scipy>=1.12",
@@ -22,6 +35,15 @@ separate = ["demucs>=4.0"]
 video = ["opencv-python>=4.8", "pycollada>=0.8", "pillow>=10.0"]
 live = ["sounddevice>=0.4"]
 dev = ["pytest>=8.0"]
+
+[project.urls]
+Homepage = "https://newsbubbles.github.io/ismail/"
+Repository = "https://github.com/newsbubbles/ismail"
+Changelog = "https://github.com/newsbubbles/ismail/blob/main/CHANGELOG.md"
+
+[project.scripts]
+ismail = "ismail.__main__:cli"
+ismail-mcp = "ismail.mcp_server:main"
 
 [build-system]
 requires = ["setuptools>=68"]

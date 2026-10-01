@@ -1,0 +1,19 @@
+cff-version: 1.2.0
+message: "If you use ismail in your work, please cite it as below."
+title: "ismail: a DAW for AI agents"
+abstract: "An agent-operated digital audio workstation: an AI agent writes music as notes, sound patches and code, renders it, reads the audio back as text, edits, and performs it live."
+type: software
+authors:
+  - name: "Nate Codes"
+    alias: newsbubbles
+version: 0.3.0
+license: MIT
+repository-code: "https://github.com/newsbubbles/ismail"
+url: "https://newsbubbles.github.io/ismail/"
+keywords:
+  - music
+  - digital audio workstation
+  - AI agents
+  - model context protocol
+  - audio analysis
+  - sound synthesis
