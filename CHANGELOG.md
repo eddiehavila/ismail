@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Roles and the migration process
+
+- `development.md`: the roles as a multi-agent system (the user, song agents, the dev agent, subagents: what each
+  owns and writes, and the contracts between them); the inclusion review before anything goes into the public repo
+  (general beyond its song? measured from the user, who must say yes first? fitted to a commercial record or
+  carrying a brand name, held for the user's decision? provenance recorded); preparing a voice or an engine for
+  ismail in eleven steps (copy never move, strip the song out, render the same anywhere, live parity, INFO as manual
+  and provenance, nothing existing changes by accident, tests, cost, docs, evidence in the PR); how to take an API
+  change a song asks for (find the workaround and its cost, check it does not exist already, extend before adding,
+  design the text first, close the loop, keep old names, prove it on the asking song); lessons from running the loop.
+
 ### The shared machine
 
 - `ismail.machine`, the governor for one computer shared by many sessions (2026-10-02: six sessions stacked heavy
