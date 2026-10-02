@@ -10,6 +10,13 @@ ROLE
   song, and do not run git in the ismail repo. Missing a capability: build it in the song (voices/, work/) and list
   it in songs/<slug>/HANDOFF.md. Changing ismail itself only when the user asks: skills/ismail/references/development.md.
 
+THE PERSON
+- Their words are data: lexicon_note(said=<verbatim>, craft=...) when they name a quality or a problem, map it
+  (means=...) once you know, set the outcome later; lexicon_find before acting on a word or explaining a change;
+  lexicon_view at the start of a session. Words about the work only, never emotions. Every piece states its
+  objective in their words (project_set(objective=)); versions use project_new(derived_from=). Read
+  references/user-experience.md.
+
 CONVENTIONS
 - Every tool takes `project` (a directory). Bars are 1-indexed; ranges [a, b] are inclusive.
 - Note text: '<beat> <pitch> <dur_beats> [vel]' per line or ';'-separated, beats relative to the target bar

@@ -266,8 +266,12 @@ def _check_voices(spec, P):
 
 @op()
 def project_new(project: str, bpm: float, length_bars: int, name: str = None, beats_per_bar: int = 4,
-                offset_sec: float = 0.0, reference: str = None) -> str:
-    """Create a new project directory. offset_sec = time of bar 1 (match a reference's grid with analyze_grid)."""
+                offset_sec: float = 0.0, reference: str = None, objective: str = None,
+                derived_from: str = None) -> str:
+    """Create a new project directory. offset_sec = time of bar 1 (match a reference's grid with analyze_grid).
+    objective: what this piece is for, in the person's words ("keep a listener asleep for 3 hours"); see project_set.
+    derived_from: the project this one is a version of; its objectives and lineage are carried over, so a derivative
+    keeps the intent it came from (intent provenance)."""
     root = os.path.abspath(project)
     if os.path.exists(os.path.join(root, 'project.json')):
         raise OpError(f"project already exists at {root}; use project_info / project_set")
@@ -278,6 +282,17 @@ def project_new(project: str, bpm: float, length_bars: int, name: str = None, be
          "sounds": {}, "reference": None}
     if reference:
         d['reference'] = {"file": os.path.abspath(reference)}
+    if derived_from:
+        src = os.path.join(os.path.abspath(derived_from), 'project.json')
+        if not os.path.exists(src):
+            raise OpError(f"derived_from {derived_from!r} has no project.json; give the folder of the project this "
+                          f"one is a version of")
+        with open(src, encoding='utf8') as f:
+            parent = json.load(f)
+        d['lineage'] = [{"project": os.path.abspath(derived_from), "name": parent.get('name'),
+                         "objectives": parent.get('objectives', [])}] + parent.get('lineage', [])
+    if objective:
+        d['objectives'] = [_objective(objective, 'user')]
     with open(os.path.join(root, 'project.json'), 'w', encoding='utf8') as f:
         json.dump(d, f, indent=1)
     return f"created project {d['name']} at {root}: {bpm} BPM, {length_bars} bars, bar 1 at {offset_sec}s"
@@ -290,6 +305,15 @@ def project_info(project: str) -> str:
     d = P.d
     L = [f"{d['name']}: {d['bpm']} BPM, {d['beats_per_bar']}/4, {d['length_bars']} bars, bar 1 at {d['offset_sec']}s, "
          f"song {(d['length_bars'] * d['beats_per_bar'] * 60 / d['bpm'] + d['offset_sec']):.1f}s"]
+    if d.get('objectives'):
+        o = d['objectives'][-1]
+        L.append(f"objective: {o['text']!r} (by {o['by']}, {o['date'][:10]})"
+                 + (f"; {len(d['objectives']) - 1} earlier" if len(d['objectives']) > 1 else ''))
+    else:
+        L.append("objective: none stated (project_set(objective=...) in the person's words: what is this piece for?)")
+    for anc in d.get('lineage', [])[:3]:
+        last = (anc.get('objectives') or [{}])[-1].get('text')
+        L.append(f"derived from {anc.get('name')}" + (f", whose objective was {last!r}" if last else ''))
     if d.get('reference'):
         L.append(f"reference: {d['reference'].get('file')}" + (f" (stems: {d['reference']['stems_dir']})" if d['reference'].get('stems_dir') else ''))
     L.append(f"tracks ({len(d['tracks'])}):")
@@ -312,6 +336,10 @@ def project_info(project: str) -> str:
     return '\n'.join(L)
 
 
+def _objective(text, by):
+    return {"text": text.strip(), "by": by, "date": time.strftime('%Y-%m-%dT%H:%M:%S')}
+
+
 def _ranges(xs):
     if not xs:
         return ''
@@ -329,9 +357,13 @@ def _ranges(xs):
 
 @op(mutates=True)
 def project_set(project: str, bpm: float = None, length_bars: int = None, offset_sec: float = None,
-                reference: str = None, tail_sec: float = None, name: str = None, reference_stems: str = None) -> str:
+                reference: str = None, tail_sec: float = None, name: str = None, reference_stems: str = None,
+                objective: str = None, objective_by: str = 'user') -> str:
     """Change project settings. Changing bpm keeps notes on the same beats (the song gets faster/slower).
-    reference_stems = a folder of already-separated stems (drums.wav, bass.wav, ...) for the reference."""
+    reference_stems = a folder of already-separated stems (drums.wav, bass.wav, ...) for the reference.
+    objective: what the piece is for, in the words of whoever set it (objective_by, default 'user'): a sleep set's
+    might be "stay asleep", a cover's "sound like the 1970 record". Earlier objectives are kept as history;
+    project_info shows the current one, and every version made from this one carries them (derived_from)."""
     P = _load(project)
     ch = []
     for k, v in (('bpm', bpm), ('length_bars', length_bars), ('offset_sec', offset_sec), ('tail_sec', tail_sec),
@@ -345,6 +377,11 @@ def project_set(project: str, bpm: float = None, length_bars: int = None, offset
             raise OpError(f"reference file {reference!r} not found")
         P.d['reference'] = dict(P.d.get('reference') or {}, file=p)
         ch.append(f"reference={p}")
+    if objective is not None:
+        if not objective.strip():
+            raise OpError("objective: say what the piece is for, in the person's words")
+        P.d.setdefault('objectives', []).append(_objective(objective, objective_by))
+        ch.append(f"objective={objective!r} (by {objective_by})")
     if reference_stems is not None:
         if not P.d.get('reference'):
             raise OpError("set reference first")
@@ -450,6 +487,60 @@ def guide(project: str = None) -> str:
     """Read this first: how to use this DAW as an agent (workflow, conventions, which tool for which question)."""
     from .guide import GUIDE
     return GUIDE
+
+
+@op()
+def lexicon_note(project: str = None, said: str = None, means=None, craft: str = None, where: str = None,
+                 outcome: str = None, why: str = None, who: str = 'user', id: str = None) -> str:
+    """Record what the person called something, and what it means in ismail. said: their words, verbatim ("too
+    clean", "the snare is boxy"). means: the system terms it maps to, a list or ';'-separated ("fx eq peak 400 Hz -3
+    dB on snare; analyze_timbre centroid"). craft: the role the word belongs to (composer, arranger, performer, sound
+    designer, recording/mixing/mastering engineer, producer, dj, director, cinematographer, colourist, editor,
+    choreographer, listener). outcome: open | worked | partly | missed, with why. Update an entry with id=... (means,
+    craft, outcome, why); the words themselves never change. Words about the work only: never record emotion, mood
+    or health. The file is local and shared by every session (lexicon_view shows where). Returns the entry and what
+    the same words meant before."""
+    from . import lexicon as LX
+    song = os.path.basename(os.path.abspath(project)) if project else None
+    before = LX.find(said, who) if said and not id else []
+    try:
+        e = LX.note(said, means, craft, song, where, outcome, why, who, id)
+    except ValueError as ex:
+        raise OpError(str(ex))
+    L = [("updated " if id else "noted ") + LX.line(e)]
+    if before:
+        L.append("the same words before:")
+        L += ['  ' + LX.line(b) for _, b, _ in before[:5]]
+    if not e.get('means'):
+        L.append(f"not mapped yet: when you know what it meant, lexicon_note(id={e['id']!r}, means=[...])")
+    return '\n'.join(L)
+
+
+@op()
+def lexicon_find(project: str = None, text: str = None, who: str = 'user') -> str:
+    """Look up the person's words in both directions: from their word to the system ("what did 'crisp' mean last
+    time?") and from a system term to their word (text='high shelf' finds what they call it, so you can say it their
+    way). Best matches first, with whether the change worked."""
+    from . import lexicon as LX
+    if not text:
+        raise OpError("text: the person's words, or a system term (an op, param or effect name)")
+    hits = LX.find(text, who)
+    if not hits:
+        return (f"no entries share words with {text!r}. If the person just used it, lexicon_note it; "
+                f"lexicon_view lists everything")
+    return '\n'.join(f"[{side}] " + LX.line(e) for _, e, side in hits)
+
+
+@op()
+def lexicon_view(project: str = None, who: str = 'user', craft: str = None, since: str = None) -> str:
+    """The person's vocabulary as a readout: entries by craft and outcome, the share of trade words in what they
+    say by month (description moving toward technique), new entries per week, entries not mapped yet, the newest
+    ten. since='2026-10-01' limits it. Read it at the start of a session to speak the person's language."""
+    from . import lexicon as LX
+    try:
+        return '\n'.join(LX.view(who, craft, since))
+    except ValueError as ex:
+        raise OpError(str(ex))
 
 
 @op()

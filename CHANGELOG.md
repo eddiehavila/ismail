@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### The person: lexicon, objectives, user-experience reference
+
+- The lexicon: `lexicon_note`, `lexicon_find`, `lexicon_view` keep a two-way map between the person's own words for
+  what they hear and see ("boxy", "too clean") and ismail's terms (ops, parameters and their direction, effects,
+  measurements), with the song, the moment, the craft the word belongs to (composer to colourist) and whether the
+  change worked. Lookups go both ways; the view reads as a learning curve (the share of trade words by month, the
+  crafts a vocabulary grows in). One local, append-only file shared by every session (`songs/_user/lexicon.jsonl`
+  or `$ISMAIL_LEXICON`), never committed; a `who` per entry for other people's feedback. Words about the work only:
+  never emotion, mood or health.
+- Objectives: `project_new(objective=)` and `project_set(objective=, objective_by=)` record what a piece is for, in
+  the person's words, with history; `project_info` shows it. `project_new(derived_from=)` carries the original's
+  objectives and lineage into a version (intent provenance).
+- Skill: `references/user-experience.md` (the lexicon, exams and pages, objectives, consent, what never to
+  record), a SKILL.md non-negotiable, and a THE PERSON section in `guide`.
+
 ### Fixes from song handoffs
 
 - Render memory: a track's whole output stays in memory only while an effect reads it (a sidechain or vocoder
