@@ -52,7 +52,7 @@ A DAW built to be operated by an AI agent. Everything goes in as text (notes, in
 
 One set of operations, three ways in:
 
-- **MCP server** for Claude Code, Cursor or any MCP client: `python -m ismail.mcp_server` (stdio, 91 tools)
+- **MCP server** for Claude Code, Cursor or any MCP client: `python -m ismail.mcp_server` (stdio, 96 tools)
 - **CLI**: `python -m ismail -p <project> <op> [args]`
 - **Python**: `from ismail import api`
 
