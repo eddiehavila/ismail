@@ -16,6 +16,51 @@ ismail is a DAW you drive with text: notes, patches, effects and automation go i
 3. **Believing one number.** Matching notes while the result sounds nothing like the target; transcribing noise as notes; buying a better score with loudness.
 4. **The console sound.** Every part a basic sprite patch (the `synth` type), so a cowboy song sounds like a 1990s game console playing one. Acoustic and electric instruments need a mimic profile or a measured voice, modeled on an example.
 
+## Your role, and where things live
+
+**Two roles; making music is the default.** Whenever the task is music (a song, a sound, a set, a video) you are a
+song agent, and your writable area is `songs/<slug>/` and nothing else. You do not edit `ismail/`, `skills/`,
+`tests/`, the README or another song, and you do not run git in the ismail repository. When ismail lacks something,
+build it inside the song (a voice in `voices/`, with its data files named `<voice>_*` beside it so the render cache
+sees them; a song-local engine as `voices/<name>_engine.py`; scripts in `work/`), prove it on the song, and list it
+in the song's `HANDOFF.md`: one heading per finding, evidence beside it. A dev agent reads every handoff every
+couple of hours, asks the user what to build, and messages your session when something you handed off is in the
+engine; then mark it migrated in your `HANDOFF.md`. Changing ismail itself is the other role, only when the user
+asks for it explicitly: read `references/development.md` first (it holds the migration loop the dev role runs).
+
+```
+ismail/                  the engine ("the engine" always means ismail/ on main)
+songs/                   git-ignored by the ismail repo, always: no song is ever committed to it
+songs/<slug>/            everything one song owns
+  HANDOFF.md             what can migrate into ismail: elements, evidence, files, proposed ops, tests, skill text
+  build.py               rebuilds proj/ (never deletes: an old proj/ moves to backups/)
+  voices/                the song's voices, profiles and song-local engine modules (build.py copies them
+                         into proj/voices/, where the engine looks)
+  work/                  analysis, measurement and exam scripts, and their saved output
+  ref/                   reference audio (analysis only) and SOURCES.md (where from, licence)
+  notes/                 the Session Sheet, feedback.md (the user's words, verbatim)
+  exam/                  ear-test pages
+  proj/                  the ismail project (generated)
+  <Title>.wav / .mp3     the finished master
+  .git/, .gitignore      optional: the song's own repository for checkpoints
+songs/_<name>/           code shared by several songs (songs/_dubstep)
+songs/_briefs/           briefs for starting a song in a fresh session
+```
+
+**Song checkpoints with git**: `git init` inside `songs/<slug>/` (the ismail repository ignores the whole `songs/`
+folder, nested repositories included), never in the ismail checkout. The song's `.gitignore` keeps out audio and
+anything big or regenerable: `*.wav *.mp3 *.flac *.ogg`, `ref/`, `proj/`, `backups/`, live recordings,
+`exam/**/*.mp3`, profiles a script rebuilds, `__pycache__/`. Local commits only; a remote only if the user asks.
+
+**Words**: "the engine" is `ismail/` on main; "song code" is anything under `songs/<slug>/`. A song never modifies
+the engine; it adds song code.
+
+**Use what ismail has before writing a script.** Call `guide` (the op) at the start and again after a long
+stretch of work: it lists the ops, and about 20 of them measure audio (grids, drums, swing, sections, envelopes per
+band, spectra, timbre, comparisons). They take a path as a source, not only project tracks. A song that wrote its
+own drum scanner and band comparisons had all of them available. A measuring script a song still needs is a
+`HANDOFF.md` item.
+
 ## The loop (every piece, every time)
 
 0. **Examples.** Ask the user for a recording of what they want (a song, a sound, a link), even if they did not offer one. Recall what the genre is played on and find an example of each instrument that matters (`references/instruments.md`). A live set, a jam or a "quick" request starts here too: a quick framing shortens the Session Sheet, never this step or the non-negotiables (a live G-funk beat skipped them and the user called draft 1 "horrible").
@@ -56,22 +101,33 @@ Registers must not collide: at most one part per octave band doing sustained wor
 - `references/mastering.md`: the master pass: loudness targets by genre or reference, the master chain, and checks. Read before calling a song finished.
 - `references/sound-design.md`: recipes per role with parameter ranges, gain staging, when and how to use `instrument_fit`, `track_fit`, `sound_extract`, formant and vocoder voices, guitars and their rigs (register first, harmonic profile, stem bias, fast rig fit). Read when choosing or designing sounds.
 - `references/listening.md`: which analysis tool answers which question, how to read the text views (digits, rolls, zoom codes), and the Listening Report checks. Read before the first listen.
+- `references/user-experience.md`: working with the person: the lexicon (their words for what they hear and see, mapped to ismail's terms and kept as their culture and learning curve), exams and feedback pages, objectives and intent provenance across versions, and what never to record. Read at the start of every session with a person.
 - `references/blind-tests.md`: ear tests for the user: the eye exam (lenses that each change one named thing) to find a direction, and the blind exam (real vs mine, hidden) to know when a sound or a performance is done; how to make them fair, how to read the answers, and the song-level checks single notes miss (note clashes, measured microtiming). Read when the numbers plateau or before calling an instrument convincing.
 - `references/recreate.md`: matching a reference recording: grid and alignment, separation, consensus transcription, comparisons, what the scores mean, and the traps that make a draft score better while sounding worse. Read whenever a reference track is involved.
-- `references/live.md`: playing live with the live engine: the Set Sheet and arc, queueing a whole arc in one batch, sweeps with ramps, listening and recording while it plays, decks (load a song, prepare it cued, transition), running a long set as a DJ loop (read the audience, small edits, a runway before every question, energy builds and drops, metric modulation for style changes), phrase voices for performers, runway before slow jobs, reading the audience (contrast over time, dynamics from effects, derived melodies),
-your latency, the pre-flight, the DJ kit (`ismail.live.djkit`), a set's folder layout, playing for a screen
-recording, what is not live yet. Read before any `live_*` call.
+- `references/live.md`: playing live with the live engine: the Set Sheet and arc, queueing a whole arc in one batch, sweeps with ramps, listening and recording while it plays, decks (load a song, prepare it cued, transition), running a long set as a DJ loop (read the audience, small edits, a runway before every question, energy builds and drops, metric modulation for style changes), phrase voices for performers, runway before slow jobs, reading the audience (contrast over time, dynamics from effects, derived melodies), your latency, the pre-flight, the DJ kit (`ismail.live.djkit`), a set's folder layout, playing for a screen recording, what is not live yet. Read before any `live_*` call.
 - `references/music-video.md`: music videos with `ismail.video`: the per-song `video/` folder, the CLI, the shot kit (units, floors, posing, mirrors, GPU budget), the cut list and note-driven glitches, contact-sheet review and the creative rules. Read before planning any video.
+- `references/development.md`: only for changing ismail itself, when the user asks: worktrees, the collaboration must-haves (what is not yours is not touched, nothing unmerged is deleted, the user merges), the roles as a multi-agent system (the user, song agents, the dev agent, subagents: who owns and writes what), the migration loop (intake with `python -m ismail.handoffs`, the ledger in `songs/_migration/`, the user decides, build, announce to the sessions, close), the inclusion review (general? may it be public? anything measured from the user needs their yes first), preparing a voice or an engine for ismail, API changes a song asks for, the handoff format.
 - `references/LOCAL.md`, if it exists: an index of the user's private references kept on this machine only (never committed). Read it at the start of a task; it says which private file covers which kind of song.
 
 ## Non-negotiables
 
+- **Share what would help others.** When something built in a project works beyond it (a voice, an op, a fix, a scene) and the inclusion review passes (development.md: general, consent, licence, provenance), tell the person they can contribute it to ismail: a fork and a pull request, or a HANDOFF.md entry for the dev agent. Never publish for them.
+- **The person's words are data.** When they name a quality, a problem or a fix ("boxy", "too clean"), `lexicon_note` it verbatim before acting, map it once you know what it meant, and say things back their way (`lexicon_find`). Words about the work only, never their emotions. Every piece states its objective in their words (`project_set(objective=)`); a version made from another says so (`project_new(derived_from=)`).
+- **The machine is shared.** Several sessions render, measure and run Blender on one computer with one cooler. Call
+  `machine_status` before anything that runs over a minute and wait when it says WAIT. Heavy ops (render, separate,
+  mimic_measure, the fits, live_parity) take a slot themselves and refuse with the reason; anything outside ismail
+  (Blender, whisper, demucs, a long script) runs through `python -m ismail.machine run --gpu|--cpu -- <command>` so
+  it takes one too. A hot GPU means the machine is hot, not that the CPU is free (they share the cooler). Never run
+  two heavy jobs of your own at once. When another session holds the slot, do lighter work or ask the user. Size
+  the job to the question: the smallest model that answers, 2-bar windows, one file at a time with a check between.
+  Do not sleep-poll a long job: run it in the background and let the harness say when it ends, and never end a turn
+  with a heavy job running that the user has not been told about (what runs, how long, how it stops).
 - Never report a render as good without numbers from at least `render` output (LUFS, peak, per-track peaks, SILENT flags) and one analysis view of the changed section.
 - Every track peak below 0 dBFS; master limiter gain reduction under about 6 dB (more means the faders are wrong, not that the limiter is working).
 - After writing notes for a part, read them back (`notes_read view='roll'` for a bar or two) before rendering. Most note bugs are visible there.
 - When matching a reference: never transcribe with raw `notes_from_audio` over a whole loop section; use `notes_from_audio_loop` (consensus). Never raise a track's level to improve a perceptual score. Never call a match done while `cmp_summary` shows a WARNING line or the mix perceptual group is far under its ceiling.
 - Reference audio is for analysis only. Do not place slices of the reference in the render; make the sounds.
-- No acoustic or electric instrument as a bare sprite (`synth`) patch: use a library voice, measure it with `mimic_measure`, build a measured voice, or use a sampler, and name the example it is modeled on. Genres built on records (hip-hop, G-funk, boom bap) get measured drums and bass too: `analyze_kit` on the reference drums, then a voice built from its components, or `sound_extract` + `instrument_fit`. Generic kick and snare fits failed there; a measured kit passed.
+- No acoustic or electric instrument as a bare sprite (`synth`) patch: use a library voice, measure it with `mimic_measure`, build a measured voice, or use a sampler, and name the example it is modeled on: `project_info` lists every track as measured, designed or unstated, `render` names the unstated ones, and `track_model` records an example the tools could not see (or `on='designed'` for a sound made on purpose). Genres built on records (hip-hop, G-funk, boom bap) get measured drums and bass too: `analyze_kit` on the reference drums, then a voice built from its components, or `sound_extract` + `instrument_fit`. Generic kick and snare fits failed there; a measured kit passed.
 - Numbers that can be measured are measured, never guessed: bar 1, tuning and swing (`analyze_grid`, `analyze_swing`), the pieces of a drum kit (`analyze_kit`), the fader balance against a reference (`levels_from_ref`). A guessed swing of 0.07 beat against a measured 0.03 was audible.
 - Everything the user hears goes through a master stage, live sets included, and its loudness is read at the output (`render` prints QUIET under -20 LUFS). A live set at -21 LUFS read as "nothing" at low volume.
 - Before a full draft goes to the user, `analyze_sections` with the Sheet's form map: the section before the climax peaks 3 dB or more under it (a build as loud as its climax only showed up there), and nothing that should be heard sits 35 dB under the loudest section.

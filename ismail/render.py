@@ -1,4 +1,5 @@
 """Project -> audio. Tracks render in dependency order (sidechain / vocoder sources first)."""
+import collections.abc
 import hashlib
 import json
 import os
@@ -7,7 +8,7 @@ import time
 import numpy as np
 import soundfile as sf
 
-from . import dsp, fx as fxmod, instruments, voices
+from . import dsp, fx as fxmod, instruments, notation, voices
 
 LOG_PARAMS = ('cutoff', 'freq', '_hz')
 PRE_ROLL_BEATS = 8  # rendered before a partial window so tails/sidechains settle
@@ -71,6 +72,56 @@ class Ctx:
         self.r.gain_reduction[key] = min(self.r.gain_reduction.get(key, 0.0), gr_db)
 
 
+class _Stem:
+    """One track's or bus's output kept from its first to its last non-zero sample, as float32: a song of 70
+    tracks that each play a few notes held ~330 MiB of float64 per track and ran out of memory."""
+    __slots__ = ('a', 'y', 'n')
+
+    def __init__(self, y):
+        self.n = y.shape[1]
+        nz = np.flatnonzero(np.abs(y).max(0) > 0) if self.n else []
+        self.a = int(nz[0]) if len(nz) else 0
+        self.y = y[:, self.a:int(nz[-1]) + 1 if len(nz) else 0].astype(np.float32)
+
+    def scale(self, g):
+        if np.ndim(g):
+            self.y *= g[self.a:self.a + self.y.shape[1]]
+        else:
+            self.y *= g
+
+    def crop(self, c):
+        """Drop the first c samples."""
+        self.n -= c
+        self.a -= c
+        if self.a < 0:
+            self.y = self.y[:, -self.a:]
+            self.a = 0
+
+    def full(self):
+        out = np.zeros((2, self.n))
+        m = min(self.y.shape[1], self.n - self.a)
+        if m > 0:
+            out[:, self.a:self.a + m] = self.y[:, :m]
+        return out
+
+
+class Stems(collections.abc.Mapping):
+    """Each track's and bus's output by name ('bus:<name>' for buses), built full length when read: going through
+    them one at a time holds one at a time."""
+
+    def __init__(self, stems):
+        self._s = stems
+
+    def __getitem__(self, k):
+        return self._s[k].full()
+
+    def __iter__(self):
+        return iter(self._s)
+
+    def __len__(self):
+        return len(self._s)
+
+
 class Renderer:
     def __init__(self, project, root, start_bar=None, end_bar=None, only=None, cache=True):
         self.project = project
@@ -102,6 +153,7 @@ class Renderer:
         self.use_cache = cache
         self.cache_dir = os.path.join(root, 'cache')
         self.stats = {}
+        self.early = {}          # track -> notes nudged before the song's first sample (moved to it)
         instruments.set_resolvers(self.load_sound, self.load_table)
 
     # ------------------------------------------------------------------ sounds
@@ -139,13 +191,19 @@ class Renderer:
     def beat_to_win_sec(self, b):
         return self.offset + b * self.spb - self.t0
 
-    def track_notes_sec(self, tr):
+    def track_notes_sec(self, tr, name=None):
         out = []
         lo = self.r_b0 - 16 if not self.full else -1e9  # notes starting a bit before the window still ring
-        for st, p, d, v in tr.get('notes', []):
+        # each note where it sounds: its beat moved by the track's and its own offset (notation.placed), as on a deck
+        for st, p, d, v in notation.placed(tr.get('notes', []), self.bpm, tr.get('offset_ms', 0.0)):
             if st + d < lo or st >= self.win_b1:
                 continue
             s = self.beat_to_win_sec(st)
+            if s < 0 and self.full:
+                # nudged before the song's first sample: it starts there instead (project_set offset_sec makes room)
+                self.early[name] = self.early.get(name, 0) + 1
+                out.append((0.0, int(p), d * self.spb, int(v)))
+                continue
             if s < 0:
                 # started before the render window: a note still sounding there with at least HELD_MIN_BEATS left
                 # (a drone, a pad, a held string) comes in at the window's first sample with what is left of it; the
@@ -226,13 +284,13 @@ class Renderer:
                 mix_auto[key] = curve
         y = np.zeros((2, n))
         if inst is not None:
-            notes = self.track_notes_sec(tr)
+            notes = self.track_notes_sec(tr, name)
             if notes:
                 y += instruments.render_instrument(inst, notes, n, inst_auto, self.bpm, self.sr, self.root,
-                                                  self.r_b0 if not self.full else -self.offset / self.spb)
+                                                  self.r_b0 if not self.full else -self.offset / self.spb, self.bpb)
         for clip in tr.get('audio', []):
             snd = self.load_sound(clip['sound'])
-            s0 = int(round(self.beat_to_win_sec(clip['at_beat']) * self.sr))
+            s0 = int(round((self.beat_to_win_sec(clip['at_beat']) + tr.get('offset_ms', 0.0) / 1000.0) * self.sr))
             a = int(clip.get('offset_sec', 0.0) * self.sr)
             seg = snd[:, a:]
             if clip.get('length_beats'):
@@ -264,6 +322,10 @@ class Renderer:
         buses = {b: np.zeros((2, self.n)) for b in self.project.get('buses', {})}
         master = np.zeros((2, self.n))
         stems = {}
+        # a track's full output stays in memory only while an effect may read it (a sidechain or vocoder source)
+        sources = set().union(*(self.deps(t) for t in tracks.values()),
+                              *(self.deps(b) for b in self.project.get('buses', {}).values()),
+                              self.deps(self.project.get('master', {})))
         for name in order:
             tr = tracks[name]
             keys[name] = self.cache_key(name, tr, [keys[d] for d in sorted(self.deps(tr))])
@@ -278,14 +340,15 @@ class Renderer:
                 if self.use_cache:
                     os.makedirs(self.cache_dir, exist_ok=True)
                     np.save(path, y.astype(np.float32))
-            self.post_fx[name] = y
+            if name in sources:
+                self.post_fx[name] = y
             self.stats[name] = {'sec': round(time.time() - t0, 2), 'cached': cached}
             audible = not tr.get('mute') and (not any_solo or tr.get('solo'))
             if self.only is not None and name not in self.only:
                 audible = False
             if not audible:
                 continue
-            stems[name] = y
+            stems[name] = _Stem(y)
             out = tr.get('output', 'master')
             if out != 'master' and out not in buses:
                 raise RenderError(f"track {name!r} outputs to unknown bus {out!r}; buses: {list(buses)}")
@@ -311,7 +374,7 @@ class Renderer:
             for i, f in enumerate(bus.get('fx', [])):
                 y = fxmod.apply_fx(y, fxmod.normalize(f), ctx, i)
             y = y * dsp.undb(vol)
-            stems['bus:' + bname] = y
+            stems['bus:' + bname] = _Stem(y)
             master += y
         m = self.project.get('master', {})
         ctx = Ctx(self, 'master', {}, self.n)
@@ -327,7 +390,8 @@ class Renderer:
             e_post = np.convolve(np.sum(master ** 2, 0), k, 'same')
             mg = np.sqrt((e_post + 1e-12) / (e_pre + 1e-12))
             mg = np.where(e_pre > 1e-10, mg, 1.0)
-            stems = {k2: v * mg for k2, v in stems.items()}
+            for v in stems.values():
+                v.scale(mg)
         vol = m.get('volume_db', 0.0)
         pts = (m.get('automation') or {}).get('volume_db')
         if pts:  # master fade: dB offset curve, like track volume automation
@@ -335,14 +399,17 @@ class Renderer:
                                          self.n, self.bpm, self.sr, self.offset)
         master = master * dsp.undb(vol)
         # stems carry the master gain curve (fades), so they line up with stems separated from a finished master
-        stems = {k: v * dsp.undb(vol) for k, v in stems.items()}
+        g = dsp.undb(vol)
+        for v in stems.values():
+            v.scale(g)
         # crop pre-roll for partial renders
         if not self.full:
             c = int(round(self.beat_to_win_sec(self.win_b0) * self.sr))
             master = master[:, c:]
-            stems = {k: v[:, c:] for k, v in stems.items()}
+            for v in stems.values():
+                v.crop(c)
         self.elapsed = time.time() - t_start
-        return master, stems
+        return master, Stems(stems)
 
 
 def _code_hash():

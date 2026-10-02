@@ -12,6 +12,131 @@
   PyPI and the registry (`.github/workflows/publish.yml`).
 - `Dockerfile` (stdio server) and `glama.json` for directories that build and inspect servers; `CITATION.cff`.
 
+### Roadmap
+
+- ROADMAP.md: where ismail is going (worlds, visiting each other's, hands and 4D editing, agents in the room,
+  sound, pictures, the person, a hub for shared work) with a status on each; a "Where it is going" section in the
+  README.
+- SKILL.md: share what would help others (a fork and a pull request, after the inclusion review); development.md:
+  sharing back from any user's project; user-experience.md: pictures have a vernacular too.
+
+### Live output follows the device
+
+- The live output follows the system default (`device='default'`): a Bluetooth speaker that connects mid-set takes
+  over within a few seconds, and a device that stops taking audio falls back to the default. `live_device` moves a
+  running set to another output by hand. The timeline, queue and audio mixed ahead carry on (about a second's gap);
+  `live_start(follow_device=False)` keeps the old behaviour.
+- The handoff scanner skips `history_src/` backups.
+
+### Placement offsets
+
+- Sounds land by their start; music lands on an anchor. A note can now be nudged off its beat in milliseconds:
+  `'0 C4 1 100 @-40ms'` (negative = earlier), and a whole part with `track_set(offset_ms=-35)`. The note keeps its
+  beat: `notes_read` shows the `@`, the roll stays on the grid, quantize and copy keep the nudge, and
+  `notes_transform(offset_ms=)` sets it on many notes. Automation stays on the song's time; audio clips move with
+  the track offset. A nudged note is the same as a note written at its nudged time, in the studio, in any window
+  (bit-identical), on a deck (live parity) and in the video sync. A note nudged before 0 s starts at 0 s and the
+  render reply says so. Live clips read `@` the same way. From tambopata, whose player was time-warped to land on
+  the beat and sounded synthetic.
+
+### The person: lexicon, objectives, user-experience reference
+
+- The lexicon: `lexicon_note`, `lexicon_find`, `lexicon_view` keep a two-way map between the person's own words for
+  what they hear and see ("boxy", "too clean") and ismail's terms (ops, parameters and their direction, effects,
+  measurements), with the song, the moment, the craft the word belongs to (composer to colourist) and whether the
+  change worked. Lookups go both ways; the view reads as a learning curve (the share of trade words by month, the
+  crafts a vocabulary grows in). One local, append-only file shared by every session (`songs/_user/lexicon.jsonl`
+  or `$ISMAIL_LEXICON`), never committed; a `who` per entry for other people's feedback. Words about the work only:
+  never emotion, mood or health.
+- Objectives: `project_new(objective=)` and `project_set(objective=, objective_by=)` record what a piece is for, in
+  the person's words, with history; `project_info` shows it. `project_new(derived_from=)` carries the original's
+  objectives and lineage into a version (intent provenance).
+- Skill: `references/user-experience.md` (the lexicon, exams and pages, objectives, consent, what never to
+  record), a SKILL.md non-negotiable, and a THE PERSON section in `guide`.
+
+### Measure first, in the tools
+
+- Every track says what its sound is modeled on: `project_info` lists each as measured (a mimic profile, a measured
+  library voice, a sample imported or extracted from a recording, a fit), designed (on purpose) or unstated, and
+  `render` names the unstated ones with the ops that measure. Fits record it themselves (`instrument_fit`
+  apply_to_track, `track_fit` apply); the new `track_model` op records an example the tools could not see or marks
+  a sound designed. Agents skipped measuring when the rule was only in the skill, most of all after a context
+  summary; the tool replies keep it in view.
+- Library voices state their provenance in INFO (`measured` or `designed`).
+- `guide` opens with MEASURE FIRST.
+
+### Fixes from song handoffs
+
+- Render memory: a track's whole output stays in memory only while an effect reads it (a sidechain or vocoder
+  source), and stems are kept from their first to their last sound as float32, built full length when read. A
+  40-bar song of 16 one-note tracks: peak 2856 -> 404 MiB, 1835 -> 73 MiB held after. A 146-bar song of ~70 tracks
+  (tambopata) had needed ~20 GB and ran out of memory.
+- `mimic_measure` measures a short note (a 0.3 s panpipe): its attack calibration read the note's level over a
+  window that started after the note ended and produced a non-finite buffer.
+- `analyze_timbre` (and every analysis reading a source in stereo) works on a mono file: both channels read the same.
+
+### Roles and the migration process
+
+- `development.md`: the roles as a multi-agent system (the user, song agents, the dev agent, subagents: what each
+  owns and writes, and the contracts between them); the inclusion review before anything goes into the public repo
+  (general beyond its song? measured from the user, who must say yes first? fitted to a commercial record or
+  carrying a brand name, held for the user's decision? provenance recorded); preparing a voice or an engine for
+  ismail in eleven steps (copy never move, strip the song out, render the same anywhere, live parity, INFO as manual
+  and provenance, nothing existing changes by accident, tests, cost, docs, evidence in the PR); how to take an API
+  change a song asks for (find the workaround and its cost, check it does not exist already, extend before adding,
+  design the text first, close the loop, keep old names, prove it on the asking song); lessons from running the loop.
+
+### The shared machine
+
+- `ismail.machine`, the governor for one computer shared by many sessions (2026-10-02: six sessions stacked heavy
+  jobs on a laptop GTX 1080 until it sat at 92 C pinned at 139 MHz and the user stopped everything). Op
+  `machine_status` (and `python -m ismail.machine`): GPU heat, clock and throttle reasons (an idle card at 139 MHz is
+  not trouble; a thermal bit or 85 C is), CPU, free commit, and every heavy job running in any session. Heavy jobs
+  take slots on a board in `songs/_machine/`: one GPU job and two CPU jobs machine-wide, a live engine on air holds
+  one. render, separate (GPU slot when it runs on CUDA), mimic_measure, instrument_fit, track_fit and live_parity
+  take a slot and refuse with what is running, whose it is, when it should end, and what to do; a render whose
+  memory estimate does not fit the free commit is refused instead of dying. Commands outside ismail run in a slot
+  with `python -m ismail.machine run --gpu|--cpu -- <command>` at below-normal priority. Heavy jobs cap numeric
+  threads at 2. The test suite takes a slot too.
+- The governor also refuses a new CPU job while the CPU is 80% busy or more over 2 s, whoever is using it, and names
+  the top processes: most load on this machine is not on the board (the desktop app, a node server). The board shows
+  the top processes.
+- Skill: "The machine is shared" is a non-negotiable (check before anything over a minute, one heavy job of your own,
+  a hot GPU is not a free CPU, size jobs to the question, no sleep-poll loops, never leave heavy jobs running
+  untold); development.md: touched tests locally, the full suite in CI; announcements never ask for work.
+
+### Roles and collaboration
+
+- Skill: "Your role, and where things live": making music is the default role and writes only inside
+  `songs/<slug>/` (no edits to `ismail/`, `skills/`, tests or other songs, no git in the ismail repo); a missing
+  capability is built in the song and listed in its `HANDOFF.md`; one folder layout for every song; song
+  checkpoints with a git repository inside the song folder. The `guide` op opens with the same rule.
+- New `references/development.md` for changing ismail itself (only when the user asks): a worktree per topic, the
+  collaboration must-haves (what is not yours is not touched, nothing unmerged is deleted, no stash in a shared
+  repo, proof and docs in every commit, the user merges), migrating from a song's `HANDOFF.md`, its format,
+  and studio/live parity: every engine change says which side it touches, how live follows, and what proves it.
+- `live.md`, from a 40-minute blues set: only proven sounds go on air (no voice written during set prep and never
+  fitted or ear-tested), first sound within minutes, never downgrade a sound in silence, a song plays live through
+  `live_load` and is never rebuilt by hand, and anything that writes runs on a copy, never in another song's folder.
+- `blind-tests.md`: ear-test pages are always hosted on localhost and opened in the app's browser pane, take answers
+  with a Submit button that writes them to a file, and are checked in the pane before the user sees them.
+- Skill brought up to date with the live parity work: phrase voices no longer run an amp inside the voice (a
+  guitar is `electric` with its rig on the track, live as in the studio); the performer signature takes `beat0`;
+  how to write a performer's expression in the studio (`inst.lane.<name>` automation); the rig effects, presets,
+  `electric`'s half-step-down tuning and `kit70`'s drum map; five rules for a voice that renders the same in a
+  window, live and in the whole song (from `songs/tambopata`); `live_parity` for checking a song on a deck; what
+  `live_status` and a deck's "not live" list now say; render speeds of the library performers. Fixed: the limiter
+  ceiling (-1.0 dB for mp3 everywhere), the eye-exam page (Submit, not a copy button), wah as an effect sweep, not
+  a lane, and where the engine looks for a song's voices. SKILL.md: call `guide` before writing a measuring
+  script. The `guide` op's live text matches.
+- The migration loop (`references/development.md`), the dev role's standing job: intake with
+  `python -m ismail.handoffs` (every handoff section new or changed since the last mark, `--full`, `--mark`),
+  triage into `songs/_migration/LEDGER.md`, the user decides, build on a branch, announce merges to every ismail
+  session, the song closes the item. SKILL.md tells song agents their handoffs are read and how to close an item.
+- The intake names sections by their heading path (one subheading under two elements stays two sections), skips
+  caches and backups, and lists a reorganized handoff's old text only with `--all` (a section whose words were
+  already in the file is "moved", not new).
+
 ### Guitar rig and performers
 
 - Rig effects (`ismail/rig.py`): `fuzz` (Fuzz Face bias shift), `univibe` (four-stage LDR phaser with lamp lag),
@@ -99,6 +224,17 @@
   mixer peak about 1000% -> 130-180% of real time.
 - The live mixer keeps every effect's state out of denormal floats (a fuzz left in silence decayed into them and
   took a guitar chain to 100% of real time), and a track whose amp only hisses goes dormant like a silent one.
+- A standing parity check: op `live_parity(song, bars)` renders the bars in the studio and plays them on a silent
+  engine of its own, then compares each track, bus and the mix (level, envelope, octave bands, residual), judged
+  from the window's second bar. `tests/test_live_song_parity.py` holds every instrument type and library voice to
+  it: voices that are not performers match the studio sample for sample, performers by ear.
+- Synths and drums seed their random phase and noise on where a note sits in its bar, not where it sits in the
+  render buffer: a studio render of a bar range now sounds as those bars do in the whole song, and live plays it
+  sample for sample (it was a different take of the noise and phases each time). Studio renders of synth and drum
+  parts get a new realization; nothing else changes.
+- Code and mimic voices get each note whole even when a render window ends first: a voice whose noise draws or
+  filters depend on the length it is given (the `sfx` voice) sounded different near a window's end and live.
+- Fix: an engine rendering inline (`workers=0`) now finds a loaded song's sampler sounds; its samplers were silent.
 
 ## 0.2.0 (2026-09-30)
 

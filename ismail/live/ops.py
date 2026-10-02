@@ -9,7 +9,7 @@ import time
 import urllib.error
 import urllib.request
 
-from ..api import OpError, op
+from ..api import OpError, heavy, op
 from .. import analysis as A
 
 VIEWS = {'bars': A.bar_table, 'envelope': A.envelope, 'pitches': A.pitches, 'drums': A.drums, 'chords': A.chords}
@@ -115,7 +115,8 @@ def _other_engines(project):
 
 
 @op()
-def live_start(project: str, bpm: float, beats_per_bar: int = 4, device: str = 'default', workers: int = None) -> str:
+def live_start(project: str, bpm: float, beats_per_bar: int = 4, device: str = 'default', workers: int = None,
+               follow_device: bool = True) -> str:
     """Start the live engine for `project` (any folder; a project.json there lends its sound bank, song voices and
     'track:<name>' instruments). It plays from bar 1 immediately, silent until you queue clips, and keeps playing
     between your calls: clips loop until replaced. Tempo is fixed for the run (live_stop, then start again to change
@@ -154,7 +155,8 @@ def live_start(project: str, bpm: float, beats_per_bar: int = 4, device: str = '
         # a hidden console, not none: the render workers inherit it instead of each opening a window
         flags = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
     subprocess.Popen([sys.executable, '-m', 'ismail.live.engine', '--project', root, '--bpm', str(bpm),
-                      '--bpb', str(beats_per_bar), '--device', str(device), '--workers', str(workers)],
+                      '--bpb', str(beats_per_bar), '--device', str(device), '--workers', str(workers)]
+                     + ([] if follow_device else ['--no-follow']),
                      cwd=pkg_root, env=env, stdout=log, stderr=subprocess.STDOUT, creationflags=flags,
                      start_new_session=os.name != 'nt')
     t0 = time.time()
@@ -430,3 +432,42 @@ def live_listen(project: str, bars=4, view: str = 'bars', band: str = None, reco
 def live_record(project: str, on: bool = True) -> str:
     """Record the live output (after the safety chain) to <project>/live/rec_<time>.wav; on=False stops it."""
     return _call(project, 'record', on=on)
+
+
+@op()
+@heavy()
+def live_parity(song: str, bars: list, tracks: list = None) -> str:
+    """Does this song play on a deck as it renders in the studio? Renders bars=[a, b] in the studio and plays them
+    on a silent engine of its own (no live_start needed, nothing is late), then compares each track, each bus and
+    the mix: level, envelope, octave bands, and the residual (how close to sample for sample; -100 dB and below is
+    identical; under -80 dB nobody can tell). Judged from the second bar: in the first, the studio rings in what came before the window and a
+    deck starts clean (its own line, 'edge'). tracks limits both sides to those tracks. Takes about as long as
+    rendering the bars twice."""
+    from . import parity
+    song = os.path.abspath(song)
+    if not os.path.exists(os.path.join(song, 'project.json')):
+        raise OpError(f"no project at {song}")
+    if not isinstance(bars, (list, tuple)) or len(bars) != 2:
+        raise OpError("bars=[first, last], song bars (inclusive), e.g. [9, 16]")
+    try:
+        res, _, head = parity.run(song, [int(bars[0]), int(bars[1])], tracks)
+    except ValueError as e:
+        raise OpError(str(e))
+    bad = [k for k, m in res.items() if not parity.verdict(m).startswith('ok') and not k.endswith('(edge)')]
+    L = [f"studio vs live, {os.path.basename(song)} bars {bars[0]}-{bars[1]}: "
+         + (f"{len(bad)} of {len(res)} differ ({', '.join(bad)})" if bad else f"all {len(res)} match")]
+    L.append(parity.report(res, head))
+    if bad:
+        L.append("  a part that DIFFERS sounds different on a deck than in a render: that is an engine gap. Say so "
+                 "(the song's HANDOFF.md, for the dev agent) instead of changing the song to hide it.")
+    return '\n'.join(L)
+
+
+@op()
+def live_device(project: str, device: str = 'default', follow: bool = None) -> str:
+    """Move a running set to another audio output without stopping it: the timeline, the queue and the audio mixed
+    ahead carry on, with a gap of about a second. device: 'default' (the system's default output now: use it after
+    connecting a Bluetooth speaker), a name or part of one ('JBL'), an index, or 'none'. With device 'default' the
+    engine also follows the system default by itself (checked every few seconds; follow=False stops that), and a
+    device that stops taking audio (a speaker switched off) falls back to the default."""
+    return _call(project, 'device', device=device, follow=follow, timeout=20)

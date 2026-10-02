@@ -287,7 +287,14 @@ def _group_mono(notes):
     return phrases
 
 
-def render_synth(p, notes, total_n, auto, bpm, sr):
+def _bar_key(st, beat0, bpm, bpb, sr):
+    """Where a note starts in its bar, in samples: the seed of its random phase and noise, so a note sounds the same
+    in a full render, in a window and live (where each bar's events render on their own)."""
+    spb = 60.0 / bpm
+    return int(round((round(beat0 + st / spb, 6) % bpb) * spb * sr))
+
+
+def render_synth(p, notes, total_n, auto, bpm, sr, beat0=0.0, bpb=4):
     out = np.zeros((2, total_n))
     tail = env_tail(p['amp_env'])
     if p['mono']:
@@ -322,7 +329,7 @@ def render_synth(p, notes, total_n, auto, bpm, sr):
             steps = lfilter([1 - a], [1, -a], steps_in, zi=zi)[0]
         prev_pitch = g[-1][1]
         vel = g[0][3]
-        l, r = _synth_voice(p, steps, gate, vel, s0, n, auto, bpm, sr, seed=s0 * 31 + g[0][1])
+        l, r = _synth_voice(p, steps, gate, vel, s0, n, auto, bpm, sr, seed=_bar_key(st, beat0, bpm, bpb, sr) * 31 + g[0][1])
         if p['mono'] and gi + 1 < len(groups):
             fade = min(int(0.004 * sr), n)
             ramp = np.linspace(1, 0, fade)
@@ -516,8 +523,10 @@ def render_code(p, notes, total_n, sr, bpm=120.0, root=None, auto=None, beat0=0.
     out = np.zeros((2, total_n))
     for st, m, d, v in notes:
         s0 = int(round(st * sr))
-        n = min(int((d + p['tail']) * sr), total_n - s0)
-        if n <= 0:
+        # the whole note even past the buffer's end: a voice's noise draws and filters depend on the length it is
+        # given, so a note cut by a render window or a live event would sound different from the song's
+        n = int((d + p['tail']) * sr)
+        if n <= 0 or s0 >= total_n:
             continue
         try:
             y = voices.call(fn, midi_to_hz(m), np.arange(n) / sr, v / 127, d, sr, bpm, p.get('params'))
@@ -526,7 +535,8 @@ def render_code(p, notes, total_n, sr, bpm=120.0, root=None, auto=None, beat0=0.
         y = np.asarray(y, dtype=np.float64)
         if y.ndim == 1:
             y = np.stack([y, y])
-        out[:, s0:s0 + y.shape[1]] += y[:, :n]
+        k = min(y.shape[1], n, total_n - s0)
+        out[:, s0:s0 + k] += y[:, :k]
     return out
 
 
@@ -539,23 +549,25 @@ def render_mimic(p, notes, total_n, sr, root=None):
     out = np.zeros((2, total_n))
     for st, m, d, v in notes:
         s0 = int(round(st * sr))
-        n = min(int((d + p['tail']) * sr), total_n - s0)
-        if n <= 0:
+        n = int((d + p['tail']) * sr)             # the whole note, as in render_code
+        if n <= 0 or s0 >= total_n:
             continue
         y = mimic.render(prof, midi_to_hz(m), np.arange(n) / sr, v / 127, d, sr, **(p.get('params') or {}))
-        out[:, s0:s0 + y.shape[1]] += y[:, :n]
+        k = min(y.shape[1], n, total_n - s0)
+        out[:, s0:s0 + k] += y[:, :k]
     return out
 
 
 # ------------------------------------------------------------------ entry point
 
-def render_instrument(inst, notes, total_n, auto=None, bpm=120.0, sr=SR, root=None, beat0=0.0):
+def render_instrument(inst, notes, total_n, auto=None, bpm=120.0, sr=SR, root=None, beat0=0.0, bpb=4):
     """inst: normalized instrument; notes: [(start_sec, midi, dur_sec, vel)]; -> (2, total_n). root = project
-    directory (song voices in <root>/voices/). beat0: the song beat at sample 0 (performers key notes on it)."""
+    directory (song voices in <root>/voices/). beat0: the song beat at sample 0 (performers key notes on it; synths
+    and drums seed on where a note sits in its bar of bpb beats)."""
     auto = auto or {}
     t = inst['type']
     if t == 'synth':
-        out = render_synth(inst, notes, total_n, auto, bpm, sr) * SYNTH_GAIN
+        out = render_synth(inst, notes, total_n, auto, bpm, sr, beat0, bpb) * SYNTH_GAIN
     elif t == 'sampler':
         out = render_sampler(inst, notes, total_n, auto, sr)
     elif t == 'code':
@@ -570,12 +582,12 @@ def render_instrument(inst, notes, total_n, auto=None, bpm=120.0, sr=SR, root=No
         for key, nts in by.items():
             if key not in inst['map']:
                 continue  # unmapped pitches are silent; notes_read flags them
-            out += render_instrument(inst['map'][key], nts, total_n, None, bpm, sr, root)
+            out += render_instrument(inst['map'][key], nts, total_n, None, bpm, sr, root, beat0, bpb)
     elif t in DRUM_DEFAULTS:
         out = np.zeros((2, total_n))
         for st, m, d, v in notes:
             s0 = int(round(st * sr))
-            y = render_drum(inst, v, sr, seed=s0) * DRUM_GAIN
+            y = render_drum(inst, v, sr, seed=_bar_key(st, beat0, bpm, bpb, sr)) * DRUM_GAIN
             n = min(len(y), total_n - s0)
             if n > 0:
                 out[0, s0:s0 + n] += y[:n]

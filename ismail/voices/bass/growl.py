@@ -6,6 +6,7 @@ from scipy.signal import lfilter
 from ismail import dsp
 
 INFO = {
+    "designed": "a dubstep bass designed by ear, not modeled on a recording",
     "summary": "dubstep bass engine: one voice, velocity picks the articulation",
     "range": "C0-C4 (roots around A0-A2)",
     "velocity": "the note velocity is a code: articulation = velocity // 10, variant = velocity % 10 (velocity 21 = wub variant 1): 1x yoi/yow vowel sweep, "

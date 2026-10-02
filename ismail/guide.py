@@ -1,9 +1,37 @@
 GUIDE = """ismail: a DAW you operate with text. You write notes/patches/effects as data, render, and read audio back as text.
 
+MACHINE
+- The computer is shared by several sessions. machine_status before anything over a minute; heavy ops (render,
+  separate, mimic_measure, fits, live_parity) take a slot and refuse with the reason when it is busy or hot. Run
+  Blender, whisper, demucs or long scripts through `python -m ismail.machine run --gpu|--cpu -- <command>`.
+
+ROLE
+- Making music (the default): write only inside songs/<slug>/. Do not edit ismail/, skills/, tests/ or another
+  song, and do not run git in the ismail repo. Missing a capability: build it in the song (voices/, work/) and list
+  it in songs/<slug>/HANDOFF.md. Changing ismail itself only when the user asks: skills/ismail/references/development.md.
+
+MEASURE FIRST
+- Songs got real where their sounds and numbers were measured from an example, and stayed fake where they were
+  guessed. Before writing a patch for an acoustic or electric part, get an example and measure it: mimic_measure,
+  sound_extract or analyze_kit + instrument_fit, track_fit, a sampler of an imported recording. Loose files work
+  as sources (a path). project_info shows each track as measured / designed / unstated; track_model records an
+  example or marks a sound designed on purpose. Write a measuring script only for what no op measures, and list
+  it in HANDOFF.md.
+
+THE PERSON
+- Their words are data: lexicon_note(said=<verbatim>, craft=...) when they name a quality or a problem, map it
+  (means=...) once you know, set the outcome later; lexicon_find before acting on a word or explaining a change;
+  lexicon_view at the start of a session. Words about the work only, never emotions. Every piece states its
+  objective in their words (project_set(objective=)); versions use project_new(derived_from=). Read
+  references/user-experience.md.
+
 CONVENTIONS
 - Every tool takes `project` (a directory). Bars are 1-indexed; ranges [a, b] are inclusive.
-- Note text: '<beat> <pitch> <dur_beats> [vel]' per line or ';'-separated, beats relative to the target bar
+- Note text: '<beat> <pitch> <dur_beats> [vel] [@-40ms]' per line or ';'-separated, beats relative to the target bar
   (0 = beat 1). Chords 'C4,E4,G4'. C4 = 60. ' #' starts a comment.
+- Sounds land by their start. A sound whose attack comes late (a measured phrase, a bowed note, a bird call)
+  is nudged: '@-40ms' on a note, or track_set(offset_ms=-35) for a whole part; the note stays on its beat.
+  Never time-warp a recording to land it.
 - Audio sources for analysis: render | ref | ref:drums|bass|other|vocals | track:<name> | sound:<name> | a path.
   Omitted source = the reference if the project has one, else your render. track:<name> needs render(stems=True)
   and is the track after its fx and fader, scaled by the master chain's gain (tracks sum to the mix).
@@ -44,9 +72,12 @@ LIVE (play in real time while you edit; a separate engine process per project fo
   Effects: live_track(fx=[...]) sets a track's chain (fx_help; 'track:<name>' copies a project track's chain),
   live_bus + sends={bus: dB} share one hall/delay across tracks, live_fx(target, index, params, ramp_beats)
   moves automatable params (a sweep, a fade, a build) without resending the chain. Replaced chains ring out.
-  An effect with no live version is baked into each rendered note (live_status marks it; no live_fx on it).
-  A performer voice (module with perform()) plays overlapping notes as one gesture; clip expr={'bend': [[beat,
-  semitones], ...]} drives its bends and vibrato.
+  Every built-in effect, the guitar rig included, runs live as in the studio; one with no live version would be
+  baked into each rendered note (live_status marks it; no live_fx on it).
+  A performer voice (module with perform(), e.g. electric, kit70) renders a bar at a time with the part before it
+  as context; clip expr={'bend': [[beat, semitones], ...]} drives its lanes, as automation inst.lane.<name> does in
+  the studio.
+  live_parity(song, bars) checks that a song section plays on a deck as it renders.
   Decks: live_load(deck, song=<ismail project folder>, bars=[a, b]) puts a whole song on a deck (cued, off air,
   while another deck plays); live_listen(deck=...) hears the cued deck; live_transition(to, style, bars) queues
   the mix (blend | bass_swap | filter | cut); live_deck sets fader, 3-band isolator (kill at -40), filter knob,

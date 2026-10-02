@@ -15,6 +15,7 @@ from scipy import signal
 
 from . import dsp_blocks as dsp, fx_blocks as F
 from ..dsp import SR
+from ..notation import placed
 
 KILL_DB = -40.0              # an isolator band at or below this is off
 SILENT_DB = -60.0            # a deck fader at or below this is off
@@ -194,17 +195,19 @@ def read_song(path, deck, bars, house_bpb, performers=()):
                 auto.setdefault(f"track:{deck}.{name}", {})[key] = pts
             else:
                 skipped['automation'].append(f"{name} {key}")
-        notes = [(n[0] - beat0, n[1], n[2], n[3]) for n in t.get('notes', []) if beat0 <= n[0] < beat1]
+        # where each note sounds: its beat moved by the track's and its own offset, as the studio places it
+        tn = placed(t.get('notes', []), float(d['bpm']), t.get('offset_ms', 0.0))
+        notes = [(n[0] - beat0, n[1], n[2], n[3]) for n in tn if beat0 <= n[0] < beat1]
         context = []
         if name in performers and notes:
             # a performer renders what came before as context: held notes keep their real start, short ones ring in
-            context = [(n[0] - beat0, n[1], n[2], n[3]) for n in t.get('notes', [])
+            context = [(n[0] - beat0, n[1], n[2], n[3]) for n in tn
                        if beat0 - LEAD_IN_BEATS <= n[0] < beat0 or (n[0] < beat0 < n[0] + n[2])]
         else:
             # a note still sounding at the window's start (a drone, a pad, a held string) comes in on its first beat
             # with what is left of it, as in a studio render of the same window; one with less than a beat left is
             # a tail
-            notes += [(0.0, n[1], min(n[0] + n[2], beat1) - beat0, n[3]) for n in t.get('notes', [])
+            notes += [(0.0, n[1], min(n[0] + n[2], beat1) - beat0, n[3]) for n in tn
                       if n[0] < beat0 and n[0] + n[2] - beat0 >= HELD_MIN_BEATS]
         full = f"{deck}.{name}"
         out = t.get('output', 'master')

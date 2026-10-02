@@ -30,7 +30,11 @@ In a guitar study the blind exam went from 3 of 28 undetected to 20 of 22 in fou
 - **Drop trials the sensors cannot follow.** If the pitch tracker cannot follow the real note (pitch error above about 40 cents), lens A copies garbage. Drop the trial automatically and say how many were dropped.
 - **Check alignment.** The onsets of A and B must come from the same detector as R's, run on the full signal. A mask edge once made every A lag 12 ms.
 
-**Page mechanics.** Serve it on localhost (`python -m http.server <port> --bind 127.0.0.1` in the page's folder), not as a file (browsers block audio loads from file pages), and never on a public host when it contains clips of the recording. Give each trial players, a radio per clip plus "can't tell", and a text box. Add one "copy my answers" button that puts every answer and note into one text block the user pastes back. Log every round's answers verbatim in the song's `notes/feedback.md`.
+**Page mechanics.** Keep the page in the song (`songs/<slug>/exam/<round>/`), never on a public host when it contains clips of the recording.
+- **Always host it, always open it in the app's browser pane.** Serve it on 127.0.0.1 and open `http://127.0.0.1:<port>/<round>/` with the browser-pane tool. Never send the user a file path or a `file://` page: browsers block audio from file pages, and an external browser means switching away (where a copy button may not work).
+- **Submit, don't copy.** A small server serves the round and takes `POST /<round>/answers`, appending them with a timestamp to `exam/<round>/answers.txt`; the user presses Submit and says "done", and you read the file. Keep a copy button as a fallback that also shows the text in a box. Songs are not in the repository, so there is no shared copy: if a song on this machine has one (`songs/tambopata/work/exam_server.py`, `songs/vox/rec/server.py`), copy it into your song's `work/`; otherwise write it (about 40 lines of `http.server`).
+- **Check the page in the pane before handing it over**: count the trials and clips, request one clip, run the answer collector, read the console errors (a JS string broken by a literal newline was caught this way).
+- Each trial: players, a radio per clip plus "can't tell", and a text box for the tell. Log every round's answers verbatim in the song's `notes/feedback.md`, with the key beside them.
 
 ## 3. Reading the answers
 

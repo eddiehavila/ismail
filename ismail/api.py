@@ -18,10 +18,12 @@ import time
 import numpy as np
 
 from . import analysis as A
+from . import machine
+from . import provenance
 from . import fx as fxmod
 from . import rig as rigmod
 from . import instruments as inst_mod
-from .notation import (parse_notes, parse_steps, pitch_to_midi, midi_to_name, format_notes, piano_roll, fmt_num,
+from .notation import (fmt_offset, parse_notes, parse_steps, pitch_to_midi, midi_to_name, format_notes, piano_roll, fmt_num,
                        NotationError)
 from .presets import PRESETS
 
@@ -66,10 +68,28 @@ def op(mutates=False):
                 sig.bind(*a, **kw)
             except TypeError as e:
                 raise OpError(f"bad arguments for {fn.__name__}: {e}. Signature: {fn.__name__}{sig}")
-            return fn(*a, **kw)
+            try:
+                return fn(*a, **kw)
+            except machine.MachineBusy as e:
+                raise OpError(str(e))
         OPS[fn.__name__] = wrapped
         if mutates:
             MUTATING.add(fn.__name__)
+        return wrapped
+    return deco
+
+
+def heavy(kind='cpu'):
+    """An op that runs in one of the machine's heavy-job slots (ismail.machine) for its whole length; it refuses
+    with the reason when the machine is busy or hot. Goes under @op()."""
+    def deco(fn):
+        import functools
+
+        @functools.wraps(fn)
+        def wrapped(*a, **kw):
+            proj = str(kw.get('project', a[0] if a else '')).replace(os.sep, '/').rstrip('/')
+            with machine.slot(kind, f"{fn.__name__} {os.path.basename(proj)}"):
+                return fn(*a, **kw)
         return wrapped
     return deco
 
@@ -193,7 +213,7 @@ def _load(project):
 
 
 def _span_bars(notes_rel, bpb):
-    end = max((s + d for s, _, d, _ in notes_rel), default=bpb)
+    end = max((n[0] + n[2] for n in notes_rel), default=bpb)
     return max(1, math.ceil(end / bpb - 1e-9))
 
 
@@ -247,8 +267,12 @@ def _check_voices(spec, P):
 
 @op()
 def project_new(project: str, bpm: float, length_bars: int, name: str = None, beats_per_bar: int = 4,
-                offset_sec: float = 0.0, reference: str = None) -> str:
-    """Create a new project directory. offset_sec = time of bar 1 (match a reference's grid with analyze_grid)."""
+                offset_sec: float = 0.0, reference: str = None, objective: str = None,
+                derived_from: str = None) -> str:
+    """Create a new project directory. offset_sec = time of bar 1 (match a reference's grid with analyze_grid).
+    objective: what this piece is for, in the person's words ("keep a listener asleep for 3 hours"); see project_set.
+    derived_from: the project this one is a version of; its objectives and lineage are carried over, so a derivative
+    keeps the intent it came from (intent provenance)."""
     root = os.path.abspath(project)
     if os.path.exists(os.path.join(root, 'project.json')):
         raise OpError(f"project already exists at {root}; use project_info / project_set")
@@ -259,6 +283,17 @@ def project_new(project: str, bpm: float, length_bars: int, name: str = None, be
          "sounds": {}, "reference": None}
     if reference:
         d['reference'] = {"file": os.path.abspath(reference)}
+    if derived_from:
+        src = os.path.join(os.path.abspath(derived_from), 'project.json')
+        if not os.path.exists(src):
+            raise OpError(f"derived_from {derived_from!r} has no project.json; give the folder of the project this "
+                          f"one is a version of")
+        with open(src, encoding='utf8') as f:
+            parent = json.load(f)
+        d['lineage'] = [{"project": os.path.abspath(derived_from), "name": parent.get('name'),
+                         "objectives": parent.get('objectives', [])}] + parent.get('lineage', [])
+    if objective:
+        d['objectives'] = [_objective(objective, 'user')]
     with open(os.path.join(root, 'project.json'), 'w', encoding='utf8') as f:
         json.dump(d, f, indent=1)
     return f"created project {d['name']} at {root}: {bpm} BPM, {length_bars} bars, bar 1 at {offset_sec}s"
@@ -271,6 +306,15 @@ def project_info(project: str) -> str:
     d = P.d
     L = [f"{d['name']}: {d['bpm']} BPM, {d['beats_per_bar']}/4, {d['length_bars']} bars, bar 1 at {d['offset_sec']}s, "
          f"song {(d['length_bars'] * d['beats_per_bar'] * 60 / d['bpm'] + d['offset_sec']):.1f}s"]
+    if d.get('objectives'):
+        o = d['objectives'][-1]
+        L.append(f"objective: {o['text']!r} (by {o['by']}, {o['date'][:10]})"
+                 + (f"; {len(d['objectives']) - 1} earlier" if len(d['objectives']) > 1 else ''))
+    else:
+        L.append("objective: none stated (project_set(objective=...) in the person's words: what is this piece for?)")
+    for anc in d.get('lineage', [])[:3]:
+        last = (anc.get('objectives') or [{}])[-1].get('text')
+        L.append(f"derived from {anc.get('name')}" + (f", whose objective was {last!r}" if last else ''))
     if d.get('reference'):
         L.append(f"reference: {d['reference'].get('file')}" + (f" (stems: {d['reference']['stems_dir']})" if d['reference'].get('stems_dir') else ''))
     L.append(f"tracks ({len(d['tracks'])}):")
@@ -284,13 +328,20 @@ def project_info(project: str) -> str:
                  f" | vol {tr.get('volume_db', 0):+.1f} pan {tr.get('pan', 0):+.2f} -> {tr.get('output', 'master')}"
                  + (f" sends {tr['sends']}" if tr.get('sends') else '') + (f" | fx [{fxs}]" if fxs else '')
                  + (f" | auto {list(tr['automation'])}" if tr.get('automation') else '')
+                 + (f" | offset {tr['offset_ms']:+g} ms" if tr.get('offset_ms') else '')
+                 + (f" | {sum(1 for n in ns if len(n) > 4 and n[4])} notes nudged" if any(len(n) > 4 and n[4] for n in ns) else '')
                  + (f" | {len(tr['audio'])} audio clips" if tr.get('audio') else '') + (f" {flags}" if flags else ''))
     for b, bus in d.get('buses', {}).items():
         L.append(f"bus {b}: fx [{', '.join(f['type'] for f in bus.get('fx', []))}] vol {bus.get('volume_db', 0):+.1f}")
     L.append(f"master: fx [{', '.join(f['type'] for f in d['master'].get('fx', []))}] vol {d['master'].get('volume_db', 0):+.1f}")
     if d.get('sounds'):
         L.append(f"sounds: {', '.join(d['sounds'])}")
+    L += provenance.summary(d, P.root)[0]
     return '\n'.join(L)
+
+
+def _objective(text, by):
+    return {"text": text.strip(), "by": by, "date": time.strftime('%Y-%m-%dT%H:%M:%S')}
 
 
 def _ranges(xs):
@@ -310,9 +361,13 @@ def _ranges(xs):
 
 @op(mutates=True)
 def project_set(project: str, bpm: float = None, length_bars: int = None, offset_sec: float = None,
-                reference: str = None, tail_sec: float = None, name: str = None, reference_stems: str = None) -> str:
+                reference: str = None, tail_sec: float = None, name: str = None, reference_stems: str = None,
+                objective: str = None, objective_by: str = 'user') -> str:
     """Change project settings. Changing bpm keeps notes on the same beats (the song gets faster/slower).
-    reference_stems = a folder of already-separated stems (drums.wav, bass.wav, ...) for the reference."""
+    reference_stems = a folder of already-separated stems (drums.wav, bass.wav, ...) for the reference.
+    objective: what the piece is for, in the words of whoever set it (objective_by, default 'user'): a sleep set's
+    might be "stay asleep", a cover's "sound like the 1970 record". Earlier objectives are kept as history;
+    project_info shows the current one, and every version made from this one carries them (derived_from)."""
     P = _load(project)
     ch = []
     for k, v in (('bpm', bpm), ('length_bars', length_bars), ('offset_sec', offset_sec), ('tail_sec', tail_sec),
@@ -326,6 +381,11 @@ def project_set(project: str, bpm: float = None, length_bars: int = None, offset
             raise OpError(f"reference file {reference!r} not found")
         P.d['reference'] = dict(P.d.get('reference') or {}, file=p)
         ch.append(f"reference={p}")
+    if objective is not None:
+        if not objective.strip():
+            raise OpError("objective: say what the piece is for, in the person's words")
+        P.d.setdefault('objectives', []).append(_objective(objective, objective_by))
+        ch.append(f"objective={objective!r} (by {objective_by})")
     if reference_stems is not None:
         if not P.d.get('reference'):
             raise OpError("set reference first")
@@ -368,10 +428,23 @@ def track_add(project: str, name: str, instrument=None, volume_db: float = 0.0, 
 
 @op(mutates=True)
 def track_set(project: str, track: str, volume_db: float = None, pan: float = None, mute: bool = None,
-              solo: bool = None, output: str = None, sends: dict = None, rename: str = None) -> str:
-    """Mixer settings for a track. sends = {bus: level_db} (replaces all sends; {} removes)."""
+              solo: bool = None, output: str = None, sends: dict = None, rename: str = None,
+              offset_ms: float = None) -> str:
+    """Mixer settings for a track. sends = {bus: level_db} (replaces all sends; {} removes). offset_ms moves every
+    sound of the track (notes and audio clips) off its beat, negative = earlier, e.g. -35 for a part whose attacks
+    come late; 0 removes it. Notes keep their beats (notes_read shows them on the grid); automation stays on the
+    song's time."""
     P = _load(project)
     tr = P.track(track)
+    if offset_ms is not None:
+        from .notation import MAX_OFFSET_MS
+        if abs(offset_ms) > MAX_OFFSET_MS:
+            raise OpError(f"offset_ms {offset_ms:g}: at most {MAX_OFFSET_MS:g} ms either way; a larger move is a "
+                          f"different start (notes_transform shift_beats)")
+        if offset_ms:
+            tr['offset_ms'] = float(offset_ms)
+        else:
+            tr.pop('offset_ms', None)
     for k, v in (('volume_db', volume_db), ('pan', pan), ('mute', mute), ('solo', solo), ('output', output),
                  ('sends', sends)):
         if v is not None:
@@ -431,6 +504,60 @@ def guide(project: str = None) -> str:
     """Read this first: how to use this DAW as an agent (workflow, conventions, which tool for which question)."""
     from .guide import GUIDE
     return GUIDE
+
+
+@op()
+def lexicon_note(project: str = None, said: str = None, means=None, craft: str = None, where: str = None,
+                 outcome: str = None, why: str = None, who: str = 'user', id: str = None) -> str:
+    """Record what the person called something, and what it means in ismail. said: their words, verbatim ("too
+    clean", "the snare is boxy"). means: the system terms it maps to, a list or ';'-separated ("fx eq peak 400 Hz -3
+    dB on snare; analyze_timbre centroid"). craft: the role the word belongs to (composer, arranger, performer, sound
+    designer, recording/mixing/mastering engineer, producer, dj, director, cinematographer, colourist, editor,
+    choreographer, listener). outcome: open | worked | partly | missed, with why. Update an entry with id=... (means,
+    craft, outcome, why); the words themselves never change. Words about the work only: never record emotion, mood
+    or health. The file is local and shared by every session (lexicon_view shows where). Returns the entry and what
+    the same words meant before."""
+    from . import lexicon as LX
+    song = os.path.basename(os.path.abspath(project)) if project else None
+    before = LX.find(said, who) if said and not id else []
+    try:
+        e = LX.note(said, means, craft, song, where, outcome, why, who, id)
+    except ValueError as ex:
+        raise OpError(str(ex))
+    L = [("updated " if id else "noted ") + LX.line(e)]
+    if before:
+        L.append("the same words before:")
+        L += ['  ' + LX.line(b) for _, b, _ in before[:5]]
+    if not e.get('means'):
+        L.append(f"not mapped yet: when you know what it meant, lexicon_note(id={e['id']!r}, means=[...])")
+    return '\n'.join(L)
+
+
+@op()
+def lexicon_find(project: str = None, text: str = None, who: str = 'user') -> str:
+    """Look up the person's words in both directions: from their word to the system ("what did 'crisp' mean last
+    time?") and from a system term to their word (text='high shelf' finds what they call it, so you can say it their
+    way). Best matches first, with whether the change worked."""
+    from . import lexicon as LX
+    if not text:
+        raise OpError("text: the person's words, or a system term (an op, param or effect name)")
+    hits = LX.find(text, who)
+    if not hits:
+        return (f"no entries share words with {text!r}. If the person just used it, lexicon_note it; "
+                f"lexicon_view lists everything")
+    return '\n'.join(f"[{side}] " + LX.line(e) for _, e, side in hits)
+
+
+@op()
+def lexicon_view(project: str = None, who: str = 'user', craft: str = None, since: str = None) -> str:
+    """The person's vocabulary as a readout: entries by craft and outcome, the share of trade words in what they
+    say by month (description moving toward technique), new entries per week, entries not mapped yet, the newest
+    ten. since='2026-10-01' limits it. Read it at the start of a session to speak the person's language."""
+    from . import lexicon as LX
+    try:
+        return '\n'.join(LX.view(who, craft, since))
+    except ValueError as ex:
+        raise OpError(str(ex))
 
 
 @op()
@@ -551,9 +678,42 @@ def instrument_set(project: str, track: str, instrument, merge: bool = True) -> 
         new = _resolve_instrument(new, P)
     else:
         new = _resolve_instrument(instrument, P)
+    old = tr.get('instrument') or {}
+    dropped = tr.get('model') and old.get('type') != new['type']
+    if dropped:
+        tr.pop('model')
     tr['instrument'] = new
     P.save()
-    return f"instrument of {track!r} is now {new['type']}"
+    return f"instrument of {track!r} is now {new['type']}" + (
+        f" (its model record no longer applies and was cleared: {provenance.of_track(tr, P.d, P.root)[1]})"
+        if dropped else '')
+
+
+@op(mutates=True)
+def track_model(project: str, track: str, on: str, by: str = None) -> str:
+    """Record what a track's sound is modeled on, shown by project_info and render. on: the example it was
+    measured from ('ref', 'ref:<stem>', 'sound:<name>', a path, or a note like 'kit comp_2 of the ref drums'),
+    'designed' for a sound made on purpose (most electronic music), or '' to clear. by: how (an op, a song script,
+    'ear exam'). Fits record it themselves (instrument_fit apply_to_track, track_fit apply=True); mimic profiles,
+    measured library voices and imported samples need nothing."""
+    P = _load(project)
+    tr = P.track(track)
+    on = (on or '').strip()
+    if not on:
+        tr.pop('model', None)
+        P.save()
+        return f"cleared; {track!r} is now {' '.join(provenance.of_track(tr, P.d, P.root))}"
+    if on.startswith('sound:') and on[6:] not in (P.d.get('sounds') or {}):
+        raise OpError(f"no sound {on[6:]!r} in the bank (sound_list); sound_import the example first")
+    if on.startswith('ref') and not P.d.get('reference'):
+        raise OpError("the project has no reference; project_set(reference=<file>) or give the example's path")
+    looks_path = os.sep in on or '/' in on or os.path.splitext(on)[1].lower() in ('.wav', '.mp3', '.flac', '.ogg')
+    if looks_path and not on.startswith(('ref', 'sound:')) and not os.path.exists(os.path.join(P.root, on)) \
+            and not os.path.exists(on):
+        raise OpError(f"{on!r} not found; give an existing file, 'ref', 'ref:<stem>', 'sound:<name>' or 'designed'")
+    tr['model'] = {'on': on, **({'by': by} if by else {})}
+    P.save()
+    return f"{track!r}: {' '.join(provenance.of_track(tr, P.d, P.root))}"
 
 
 @op()
@@ -571,13 +731,15 @@ def instrument_show(project: str, track: str, full: bool = False) -> str:
 @op(mutates=True)
 def notes_write(project: str, track: str, bar: int, notes: str, mode: str = 'replace', bars: int = None,
                 repeat: int = 1) -> str:
-    """Write notes starting at `bar`. notes: one per line or ';'-separated: '<beat> <pitch> <dur_beats> [vel]'
-    with beat relative to the bar's beat 1 (0, 0.5, 1/3 ...). Chords: 'C4,E4,G4'. mode='replace' first clears the
-    written span (length `bars`, default = bars the notes cover); mode='add' merges. repeat=N tiles the block N times."""
+    """Write notes starting at `bar`. notes: one per line or ';'-separated: '<beat> <pitch> <dur_beats> [vel]
+    [@offset]' with beat relative to the bar's beat 1 (0, 0.5, 1/3 ...). Chords: 'C4,E4,G4'. @offset nudges the
+    sound off its beat in milliseconds ('@-40ms' = 40 ms early, so a late attack lands on the beat); the note still
+    belongs to its beat. mode='replace' first clears the written span (length `bars`, default = bars the notes
+    cover); mode='add' merges. repeat=N tiles the block N times."""
     P = _load(project)
     tr = P.track(track)
     try:
-        rel = parse_notes(notes)
+        rel = parse_notes(notes, offsets=True)
     except NotationError as e:
         raise OpError(str(e))
     if not rel:
@@ -590,8 +752,8 @@ def notes_write(project: str, track: str, bar: int, notes: str, mode: str = 'rep
         b0 = base + r * span * P.bpb
         if mode == 'replace':
             removed += _clear(tr, b0, b0 + span * P.bpb)
-        for s, p, d, v in rel:
-            tr['notes'].append([round(b0 + s, 6), p, d, v])
+        for s, p, d, v, off in rel:
+            tr['notes'].append([round(b0 + s, 6), p, d, v] + ([off] if off else []))
             written += 1
     tr['notes'].sort()
     P.save()
@@ -603,7 +765,7 @@ def _kit_warning(tr, rel):
     inst = tr.get('instrument') or {}
     if inst.get('type') == 'kit':
         mapped = {pitch_to_midi(k) for k in inst['map']}
-        miss = sorted({p for _, p, _, _ in rel if p not in mapped})
+        miss = sorted({n[1] for n in rel if n[1] not in mapped})
         if miss:
             return f"\nWARNING: pitches {[midi_to_name(m) for m in miss]} are not in the kit map (silent). mapped: " \
                    f"{[midi_to_name(m) for m in sorted(mapped)]}"
@@ -651,23 +813,27 @@ def pattern_write(project: str, track: str, bar: int, lanes: dict, step: float =
 
 @op()
 def notes_read(project: str, track: str, bars: list = None, view: str = 'list', step: float = 0.25) -> str:
-    """Read a track's notes in bars [a, b] (inclusive). view='list' (bar, offset, pitch, dur, vel), 'roll' (ASCII
-    piano roll, max 8 bars), or 'rel' (notes_write format relative to bar a - copy/edit/write back)."""
+    """Read a track's notes in bars [a, b] (inclusive). view='list' (bar, beat in the bar, pitch, dur, vel, and an
+    @offset when a note is nudged), 'roll' (ASCII piano roll, max 8 bars, on the beats), or 'rel' (notes_write
+    format relative to bar a - copy/edit/write back, offsets included). A track offset is named on the first line."""
     P = _load(project)
     tr = P.track(track)
     a, b = bars or [1, P.d['length_bars']]
     b0, b1 = P.bar_to_beat(a), P.bar_to_beat(b + 1)
     sel = [n for n in tr['notes'] if b0 <= n[0] < b1]
+    toff = (f"(track offset {tr['offset_ms']:+g} ms: every sound of {track} lands that far from its beat)\n"
+            if tr.get('offset_ms') else '')
     if view == 'roll':
         if b - a + 1 > 8:
             raise OpError("roll view is limited to 8 bars; narrow `bars`")
         head = f"{track} bars {a}-{b} (one char per {step:g} beat; # = note start, = = held)"
-        return head + '\n' + piano_roll(sel, b0, b1 - b0, step, P.bpb)
+        return toff + head + '\n' + piano_roll(sel, b0, b1 - b0, step, P.bpb)
     if view == 'rel':
-        return '\n'.join(f"{fmt_num(s - b0)} {midi_to_name(p)} {fmt_num(d)} {v}" for s, p, d, v in sel) or '(empty)'
+        return toff + ('\n'.join(f"{fmt_num(n[0] - b0)} {midi_to_name(n[1])} {fmt_num(n[2])} {n[3]}"
+                                 + (f" {fmt_offset(n[4])}" if len(n) > 4 and n[4] else '') for n in sel) or '(empty)')
     if len(sel) > 300:
-        return format_notes(sel[:300], P.bpb) + f"\n... {len(sel) - 300} more; narrow `bars`"
-    return format_notes(sel, P.bpb) or '(no notes in range)'
+        return toff + format_notes(sel[:300], P.bpb) + f"\n... {len(sel) - 300} more; narrow `bars`"
+    return toff + (format_notes(sel, P.bpb) or '(no notes in range)')
 
 
 @op(mutates=True)
@@ -698,8 +864,8 @@ def notes_copy(project: str, track: str, from_bars: list, to_bar: int, times: in
         d0 = P.bar_to_beat(to_bar) + r * span
         if mode == 'replace':
             _clear(dst, d0, d0 + span)
-        for s, p, d, v in block:
-            dst['notes'].append([round(d0 + s - b0, 6), p + transpose, d, v])
+        for n in block:
+            dst['notes'].append([round(d0 + n[0] - b0, 6), n[1] + transpose, n[2], n[3]] + list(n[4:5]))
     dst['notes'].sort()
     P.save()
     return f"copied {len(block)} notes x{times} from {track} bars {a}-{b} to {to_track or track} bar {to_bar}" \
@@ -709,9 +875,12 @@ def notes_copy(project: str, track: str, from_bars: list, to_bar: int, times: in
 @op(mutates=True)
 def notes_transform(project: str, track: str, bars: list, transpose: int = 0, velocity: int = None,
                     vel_scale: float = None, shift_beats: float = 0.0, quantize: float = None, dur_scale: float = None,
-                    dur_set: float = None, legato: bool = False, pitches: list = None) -> str:
+                    dur_set: float = None, legato: bool = False, pitches: list = None,
+                    offset_ms: float = None) -> str:
     """Edit notes in bars [a, b]: transpose (semitones), velocity (set) / vel_scale, shift_beats, quantize (grid in
-    beats), dur_scale / dur_set, legato (extend each note to the next onset). pitches limits to those pitches."""
+    beats; a note's @offset is kept, so a nudge survives quantizing), dur_scale / dur_set, legato (extend each note to
+    the next onset), offset_ms (set each note's nudge in ms, negative = earlier; 0 removes it). pitches limits to
+    those pitches."""
     P = _load(project)
     tr = P.track(track)
     b0, b1 = P.bar_to_beat(bars[0]), P.bar_to_beat(bars[1] + 1)
@@ -730,6 +899,15 @@ def notes_transform(project: str, track: str, bars: list, transpose: int = 0, ve
             n[2] *= dur_scale
         if dur_set:
             n[2] = dur_set
+        if offset_ms is not None:
+            from .notation import parse_offset
+            try:
+                parse_offset(f"@{offset_ms}")
+            except NotationError as e:
+                raise OpError(str(e))
+            del n[4:]
+            if offset_ms:
+                n.append(float(offset_ms))
     if legato:
         starts = sorted({n[0] for n in sel})
         for n in sel:
@@ -1030,7 +1208,9 @@ def render(project: str, bars: list = None, tracks: list = None, stems: bool = F
             P.track(t)
     try:
         R = Renderer(P.d, P.root, bars[0] if bars else None, (bars[1] + 1) if bars else None, tracks, cache)
-        y, st = R.run()
+        with machine.slot('cpu', f"render {os.path.basename(P.root)}" + (f" bars {bars[0]}-{bars[1]}" if bars else ''),
+                          mem_gb=_render_gb(P.d, R.n, tracks)):
+            y, st = R.run()
     except (RenderError, fxmod.FxError, inst_mod.InstrumentError) as e:
         raise OpError(f"render failed: {e}")
     rd = os.path.join(P.root, 'renders')
@@ -1080,12 +1260,26 @@ def render(project: str, bars: list = None, tracks: list = None, stems: bool = F
     for (trk, i), gr in R.gain_reduction.items():
         if gr < -0.5:
             L.append(f"  {trk} fx {i}: max gain reduction {gr:.1f} dB")
+    for trk, k in R.early.items():
+        L.append(f"  {trk}: {k} nudged notes would sound before 0 s and start at 0 s instead; "
+                 f"project_set(offset_sec=...) a little later than now gives their lead-in room")
     mfx = [f.get('type') for f in P.d.get('master', {}).get('fx', [])]
     if 'limiter' not in mfx:
         L.append("  master: no limiter (fx_add target='master' fx={'type': 'limiter', 'ceiling_db': -0.3} catches peaks)")
     elif not any(t == 'master' and gr < -0.5 for (t, _), gr in R.gain_reduction.items()):
         L.append("  master limiter: idle (gain reduction under 0.5 dB)")
+    short = provenance.summary(P.d, P.root, tracks)[1]
+    if short:
+        L.append(short)
     return '\n'.join(L)
+
+
+def _render_gb(d, n, only=None):
+    """Peak memory estimate of one render of n samples (ismail.machine.render_memory_gb)."""
+    from .render import Renderer
+    tracks = [t for k, t in d['tracks'].items() if only is None or k in only]
+    deps = set().union(*(Renderer.deps(None, t) for t in d['tracks'].values()))
+    return machine.render_memory_gb(n, len(tracks), len(d.get('buses', {})), len(deps))
 
 
 def _record_window(rd, files, window):
@@ -1282,15 +1476,27 @@ def spectrogram(project: str, source: str = None, bars: list = None, out: str = 
 def separate(project: str, source: str = 'ref', model: str = 'htdemucs_ft') -> str:
     """Split a source into drums/bass/other/vocals stems with demucs (GPU if available). For 'ref' the stems become
     'ref:drums' etc."""
-    from .separate import separate as sep
+    from .separate import separate as sep, uses_gpu
     P = _load(project)
     path = P.resolve_audio(source)
     outdir = os.path.join(P.root, 'stems', os.path.splitext(os.path.basename(path))[0])
-    names = sep(path, outdir, model)
+    with machine.slot('gpu' if uses_gpu() else 'cpu', f"separate {os.path.basename(path)}"):
+        names = sep(path, outdir, model)
     if source == 'ref':
         P.d['reference']['stems_dir'] = outdir
         P.save()
     return f"stems {names} in {outdir}" + (" (available as ref:<stem>)" if source == 'ref' else '')
+
+
+# ------------------------------------------------------------------ the shared machine
+
+@op()
+def machine_status(project: str = None) -> str:
+    """The shared machine before anything heavy (a render over a minute, separate, mimic_measure, a fit, Blender,
+    whisper): GPU heat and throttling, CPU, free memory, every heavy job running now in any session, and whether a new
+    GPU or CPU job may start. Heavy ops check it themselves and refuse with the reason; run commands outside ismail
+    through `python -m ismail.machine run --gpu|--cpu -- <command>` so they take a slot too."""
+    return machine.board()
 
 
 # ------------------------------------------------------------------ batch

@@ -2,11 +2,13 @@
 
 ## Notation you will use all the time
 
-- `notes_write(track, bar, notes, bars=, repeat=, mode=)`: `'<beat> <pitch> <dur> [vel]'`, beats relative to `bar`. `bars` sets the span that `mode='replace'` clears and that `repeat` tiles. Write one bar or one phrase, then tile with `repeat` or `notes_copy`.
+- `notes_write(track, bar, notes, bars=, repeat=, mode=)`: `'<beat> <pitch> <dur> [vel] [@offset]'`, beats relative to `bar`. `bars` sets the span that `mode='replace'` clears and that `repeat` tiles. Write one bar or one phrase, then tile with `repeat` or `notes_copy`.
 - `pattern_write(track, bar, lanes={'C1': 'X...x...X...x...'}, step=0.25, repeat=)`: X 127, x 100, o 70, - 45, `_` ties the previous step. Pattern length sets the span. Best for drums and for any repeated rhythmic cell on a fixed pitch.
+- **Landing a sound on its beat.** A note sounds from its start, but music lands on an anchor: the attack of a bowed note, the loud part of a bird call, a syllable. When the attack comes late, nudge the sound, not the grid: `@-40ms` on a note (`0 C4 1 100 @-40ms`; measure the lead-in, e.g. the first frame within 10 dB of the note's peak), or `track_set(offset_ms=-35)` for a whole part, both in milliseconds, negative = earlier. The note keeps its beat (quantize, copy and read it on the grid; `notes_read` shows the `@`), automation stays on the song's time, and a deck plays it exactly where the studio does. `notes_transform(offset_ms=)` sets a nudge on many notes at once. Never time-warp a recording to make it land: tambopata did, and the player sounded synthetic. A note nudged before 0 s starts at 0 s (render says so; raise `offset_sec`).
 - `notes_copy(from_bars, to_bar, times, to_track, transpose)`: repeat sections, move a line to another instrument, make an octave layer.
-- `notes_transform(bars, transpose, velocity, vel_scale, shift_beats, quantize, dur_scale, legato, pitches)`: variation without rewriting.
+- `notes_transform(bars, transpose, velocity, vel_scale, shift_beats, quantize, dur_scale, legato, pitches, offset_ms)`: variation without rewriting.
 - `automation_set(track, param, points=[[bar, value], ...])`: fractional bars (17.5 = beat 3 of bar 17). Filter sweeps: `inst.filter.cutoff`, log interpolated. Fades: `volume_db` (an offset on the fader) or `track='master'`.
+- A performer voice's expression (`electric`: bend, vib, slide, mute, level; `voice_help` lists each voice's lanes) is automation `inst.lane.<name>` with the same `[bar, value]` points, e.g. `automation_set('lead', 'inst.lane.bend', [[17, 0], [17.5, 2], [18, 2], [18.25, 0]])` for a whole-step bend on beat 3. A deck plays these lanes too.
 
 ## Rhythm
 
@@ -42,7 +44,8 @@ Rules of thumb: accents (X) on no more than 4 steps per bar per part; a part tha
 
 For parts meant to sound played (guitar, bass, live drums), placement matters more than notes. Learned on a 1970 guitar band pastiche; the per-part checks are in `references/blind-tests.md` section 4.
 
-- **No per-note random jitter.** It is what an amateur sounds like; keep it to a few ms. Place whole phrases instead: landing notes tight to the band (within about 8 ms), phrase entries free (on the grid, 35-75 ms late or 25-50 ms early), and the run between re-spaced evenly (a lazy start rushing into the landing, or a push). Move the notes and every expression lane (bend, vibrato, wah, level) together with one time warp.
+- **No per-note random jitter.** It is what an amateur sounds like; keep it to a few ms. Place whole phrases instead: landing notes tight to the band (within about 8 ms), phrase entries free (on the grid, 35-75 ms late or 25-50 ms early), and the run between re-spaced evenly (a lazy start rushing into the landing, or a push). Move the notes and every expression lane (bend, vib, slide, mute, level) and every effect sweep (a wah's
+`fx.<i>.pos`) together with one time warp.
 - **The band has a feel too:** a shared slow push and pull per bar, 16ths a little late, a little looseness. That alone moved drums, bass and rhythm guitar from "digital" to "organic".
 - **Bends land on chord tones** of the chord sounding when they land, or on a scale tone that is no semitone from a chord tone (which keeps the blues bend from the minor 3rd to the 4th); never more than a whole step. A half-step bend onto the major 3rd over a minor chord sours it for as long as it is held.
 - **Each chord its own scale.** One mode over the whole song put a G natural under Ebm9. A double-stop under a held melody note moves by scale steps, as a pair.
