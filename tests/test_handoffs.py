@@ -26,3 +26,18 @@ def test_intake_reports_new_and_changed_sections_until_marked(tmp_path, capsys):
     out = capsys.readouterr().out
     assert 'now with knocks' in out and 'first version' not in out     # a changed section shows its added lines
     assert sorted(os.listdir(os.path.join(songs, 'birds'))) == ['HANDOFF.md', 'proj']
+
+
+def test_one_subheading_under_two_elements_stays_two_sections_and_a_reorganized_file_is_not_new(tmp_path):
+    songs = str(tmp_path / 'songs')
+    h = os.path.join(songs, 'film', 'HANDOFF.md')
+    write(os.path.join(songs, 'film', 'work', 'cache', 'HANDOFF.copy.md'), '# a backup, ignored\n')
+    write(h, '# HANDOFF\n## Grade\n### What it is\nnight cam\n## Thumb\n### What it is\nmatte\n'
+             '## Lessons\n- **Fade the edges.** A cut mid-sound clicks.\n')
+    rows, _, _ = handoffs.scan(songs)
+    assert [r[1] for r in rows] == ['Grade > What it is', 'Thumb > What it is', 'Lessons']
+    handoffs.main(['--songs', songs, '--mark'])
+    write(h, '# HANDOFF\n## Grade\n### What it is\nnight cam\n## Thumb\n### What it is\nmatte\n'
+             '## Lessons\n### Fade the edges\nA cut mid-sound clicks.\n### New\nsomething never said before\n')
+    kinds = {r[1]: r[2] for r in handoffs.scan(songs)[0]}
+    assert kinds['Lessons > Fade the edges'] == 'moved' and kinds['Lessons > New'] == 'new'

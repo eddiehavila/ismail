@@ -30,6 +30,9 @@
   `python -m ismail.handoffs` (every handoff section new or changed since the last mark, `--full`, `--mark`),
   triage into `songs/_migration/LEDGER.md`, the user decides, build on a branch, announce merges to every ismail
   session, the song closes the item. SKILL.md tells song agents their handoffs are read and how to close an item.
+- The intake names sections by their heading path (one subheading under two elements stays two sections), skips
+  caches and backups, and lists a reorganized handoff's old text only with `--all` (a section whose words were
+  already in the file is "moved", not new).
 
 ### Guitar rig and performers
 
