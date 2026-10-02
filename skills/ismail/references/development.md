@@ -4,6 +4,9 @@ Read this only when the user has explicitly asked you to change ismail (the engi
 tests, the README), or to migrate elements a song lists in its `HANDOFF.md`. Making music is the other role, and
 it never changes these files (SKILL.md, "Your role").
 
+The dev role is more than editing: it runs **the migration loop** (below), the standing job of turning what the
+songs learn into the engine and the skill, and of keeping every session on the same page.
+
 Several sessions work on one machine at once: some make songs, one or more develop the engine, and the user moves
 between them. Every rule below exists because breaking it once cost someone work or an afternoon.
 
@@ -69,7 +72,32 @@ Every engine change answers three questions in its commit and pull request:
 A parity bug found while making music is a song agent's finding, not its fix: it goes in the song's `HANDOFF.md`
 with the A/B numbers and the bars, and the engine agent fixes it on a branch with a test that fails before the fix.
 
-## Migrating from a song
+## The migration loop
+
+Songs keep finding what ismail lacks, build it in their own folder and write it in their `HANDOFF.md`. The dev
+agent collects those findings, gets the user's decision, builds them into the engine and tells the other sessions.
+Each step ends in something you can point at:
+
+1. **Intake.** `python -m ismail.handoffs` lists every handoff section that is new or changed since the last mark,
+   across `songs/**/HANDOFF*.md` and the folders in `songs/_migration/roots.txt` (`--full` prints the new text).
+   Run it before any engine work, and every couple of hours while songs are active. Read new sections whole.
+2. **Triage** into `songs/_migration/LEDGER.md`, one row per item: where from, kind (bug, migrate, feature, skill,
+   research, preset), status. Merge duplicates across songs: two songs building the same thing is the strongest
+   signal there is. Kinds that stay out of the engine say why: song-only, parked (with the reason), held (blocked on
+   a decision, e.g. anything fitted to a commercial recording or named after a brand or a person). Then
+   `python -m ismail.handoffs --mark`.
+3. **Report and decide.** Tell the user what is new, the verdict you propose for each item and an order. The
+   user approves, cuts or reorders; nothing is built before that.
+4. **Build**, one topic per worktree branch, with a test that fails before the change, the docs and skill text
+   in the same commit, and a pull request (the steps under "Migrating an element" below). The row says `in PR #n`.
+5. **Announce after the user merges.** Send each ismail session in the ledger's roster one short message (the
+   `SendMessage` tool): what changed, the ops, params and skill sections involved, what to do differently, and that
+   the skill changed on disk (re-read the reference before relying on it). Tell, never instruct: what a session does
+   with its own song is its business and the user's. Log the message in the ledger; the row says `announced`.
+6. **Close.** The song agent marks the item migrated in its own `HANDOFF.md`; the next intake sees the change and
+   the row says `closed`. The dev agent never writes in a song's folder (`songs/_migration/` is its own).
+
+## Migrating an element
 
 A song agent that needed something ismail lacks built it inside its song and listed it in
 `songs/<slug>/HANDOFF.md`. Migrating it:
@@ -82,11 +110,13 @@ A song agent that needed something ismail lacks built it inside its song and lis
 4. Tests: a round trip on known material (synthetic audio with known answers), plus one regression test per bug
    the handoff describes.
 5. Skill text where an agent will look for it (a route-table row, a section in the matching reference).
-6. Tell the user it is migrated and in which pull request, so the song's handoff can be marked done.
+6. Tell the user it is migrated and in which pull request; after the merge, announce it (the loop's step 5).
 
 ## A song's HANDOFF.md
 
-Written by the song agent, in the song's root folder, so any agent can migrate without the conversation:
+Written by the song agent, in the song's root folder, so any agent can migrate without the conversation. The
+intake splits it on headings and compares section by section, so give each finding its own heading and add to it
+rather than rewriting old sections:
 
 ```
 # HANDOFF: what can migrate out of <Song> (songs/<slug>)

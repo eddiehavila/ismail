@@ -26,6 +26,10 @@
   ceiling (-1.0 dB for mp3 everywhere), the eye-exam page (Submit, not a copy button), wah as an effect sweep, not
   a lane, and where the engine looks for a song's voices. SKILL.md: call `guide` before writing a measuring
   script. The `guide` op's live text matches.
+- The migration loop (`references/development.md`), the dev role's standing job: intake with
+  `python -m ismail.handoffs` (every handoff section new or changed since the last mark, `--full`, `--mark`),
+  triage into `songs/_migration/LEDGER.md`, the user decides, build on a branch, announce merges to every ismail
+  session, the song closes the item. SKILL.md tells song agents their handoffs are read and how to close an item.
 
 ### Guitar rig and performers
 

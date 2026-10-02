@@ -23,8 +23,10 @@ song agent, and your writable area is `songs/<slug>/` and nothing else. You do n
 `tests/`, the README or another song, and you do not run git in the ismail repository. When ismail lacks something,
 build it inside the song (a voice in `voices/`, with its data files named `<voice>_*` beside it so the render cache
 sees them; a song-local engine as `voices/<name>_engine.py`; scripts in `work/`), prove it on the song, and list it
-in the song's `HANDOFF.md`. Changing ismail itself is the other role, only when the user asks for it explicitly:
-read `references/development.md` first.
+in the song's `HANDOFF.md`: one heading per finding, evidence beside it. A dev agent reads every handoff every
+couple of hours, asks the user what to build, and messages your session when something you handed off is in the
+engine; then mark it migrated in your `HANDOFF.md`. Changing ismail itself is the other role, only when the user
+asks for it explicitly: read `references/development.md` first (it holds the migration loop the dev role runs).
 
 ```
 ismail/                  the engine ("the engine" always means ismail/ on main)
@@ -103,7 +105,7 @@ Registers must not collide: at most one part per octave band doing sustained wor
 - `references/recreate.md`: matching a reference recording: grid and alignment, separation, consensus transcription, comparisons, what the scores mean, and the traps that make a draft score better while sounding worse. Read whenever a reference track is involved.
 - `references/live.md`: playing live with the live engine: the Set Sheet and arc, queueing a whole arc in one batch, sweeps with ramps, listening and recording while it plays, decks (load a song, prepare it cued, transition), running a long set as a DJ loop (read the audience, small edits, a runway before every question, energy builds and drops, metric modulation for style changes), phrase voices for performers, runway before slow jobs, reading the audience (contrast over time, dynamics from effects, derived melodies), your latency, the pre-flight, the DJ kit (`ismail.live.djkit`), a set's folder layout, playing for a screen recording, what is not live yet. Read before any `live_*` call.
 - `references/music-video.md`: music videos with `ismail.video`: the per-song `video/` folder, the CLI, the shot kit (units, floors, posing, mirrors, GPU budget), the cut list and note-driven glitches, contact-sheet review and the creative rules. Read before planning any video.
-- `references/development.md`: only for changing ismail itself, when the user asks: worktrees, the collaboration must-haves (what is not yours is not touched, nothing unmerged is deleted, the user merges), migrating elements from a song's `HANDOFF.md`, the handoff format.
+- `references/development.md`: only for changing ismail itself, when the user asks: worktrees, the collaboration must-haves (what is not yours is not touched, nothing unmerged is deleted, the user merges), the migration loop (intake with `python -m ismail.handoffs`, the ledger in `songs/_migration/`, the user decides, build, announce to the sessions, close), migrating elements from a song's `HANDOFF.md`, the handoff format.
 - `references/LOCAL.md`, if it exists: an index of the user's private references kept on this machine only (never committed). Read it at the start of a task; it says which private file covers which kind of song.
 
 ## Non-negotiables
