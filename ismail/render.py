@@ -8,7 +8,7 @@ import time
 import numpy as np
 import soundfile as sf
 
-from . import dsp, fx as fxmod, instruments, voices
+from . import dsp, fx as fxmod, instruments, notation, voices
 
 LOG_PARAMS = ('cutoff', 'freq', '_hz')
 PRE_ROLL_BEATS = 8  # rendered before a partial window so tails/sidechains settle
@@ -153,6 +153,7 @@ class Renderer:
         self.use_cache = cache
         self.cache_dir = os.path.join(root, 'cache')
         self.stats = {}
+        self.early = {}          # track -> notes nudged before the song's first sample (moved to it)
         instruments.set_resolvers(self.load_sound, self.load_table)
 
     # ------------------------------------------------------------------ sounds
@@ -190,13 +191,19 @@ class Renderer:
     def beat_to_win_sec(self, b):
         return self.offset + b * self.spb - self.t0
 
-    def track_notes_sec(self, tr):
+    def track_notes_sec(self, tr, name=None):
         out = []
         lo = self.r_b0 - 16 if not self.full else -1e9  # notes starting a bit before the window still ring
-        for st, p, d, v in tr.get('notes', []):
+        # each note where it sounds: its beat moved by the track's and its own offset (notation.placed), as on a deck
+        for st, p, d, v in notation.placed(tr.get('notes', []), self.bpm, tr.get('offset_ms', 0.0)):
             if st + d < lo or st >= self.win_b1:
                 continue
             s = self.beat_to_win_sec(st)
+            if s < 0 and self.full:
+                # nudged before the song's first sample: it starts there instead (project_set offset_sec makes room)
+                self.early[name] = self.early.get(name, 0) + 1
+                out.append((0.0, int(p), d * self.spb, int(v)))
+                continue
             if s < 0:
                 # started before the render window: a note still sounding there with at least HELD_MIN_BEATS left
                 # (a drone, a pad, a held string) comes in at the window's first sample with what is left of it; the
@@ -277,13 +284,13 @@ class Renderer:
                 mix_auto[key] = curve
         y = np.zeros((2, n))
         if inst is not None:
-            notes = self.track_notes_sec(tr)
+            notes = self.track_notes_sec(tr, name)
             if notes:
                 y += instruments.render_instrument(inst, notes, n, inst_auto, self.bpm, self.sr, self.root,
                                                   self.r_b0 if not self.full else -self.offset / self.spb, self.bpb)
         for clip in tr.get('audio', []):
             snd = self.load_sound(clip['sound'])
-            s0 = int(round(self.beat_to_win_sec(clip['at_beat']) * self.sr))
+            s0 = int(round((self.beat_to_win_sec(clip['at_beat']) + tr.get('offset_ms', 0.0) / 1000.0) * self.sr))
             a = int(clip.get('offset_sec', 0.0) * self.sr)
             seg = snd[:, a:]
             if clip.get('length_beats'):

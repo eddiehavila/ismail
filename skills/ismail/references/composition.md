@@ -2,10 +2,11 @@
 
 ## Notation you will use all the time
 
-- `notes_write(track, bar, notes, bars=, repeat=, mode=)`: `'<beat> <pitch> <dur> [vel]'`, beats relative to `bar`. `bars` sets the span that `mode='replace'` clears and that `repeat` tiles. Write one bar or one phrase, then tile with `repeat` or `notes_copy`.
+- `notes_write(track, bar, notes, bars=, repeat=, mode=)`: `'<beat> <pitch> <dur> [vel] [@offset]'`, beats relative to `bar`. `bars` sets the span that `mode='replace'` clears and that `repeat` tiles. Write one bar or one phrase, then tile with `repeat` or `notes_copy`.
 - `pattern_write(track, bar, lanes={'C1': 'X...x...X...x...'}, step=0.25, repeat=)`: X 127, x 100, o 70, - 45, `_` ties the previous step. Pattern length sets the span. Best for drums and for any repeated rhythmic cell on a fixed pitch.
+- **Landing a sound on its beat.** A note sounds from its start, but music lands on an anchor: the attack of a bowed note, the loud part of a bird call, a syllable. When the attack comes late, nudge the sound, not the grid: `@-40ms` on a note (`0 C4 1 100 @-40ms`; measure the lead-in, e.g. the first frame within 10 dB of the note's peak), or `track_set(offset_ms=-35)` for a whole part, both in milliseconds, negative = earlier. The note keeps its beat (quantize, copy and read it on the grid; `notes_read` shows the `@`), automation stays on the song's time, and a deck plays it exactly where the studio does. `notes_transform(offset_ms=)` sets a nudge on many notes at once. Never time-warp a recording to make it land: tambopata did, and the player sounded synthetic. A note nudged before 0 s starts at 0 s (render says so; raise `offset_sec`).
 - `notes_copy(from_bars, to_bar, times, to_track, transpose)`: repeat sections, move a line to another instrument, make an octave layer.
-- `notes_transform(bars, transpose, velocity, vel_scale, shift_beats, quantize, dur_scale, legato, pitches)`: variation without rewriting.
+- `notes_transform(bars, transpose, velocity, vel_scale, shift_beats, quantize, dur_scale, legato, pitches, offset_ms)`: variation without rewriting.
 - `automation_set(track, param, points=[[bar, value], ...])`: fractional bars (17.5 = beat 3 of bar 17). Filter sweeps: `inst.filter.cutoff`, log interpolated. Fades: `volume_db` (an offset on the fader) or `track='master'`.
 - A performer voice's expression (`electric`: bend, vib, slide, mute, level; `voice_help` lists each voice's lanes) is automation `inst.lane.<name>` with the same `[bar, value]` points, e.g. `automation_set('lead', 'inst.lane.bend', [[17, 0], [17.5, 2], [18, 2], [18.25, 0]])` for a whole-step bend on beat 3. A deck plays these lanes too.
 
