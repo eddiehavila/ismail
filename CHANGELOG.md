@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Fixes from song handoffs
+
+- Render memory: a track's whole output stays in memory only while an effect reads it (a sidechain or vocoder
+  source), and stems are kept from their first to their last sound as float32, built full length when read. A
+  40-bar song of 16 one-note tracks: peak 2856 -> 404 MiB, 1835 -> 73 MiB held after. A 146-bar song of ~70 tracks
+  (tambopata) had needed ~20 GB and ran out of memory.
+- `mimic_measure` measures a short note (a 0.3 s panpipe): its attack calibration read the note's level over a
+  window that started after the note ended and produced a non-finite buffer.
+- `analyze_timbre` (and every analysis reading a source in stereo) works on a mono file: both channels read the same.
+
 ### Roles and collaboration
 
 - Skill: "Your role, and where things live": making music is the default role and writes only inside
