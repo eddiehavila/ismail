@@ -280,6 +280,14 @@ python -m ismail.video edit   -s songs/<slug> -- --sheet 33 41 16
 
 Shots are Blender scripts built on a small kit (rooms, rigged characters from JSON, lights, fog, cameras), the cut list is Python written in bars, and review is by stills and contact sheets. Per-song work lives in `songs/<slug>/video/`. The skill reference `skills/ismail/references/music-video.md` has the full method.
 
+## Developing ismail
+
+Songs live in `songs/<slug>/`, which this repository ignores: a song is never committed here, and a song session
+never edits the engine. What a song builds that ismail lacks, it lists in its own `HANDOFF.md`; engine work happens
+on a git worktree branch and comes in through a pull request. The rules (worktrees, never touching another
+session's work, never deleting an unmerged branch or worktree, migrating from a song's handoff) are in
+[skills/ismail/references/development.md](skills/ismail/references/development.md).
+
 ## Tests
 
 ```bash

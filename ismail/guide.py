@@ -1,5 +1,10 @@
 GUIDE = """ismail: a DAW you operate with text. You write notes/patches/effects as data, render, and read audio back as text.
 
+ROLE
+- Making music (the default): write only inside songs/<slug>/. Do not edit ismail/, skills/, tests/ or another
+  song, and do not run git in the ismail repo. Missing a capability: build it in the song (voices/, work/) and list
+  it in songs/<slug>/HANDOFF.md. Changing ismail itself only when the user asks: skills/ismail/references/development.md.
+
 CONVENTIONS
 - Every tool takes `project` (a directory). Bars are 1-indexed; ranges [a, b] are inclusive.
 - Note text: '<beat> <pitch> <dur_beats> [vel]' per line or ';'-separated, beats relative to the target bar
@@ -44,9 +49,12 @@ LIVE (play in real time while you edit; a separate engine process per project fo
   Effects: live_track(fx=[...]) sets a track's chain (fx_help; 'track:<name>' copies a project track's chain),
   live_bus + sends={bus: dB} share one hall/delay across tracks, live_fx(target, index, params, ramp_beats)
   moves automatable params (a sweep, a fade, a build) without resending the chain. Replaced chains ring out.
-  An effect with no live version is baked into each rendered note (live_status marks it; no live_fx on it).
-  A performer voice (module with perform()) plays overlapping notes as one gesture; clip expr={'bend': [[beat,
-  semitones], ...]} drives its bends and vibrato.
+  Every built-in effect, the guitar rig included, runs live as in the studio; one with no live version would be
+  baked into each rendered note (live_status marks it; no live_fx on it).
+  A performer voice (module with perform(), e.g. electric, kit70) renders a bar at a time with the part before it
+  as context; clip expr={'bend': [[beat, semitones], ...]} drives its lanes, as automation inst.lane.<name> does in
+  the studio.
+  live_parity(song, bars) checks that a song section plays on a deck as it renders.
   Decks: live_load(deck, song=<ismail project folder>, bars=[a, b]) puts a whole song on a deck (cued, off air,
   while another deck plays); live_listen(deck=...) hears the cued deck; live_transition(to, style, bars) queues
   the mix (blend | bass_swap | filter | cut); live_deck sets fader, 3-band isolator (kill at -40), filter knob,

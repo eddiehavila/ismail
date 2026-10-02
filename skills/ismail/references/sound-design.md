@@ -6,9 +6,28 @@ For acoustic and electric instruments (guitar, strings, piano, brass, voice, cro
 
 ## Voices: instruments written as code
 
-`voices_list` first: a built-in voice (grand_piano, growl, sfx ...) may already be the sound you need, and `voice_help(name)` shows what its velocity does. When you engineer an instrument as code that the song will reuse, write it as a voice module in `<project>/voices/<name>.py` (a `voice(freq, t, vel, gate, sr)` function plus an `INFO` dict), not as a `code` string in the track: the project stays portable, edits re-render automatically, and the voice can later move into the library. Never paste absolute paths or `sys.path` hacks into a `code` instrument.
+`voices_list` first: a built-in voice (grand_piano, growl, sfx ...) may already be the sound you need, and `voice_help(name)` shows what its velocity does. When you engineer an instrument as code that the song will reuse, write it as a voice module in `<project>/voices/<name>.py` (the engine looks in the project's `voices/` and in
+`$ISMAIL_VOICES`; a song that keeps its voices in `songs/<slug>/voices/` has `build.py` copy them into
+`proj/voices/`) (a `voice(freq, t, vel, gate, sr)` function plus an `INFO` dict), not as a `code` string in the track: the project stays portable, edits re-render automatically, and the voice can later move into the library. Never paste absolute paths or `sys.path` hacks into a `code` instrument.
 
 A **performer** voice plays a whole part: `perform(notes, total_n, sr, bpm=120, lanes=None, beat0=0.0, **params)` and no `voice()`. Take `beat0` (the song beat at sample 0) and draw each note's randomness (humanize, pick, drift, noise) from a generator keyed on the note's song beat and pitch, as `voices/guitar/electric.py` `_rng` does, never from one generator drawn note after note: a render of any slice of the part (a bar range, the live engine's bar chunks) then plays exactly as the whole part does. Noise that runs under the whole part (a snare's wires) is drawn per block of the song's own timeline (`kit70._wire_noise`).
+
+A voice renders the same in the whole song, in a bar range and live only if it follows five rules (found joining
+windowed renders of a 146-bar song, `songs/tambopata`):
+1. **Seed by song time**, never by where a note sits in the buffer: `beat0` plus the note's start, rounded once
+   (`round((st + beat0 * 60 / bpm) * 1000)`, song milliseconds), not two rounded sample counts added.
+2. **Never index notes by their place in the list**: a window gets only its own notes and a few before. Carry the
+   identity in the note.
+3. **A held note arrives cut**: a note that began before the window comes in at the window's first sample with
+   what is left of it. A song-long bed generates by absolute time (noise per frame seeded by the frame's song
+   number, fades over the song's first seconds), not by the note.
+4. **Length-dependent work changes the sound**: a voice that draws noise for the whole buffer or filters it
+   zero-phase sounds different when it is given a different length. ismail hands code voices each note whole; a
+   performer still gets the window, so keep its draws per note and its filters causal.
+5. **A window's last bar is not the song**: notes after it are absent and it fades out; compare windows at a join,
+   not over their last bar.
+Studio renders of songs using `electric` or `kit70` made before their seeds were keyed (late September 2026) are a
+different take of the same humanization: a blind exam's old clips cannot be rendered again exactly.
 
 ## Gain staging
 
@@ -43,13 +62,15 @@ Drum synths are mono; width comes from effects. Sidechain feel: `duck` with `sou
 
 ## Effects order that works
 
-instrument -> eq (cleanup) -> distortion -> filter -> duck/compressor -> chorus -> delay; reverb on a bus with sends. Master: limiter last, ceiling -0.3 dB. A drum bus (tracks output to a bus with compressor attack ~8 ms, ratio 3, plus a short room reverb mix 0.1) glues drums; fast attack plus clipping made them worse in testing.
+instrument -> eq (cleanup) -> distortion -> filter -> duck/compressor -> chorus -> delay; reverb on a bus with sends. Master: limiter last, ceiling -1.0 dB for anything that becomes an mp3 (`references/mastering.md`). A drum bus (tracks output to a bus with compressor attack ~8 ms, ratio 3, plus a short room reverb mix 0.1) glues drums; fast attack plus clipping made them worse in testing.
 
 ## Guitars and other played strings
 
 Learned matching a 1970 guitar record until 20 of 22 single notes passed a blind exam (`references/blind-tests.md`).
 
-- Start from the library: `voice_help(name='electric')` (guitar or bass) and `voice_help(name='kit70')` list presets and the rig each was fitted with. The voice is the DI signal; without its rig it sounds like a synth.
+- Start from the library: `voice_help(name='electric')` (guitar or bass) and `voice_help(name='kit70')` list presets and the rig each was fitted with. The voice is the DI signal; without its rig it sounds like a synth. Presets: `strat70_lead`, `strat70_rhythm`, `strat70_rotary`, `pbass70`, `kit70` (`track_add(..., instrument='preset:strat70_lead')`), then `fx_add` the rig's effects in order.
+- The rig effects are `wah`, `fuzz`, `univibe`, `amp`, `cab`, `rotary`, `tape`; `fx_help(type='amp')` documents each. They play live as in the studio.
+- `electric` is tuned a half step down by default (guitar Eb2-Eb6, bass Eb1-G3), as on the record it was fitted to; set `tuning` (MIDI notes of the open strings, low to high) for E standard. `kit70` plays General MIDI drum numbers (36 kick, 38 snare, 42/44/46 hats, 49/57 crashes, 51 ride; `voice_help` has the full map).
 - Rig order: wah -> fuzz -> amp -> cab -> delay -> eq for a lead (wah before the fuzz, as on the record); univibe before the amp; a rotary speaker after the cab. Amp noise (`hiss_db`, `hum_db`) belongs in a lead: "too clean" was the most common tell.
 - **Put the parts in the record's register before fitting any tone.** Measure the pitch percentiles of each reference part and move voicings and the bass line there first. Two tone fits failed until the notes moved; register masquerades as tone.
 - **Fit the harmonic profile, not the long-term spectrum.** A long-term spectrum mostly measures which notes were played. The level of each harmonic relative to the fundamental, averaged over notes, is note-independent: fitting it took a bass from 8.6 to 4.6 dB off.

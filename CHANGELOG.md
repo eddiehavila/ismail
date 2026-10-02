@@ -2,6 +2,35 @@
 
 ## Unreleased
 
+### Roles and collaboration
+
+- Skill: "Your role, and where things live": making music is the default role and writes only inside
+  `songs/<slug>/` (no edits to `ismail/`, `skills/`, tests or other songs, no git in the ismail repo); a missing
+  capability is built in the song and listed in its `HANDOFF.md`; one folder layout for every song; song
+  checkpoints with a git repository inside the song folder. The `guide` op opens with the same rule.
+- New `references/development.md` for changing ismail itself (only when the user asks): a worktree per topic, the
+  collaboration must-haves (what is not yours is not touched, nothing unmerged is deleted, no stash in a shared
+  repo, proof and docs in every commit, the user merges), migrating from a song's `HANDOFF.md`, its format,
+  and studio/live parity: every engine change says which side it touches, how live follows, and what proves it.
+- `live.md`, from a 40-minute blues set: only proven sounds go on air (no voice written during set prep and never
+  fitted or ear-tested), first sound within minutes, never downgrade a sound in silence, a song plays live through
+  `live_load` and is never rebuilt by hand, and anything that writes runs on a copy, never in another song's folder.
+- `blind-tests.md`: ear-test pages are always hosted on localhost and opened in the app's browser pane, take answers
+  with a Submit button that writes them to a file, and are checked in the pane before the user sees them.
+- Skill brought up to date with the live parity work: phrase voices no longer run an amp inside the voice (a
+  guitar is `electric` with its rig on the track, live as in the studio); the performer signature takes `beat0`;
+  how to write a performer's expression in the studio (`inst.lane.<name>` automation); the rig effects, presets,
+  `electric`'s half-step-down tuning and `kit70`'s drum map; five rules for a voice that renders the same in a
+  window, live and in the whole song (from `songs/tambopata`); `live_parity` for checking a song on a deck; what
+  `live_status` and a deck's "not live" list now say; render speeds of the library performers. Fixed: the limiter
+  ceiling (-1.0 dB for mp3 everywhere), the eye-exam page (Submit, not a copy button), wah as an effect sweep, not
+  a lane, and where the engine looks for a song's voices. SKILL.md: call `guide` before writing a measuring
+  script. The `guide` op's live text matches.
+- The migration loop (`references/development.md`), the dev role's standing job: intake with
+  `python -m ismail.handoffs` (every handoff section new or changed since the last mark, `--full`, `--mark`),
+  triage into `songs/_migration/LEDGER.md`, the user decides, build on a branch, announce merges to every ismail
+  session, the song closes the item. SKILL.md tells song agents their handoffs are read and how to close an item.
+
 ### Guitar rig and performers
 
 - Rig effects (`ismail/rig.py`): `fuzz` (Fuzz Face bias shift), `univibe` (four-stage LDR phaser with lamp lag),
