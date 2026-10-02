@@ -10,6 +10,7 @@ from numba import njit
 from ismail import dsp
 
 INFO = {
+    "measured": "calibrated from measured reference notes (piano_profile.json): partial levels, two-stage decay, inharmonicity, stereo image",
     "summary": "grand piano calibrated from measured notes: stiff-string partials, 1-3 detuned strings, stereo pair, "
                "hammer knock, dampers",
     "range": "A0-C8",

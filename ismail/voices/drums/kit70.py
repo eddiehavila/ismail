@@ -23,6 +23,7 @@ RIGS = {
 }
 
 INFO = {
+    "measured": "modes and the kit70 rig fitted against a late-60s record's drum stem",
     "summary": "1970 acoustic kit (22\" kick, 5x14 metal snare, 13\" hats, 22\" ride, 18\" crash, 12/16\" toms) "
                "as modal resonator banks re-excited by stick hits",
     "range": "36 kick 37 ghost 38 snare 40 rimshot 41/43 floor toms 45 mid tom 48 high tom 42/44/46 hats "
