@@ -208,7 +208,8 @@ def slot(kind, what, est_s=None, mem_gb=0.0, who=None, force=False, threads=THRE
         me = psutil.Process()
         job = {'kind': kind, 'what': what, 'who': who or _who(), 'pid': me.pid, 'pid_start': me.create_time(),
                'started': time.time(), 'est_s': est_s, 'mem_gb': mem_gb, 'forced': bool(force)}
-        path = os.path.join(board_dir(), 'jobs', f"{me.pid}_{int(job['started'] * 1000)}.json")
+        # unique per slot: two slots taken in the same millisecond by one process overwrote each other
+        path = os.path.join(board_dir(), 'jobs', f"{me.pid}_{int(job['started'] * 1000)}_{os.urandom(3).hex()}.json")
         with open(path, 'w', encoding='utf8') as f:
             json.dump(job, f)
     _held.depth = 1
