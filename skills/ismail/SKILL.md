@@ -110,6 +110,15 @@ Registers must not collide: at most one part per octave band doing sustained wor
 
 ## Non-negotiables
 
+- **The machine is shared.** Several sessions render, measure and run Blender on one computer with one cooler. Call
+  `machine_status` before anything that runs over a minute and wait when it says WAIT. Heavy ops (render, separate,
+  mimic_measure, the fits, live_parity) take a slot themselves and refuse with the reason; anything outside ismail
+  (Blender, whisper, demucs, a long script) runs through `python -m ismail.machine run --gpu|--cpu -- <command>` so
+  it takes one too. A hot GPU means the machine is hot, not that the CPU is free (they share the cooler). Never run
+  two heavy jobs of your own at once. When another session holds the slot, do lighter work or ask the user. Size
+  the job to the question: the smallest model that answers, 2-bar windows, one file at a time with a check between.
+  Do not sleep-poll a long job: run it in the background and let the harness say when it ends, and never end a turn
+  with a heavy job running that the user has not been told about (what runs, how long, how it stops).
 - Never report a render as good without numbers from at least `render` output (LUFS, peak, per-track peaks, SILENT flags) and one analysis view of the changed section.
 - Every track peak below 0 dBFS; master limiter gain reduction under about 6 dB (more means the faders are wrong, not that the limiter is working).
 - After writing notes for a part, read them back (`notes_read view='roll'` for a bar or two) before rendering. Most note bugs are visible there.

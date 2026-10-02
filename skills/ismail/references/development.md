@@ -35,9 +35,11 @@ worktree (`songs/` is git-ignored), so read a song's files by their path in the 
    up anything that is not regenerable. Deleting a folder, a branch or a stash needs the user's yes.
 3. **No stash in a shared repository.** The stash stack is shared by every worktree; another session can pop yours.
    Park work in a commit on your branch.
-4. **Every commit carries its own proof and its docs:** the full test suite passing in a clean worktree (apply
-   exactly what is staged to a fresh checkout and run it there), a `CHANGELOG.md` entry under Unreleased, and the
-   skill, README and op docstrings updated in the same commit as the behavior they describe.
+4. **Every commit carries its own proof and its docs:** the tests the change touches passing locally, the full
+   suite passing in CI on the pull request (GitHub runs it on every push, on four platforms; a full local run is one
+   more heavy job on the shared machine, so run it only when CI cannot answer), a `CHANGELOG.md` entry under
+   Unreleased, and the skill, README and op docstrings updated in the same commit as the behavior they describe.
+   The test suite takes a CPU slot on the machine's board (`tests/conftest.py`), so it waits like any render.
 5. **Stage your files and hunks only**, never `git add .` or `-a`.
 6. **The user merges.** Push the branch and open a pull request; the user reviews and merges. Push to main only when
    the user says so. A worktree stays until its pull request is merged.
@@ -93,7 +95,8 @@ Each step ends in something you can point at:
 5. **Announce after the user merges.** Send each ismail session in the ledger's roster one short message (the
    `SendMessage` tool): what changed, the ops, params and skill sections involved, what to do differently, and that
    the skill changed on disk (re-read the reference before relying on it). Tell, never instruct: what a session does
-   with its own song is its business and the user's. Log the message in the ledger; the row says `announced`.
+   with its own song is its business and the user's. An announcement wakes every idle session at once: never ask
+   for work in it, and add a line from `python -m ismail.machine` when heavy jobs are running. Log the message in the ledger; the row says `announced`.
 6. **Close.** The song agent marks the item migrated in its own `HANDOFF.md`; the next intake sees the change and
    the row says `closed`. The dev agent never writes in a song's folder (`songs/_migration/` is its own).
 

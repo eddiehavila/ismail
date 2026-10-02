@@ -1,5 +1,10 @@
 GUIDE = """ismail: a DAW you operate with text. You write notes/patches/effects as data, render, and read audio back as text.
 
+MACHINE
+- The computer is shared by several sessions. machine_status before anything over a minute; heavy ops (render,
+  separate, mimic_measure, fits, live_parity) take a slot and refuse with the reason when it is busy or hot. Run
+  Blender, whisper, demucs or long scripts through `python -m ismail.machine run --gpu|--cpu -- <command>`.
+
 ROLE
 - Making music (the default): write only inside songs/<slug>/. Do not edit ismail/, skills/, tests/ or another
   song, and do not run git in the ismail repo. Missing a capability: build it in the song (voices/, work/) and list
