@@ -275,8 +275,11 @@ hole at the bass swap. Pick `bars` so the section starts on its downbeat hit.
 - **Pre-flight.** `live_start` names any other engine still running on the machine (a forgotten set held a
   Bluetooth speaker for hours and froze the next one): stop it unless it should play. After the first clip,
   check that the heard bar moves; a `STALLED` line in `live_status` (or in any reply) means the device stopped
-  asking for audio: `live_stop`, then `live_start`, or another device. `live_stop` waits for the engine to exit
-  and kills it with its workers when a dead device would hang it.
+  asking for audio. With `device='default'` the engine moves by itself: to a speaker that becomes the system
+  default (a Bluetooth speaker connecting), and back to the default when a device stops taking audio; the next
+  reply says "output moved". To move by hand mid-set, `live_device(device='JBL')` (part of a name works): the
+  timeline and queue carry on with a gap of about a second, nothing is reloaded. `live_stop` waits for the engine
+  to exit and kills it with its workers when a dead device would hang it.
 - **Heavy jobs before the set.** Stem separation during a set caused 1,654 underruns; measurement scripts at idle
   priority were fine.
 - **Mixer budget.** About 18 tracks in a crescendo peaked at 71% of real time and dropped out. Share reverbs on
