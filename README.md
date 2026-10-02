@@ -55,7 +55,7 @@ Making music with an AI agent runs into the same few walls. ismail is built arou
 - The measured piano is still behind a good sampler (16.3 against 11.6 in the same test), bowed strings miss a last crispness, and notes don't glide into each other yet.
 - One tempo per project, no MIDI import or export, no plugin hosting.
 - Live changes land between the agent's turns, 5 to 30 seconds apart.
-- It needs a capable agent, and your ear stays the final judge.
+- It needs a capable agent, and your ear stays the final judge. The blind exams so far had one listener.
 
 How it compares with Suno, streaming models such as Lyria RealTime, and bridges into Ableton or FL Studio: see the [showcase page](https://newsbubbles.github.io/ismail/#compare).
 
@@ -234,7 +234,7 @@ Bring your own reference audio (`project_new(..., reference=<file>)`); none is i
 
 1. `analyze_grid(source='ref')`, then `align` a rendered drum track against `ref:drums` and correct `offset_sec`. If it reports the record 15 cents or more off A440 (a sped-up sample), run `ref_retune()` first: otherwise every note reads as a pair of semitones.
 2. `separate(source='ref')` (demucs) and read `analyze_structure(source='ref')`. Measure the drums before writing them: `analyze_swing` and `analyze_kit(source='ref:drums')`.
-3. Transcribe with `notes_from_audio_loop`. It keeps only notes that recur across repetitions of the loop, because raw transcription copies echoes, leakage and distortion partials as hard notes. If the song alternates versions of its loop, transcribe each from its own repetitions and pass `base_bars` so the shared notes stay identical.
+3. Transcribe with `notes_from_audio_loop`. It keeps only notes present in most repetitions of the loop, which drops what changes between repetitions (leakage, transcription glitches), and drops notes far quieter than the loudest (`min_rel_db`), which catches quiet echoes. Echoes and distortion partials locked to the loop recur every time, so a vote alone keeps them: raw transcription copies all of these as hard notes. If the song alternates versions of its loop, transcribe each from its own repetitions and pass `base_bars` so the shared notes stay identical.
 4. Design sounds: `sound_extract` a repeated hit or stab, then `instrument_fit` (evolution strategy over instrument and effect parameters, scored on spectrum, envelope, width and pitch clarity). `track_fit` tunes a part in context against the reference stem.
 5. `stem_map_set`, `render(stems=True)`, `levels_from_ref` (faders from the reference's stem balance), `cmp_run`, then drill down: `cmp_summary`, `cmp_arrangement`, `cmp_sections`, `cmp_worst`, `cmp_bars`, `cmp_zoom(bar)`. `cmp_list` tracks progress across runs.
 
