@@ -34,6 +34,8 @@ def load(path, sr=ASR, stereo=False):
     y = y.T
     if not stereo:
         y = y.mean(0)
+    elif y.shape[0] == 1:                # a mono file read as stereo: both channels the same (callers index [1])
+        y = np.vstack([y, y])
     if fsr != sr:
         y = librosa.resample(y, orig_sr=fsr, target_sr=sr, res_type='soxr_hq')
     _CACHE.clear() if len(_CACHE) > 12 else None
