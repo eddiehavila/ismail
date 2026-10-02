@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Live output follows the device
+
+- The live output follows the system default (`device='default'`): a Bluetooth speaker that connects mid-set takes
+  over within a few seconds, and a device that stops taking audio falls back to the default. `live_device` moves a
+  running set to another output by hand. The timeline, queue and audio mixed ahead carry on (about a second's gap);
+  `live_start(follow_device=False)` keeps the old behaviour.
+- The handoff scanner skips `history_src/` backups.
+
 ### Placement offsets
 
 - Sounds land by their start; music lands on an anchor. A note can now be nudged off its beat in milliseconds:
