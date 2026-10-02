@@ -9,7 +9,8 @@ jobs on a laptop GTX 1080 until it sat at 92 C pinned at 139 MHz and the user st
 
 Rules (the slots): one GPU-heavy job machine-wide, two CPU-heavy jobs (a live engine on air holds one). No new heavy
 job while the GPU is in thermal or hardware slowdown or above GPU_HOT_C: CPU and GPU share one cooler, so a hot GPU
-is not a free CPU. A job whose memory estimate does not fit the free commit (minus a reserve) is refused instead of
+is not a free CPU. No new CPU job while the CPU is CPU_BUSY % busy or more, whoever is using it: most of the load on
+this machine is not on the board (the desktop app, servers, other tools), and the refusal names the top processes. A job whose memory estimate does not fit the free commit (minus a reserve) is refused instead of
 dying with a MemoryError. A refused job says what is running, whose it is and when to retry; force=True (only when
 the user says so) runs it anyway. Jobs of processes that died are cleared on the next look.
 
@@ -34,6 +35,8 @@ GPU_HOT_C = 85
 # nvidia-smi clocks_throttle_reasons bits that mean the card is slowing itself down (0x1 is idle: fine)
 GPU_BAD = {0x8: 'hardware slowdown', 0x20: 'thermal slowdown (driver)', 0x40: 'thermal slowdown (hardware)',
            0x80: 'power brake'}
+CPU_BUSY = 80.0                    # % of all cores, averaged over CPU_SAMPLE_S
+CPU_SAMPLE_S = 2.0
 RESERVE_GB = 4.0                   # commit kept free for the desktop, the sessions and the live engine
 THREADS = 2                        # numeric threads per heavy job
 
@@ -78,6 +81,39 @@ def gpu_trouble(g):
     if g['temp'] >= GPU_HOT_C:
         why.append(f"{g['temp']:.0f} C (limit {GPU_HOT_C} C)")
     return ', '.join(why)
+
+
+_cpu_cache = [0.0, None]
+
+
+def cpu_load():
+    """-> (% of all cores busy over CPU_SAMPLE_S, [(% of all cores, process name, pid)] for the top 4), cached 10 s."""
+    if time.time() - _cpu_cache[0] < 10 and _cpu_cache[1] is not None:
+        return _cpu_cache[1]
+    procs = []
+    for p in psutil.process_iter(['name']):
+        try:
+            p.cpu_percent(None)
+            procs.append(p)
+        except psutil.Error:
+            pass
+    total = psutil.cpu_percent(interval=CPU_SAMPLE_S)
+    n = psutil.cpu_count() or 1
+    top = []
+    for p in procs:
+        try:
+            c = p.cpu_percent(None) / n
+        except psutil.Error:
+            continue
+        if c >= 1.0 and p.pid and p.info.get('name') not in ('System Idle Process', 'idle'):
+            top.append((c, p.info.get('name') or '?', p.pid))
+    top.sort(reverse=True)
+    _cpu_cache[:] = [time.time(), (total, top[:4])]
+    return _cpu_cache[1]
+
+
+def _top_text(top):
+    return ', '.join(f"{name} {c:.0f}%" for c, name, _ in top) or 'no single process stands out'
 
 
 def memory():
@@ -173,6 +209,11 @@ def check(kind, mem_gb=0.0, _jobs=None):
     hot = gpu_trouble(gpu())
     if hot:
         why.append(f"the GPU is {hot}: the machine is hot (CPU and GPU share one cooler), no new heavy job until it cools")
+    if kind == 'cpu':
+        busy, top = cpu_load()
+        if busy >= CPU_BUSY:
+            why.append(f"the CPU is {busy:.0f}% busy (limit {CPU_BUSY:.0f}%), mostly load that is not on the board "
+                       f"({_top_text(top)}): wait for it to settle, or ask the user whether something can close")
     same = [j for j in js if j['kind'] == kind or (kind == 'cpu' and j['kind'] == 'live')]
     if len(same) >= SLOTS[kind]:
         why.append(f"the {kind} slots are full ({SLOTS[kind]}): " + '; '.join(_describe(j) for j in same))
@@ -200,6 +241,8 @@ def slot(kind, what, est_s=None, mem_gb=0.0, who=None, force=False, threads=THRE
         return
     if kind not in SLOTS and kind != 'live':
         raise ValueError(f"kind is 'gpu', 'cpu' or 'live', not {kind!r}")
+    if kind == 'cpu' and not force:
+        cpu_load()                     # sample outside the board's lock (it takes CPU_SAMPLE_S); check() reuses it
     with _board_lock():
         why = '' if force or kind == 'live' else check(kind if kind != 'live' else 'cpu', mem_gb)
         if why:
@@ -256,7 +299,9 @@ def board():
         L.append(f"GPU: {g['temp']:.0f} C, {g['util']:.0f}% busy, core {g['clock']:.0f}/{g['max_clock']:.0f} MHz"
                  f"{' (idle)' if g['reasons'] & 0x1 else ''}, VRAM {g['mem_used_gb']:.1f}/{g['mem_total_gb']:.1f} GB"
                  + (f"  HOT: {hot}" if hot else ''))
-    L.append(f"CPU: {psutil.cpu_percent(interval=0.3):.0f}% busy, {psutil.cpu_count()} threads")
+    busy, top = cpu_load()
+    L.append(f"CPU: {busy:.0f}% busy over {CPU_SAMPLE_S:.0f} s, {psutil.cpu_count()} threads; top: {_top_text(top)}"
+             + (f"  BUSY (limit {CPU_BUSY:.0f}%)" if busy >= CPU_BUSY else ''))
     L.append(f"memory: {free:.1f} GB of {limit:.0f} GB commit free, {ram:.1f} GB RAM free")
     js = jobs()
     L.append(f"heavy jobs ({len(js)}; slots: gpu {SLOTS['gpu']}, cpu {SLOTS['cpu']}, a live engine holds a cpu slot):")
