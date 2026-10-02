@@ -11,6 +11,43 @@ class NotationError(ValueError):
     pass
 
 
+MAX_OFFSET_MS = 2000.0
+_OFFSET_RE = re.compile(r'^@([+-]?\d+(?:\.\d+)?)(ms)?$')
+
+
+def parse_offset(tok):
+    """'@-40ms', '@-40', '@+12.5ms' -> milliseconds (negative = earlier than the beat)."""
+    m = _OFFSET_RE.match(tok)
+    if not m:
+        raise NotationError(f"offset {tok!r}: write it in milliseconds after an @, e.g. '@-40ms' (earlier) or "
+                            f"'@15ms' (later); to move a note by beats, change its start")
+    ms = float(m.group(1))
+    if abs(ms) > MAX_OFFSET_MS:
+        raise NotationError(f"offset {tok!r}: at most {MAX_OFFSET_MS:g} ms either way; a larger move is a new start")
+    return ms
+
+
+def fmt_offset(ms):
+    return f"@{fmt_num(ms) if ms < 0 else '+' + fmt_num(ms)}ms"
+
+
+def placed(notes, bpm, track_offset_ms=0.0):
+    """Stored notes [[start, midi, dur, vel(, offset_ms)]] -> [(start, midi, dur, vel)] with each start moved by the
+    track's and the note's offset, in beats at `bpm`. A nudged note is the same as a note written at its nudged
+    time: the studio and the live decks both place notes through this, so they agree."""
+    k = bpm / 60000.0
+    out = []
+    for n in notes:
+        off = float(track_offset_ms or 0.0) + (float(n[4]) if len(n) > 4 else 0.0)
+        out.append((n[0] + off * k if off else n[0], n[1], n[2], n[3]))
+    return out
+
+
+def with_offsets(notes5, bpm):
+    """[(start, midi, dur, vel, offset_ms)] from parse_notes(offsets=True) -> 4-tuples with starts moved."""
+    return placed(notes5, bpm)
+
+
 def pitch_to_midi(p):
     """'C4' -> 60, 'F#2' -> 42, 'Bb3' -> 58, 60 -> 60, '60' -> 60."""
     if isinstance(p, (int, float)):
@@ -54,17 +91,27 @@ def fmt_num(x):
     return str(int(x)) if x == int(x) else f"{x:g}"
 
 
-def parse_notes(text, default_vel=100, default_dur=None):
+def parse_notes(text, default_vel=100, default_dur=None, offsets=False):
     """Parse a note list. One note per line or ';'-separated:
-         <start_beats> <pitch> [<dur_beats>] [<velocity>]
-       Pitch may be a chord 'C4,E4,G4'. ' #' starts a comment (F#4 is a pitch).
-       Returns [(start, midi, dur, vel)]."""
+         <start_beats> <pitch> [<dur_beats>] [<velocity>] [@<offset>ms]
+       Pitch may be a chord 'C4,E4,G4'. ' #' starts a comment (F#4 is a pitch). @offset moves the sound off its
+       beat by milliseconds (negative = earlier: a sound whose attack comes late starts early so the attack lands on
+       the beat); the note still belongs to its beat.
+       Returns [(start, midi, dur, vel)], or with offsets=True [(start, midi, dur, vel, offset_ms)]."""
     out = []
     for lineno, raw in enumerate(re.split(r'[;\n]', text), 1):
         line = re.sub(r'(^|\s)#.*$', '', raw).strip()
         if not line:
             continue
         parts = line.split()
+        offs = [p for p in parts if p.startswith('@')]
+        parts = [p for p in parts if not p.startswith('@')]
+        if len(offs) > 1:
+            raise NotationError(f"note {lineno} {raw.strip()!r}: one @offset per note")
+        off = parse_offset(offs[0]) if offs else 0.0
+        if offs and not offsets:
+            raise NotationError(f"note {lineno} {raw.strip()!r}: an @offset is not read here; write the note "
+                                f"without it, or move its start")
         if len(parts) < 2:
             raise NotationError(f"note {lineno} {raw.strip()!r}: need at least '<start> <pitch>' e.g. '0 E2 0.5 100'")
         start = parse_num(parts[0])
@@ -80,7 +127,7 @@ def parse_notes(text, default_vel=100, default_dur=None):
         if not 1 <= vel <= 127:
             raise NotationError(f"note {lineno}: velocity must be 1..127")
         for p in parts[1].split(','):
-            out.append((start, pitch_to_midi(p), dur, vel))
+            out.append((start, pitch_to_midi(p), dur, vel, off) if offsets else (start, pitch_to_midi(p), dur, vel))
     return out
 
 
@@ -108,12 +155,14 @@ def parse_steps(pattern, step=0.25, dur=None, vel_map=None):
 
 
 def format_notes(notes, beats_per_bar, bar_origin=1):
-    """notes: [(start_abs_beats, midi, dur, vel)] -> 'bar | +beat | pitch | dur | vel' lines."""
+    """notes: [(start_abs_beats, midi, dur, vel(, offset_ms))] -> 'bar | +beat | pitch | dur | vel | @offset' lines."""
     lines = []
-    for st, p, d, v in sorted(notes):
+    for n in sorted(notes):
+        st, p, d, v = n[:4]
         bar = int(st // beats_per_bar) + bar_origin
         off = st - (bar - bar_origin) * beats_per_bar
-        lines.append(f"bar {bar:>3} +{fmt_num(off):<6} {midi_to_name(p):<4} d={fmt_num(d):<6} v={v}")
+        lines.append(f"bar {bar:>3} +{fmt_num(off):<6} {midi_to_name(p):<4} d={fmt_num(d):<6} v={v}"
+                     + (f" {fmt_offset(n[4])}" if len(n) > 4 and n[4] else ''))
     return '\n'.join(lines)
 
 
@@ -122,6 +171,7 @@ def piano_roll(notes, start_beat, n_beats, step=0.25, beats_per_bar=4):
     if not notes:
         return '(no notes in range)'
     ncols = int(round(n_beats / step))
+    notes = [tuple(n[:4]) for n in notes]
     pitches = sorted({p for _, p, _, _ in notes}, reverse=True)
     rows = {p: ['.'] * ncols for p in pitches}
     for st, p, d, v in notes:

@@ -13,6 +13,7 @@ import os
 import numpy as np
 
 from . import config, master_wav, video_dir
+from ..notation import placed
 
 GROWL = {1: 'yoi', 2: 'wub', 3: 'screech', 4: 'metal', 5: 'dive', 6: 'zap', 7: 'grind', 8: 'chop', 9: 'talk',
          11: 'robot', 12: 'howl'}
@@ -40,7 +41,7 @@ def events(song):
         growl = _is_growl(tr.get('instrument'))
         fam_names = names.get(name, {})
         ev = []
-        for beat, pitch, dur, vel in tr['notes']:
+        for beat, pitch, dur, vel in placed(tr['notes'], bpm, tr.get('offset_ms', 0.0)):
             e = {'f': int(round(beat * fpb + off)), 'beat': beat, 'pitch': pitch,
                  'len': max(1, int(round(dur * fpb))), 'vel': vel}
             fam = fam_names.get(str(vel))

@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Placement offsets
+
+- Sounds land by their start; music lands on an anchor. A note can now be nudged off its beat in milliseconds:
+  `'0 C4 1 100 @-40ms'` (negative = earlier), and a whole part with `track_set(offset_ms=-35)`. The note keeps its
+  beat: `notes_read` shows the `@`, the roll stays on the grid, quantize and copy keep the nudge, and
+  `notes_transform(offset_ms=)` sets it on many notes. Automation stays on the song's time; audio clips move with
+  the track offset. A nudged note is the same as a note written at its nudged time, in the studio, in any window
+  (bit-identical), on a deck (live parity) and in the video sync. A note nudged before 0 s starts at 0 s and the
+  render reply says so. Live clips read `@` the same way. From tambopata, whose player was time-warped to land on
+  the beat and sounded synthetic.
+
 ### The person: lexicon, objectives, user-experience reference
 
 - The lexicon: `lexicon_note`, `lexicon_find`, `lexicon_view` keep a two-way map between the person's own words for

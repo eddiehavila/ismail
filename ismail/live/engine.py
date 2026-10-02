@@ -28,7 +28,7 @@ import numpy as np
 from . import fx_blocks as F
 from .. import instruments, machine
 from ..dsp import SR
-from ..notation import NotationError, format_notes, parse_notes, parse_steps, pitch_to_midi, fmt_num
+from ..notation import NotationError, format_notes, parse_notes, parse_steps, pitch_to_midi, fmt_num, with_offsets
 from ..presets import PRESETS
 from . import decks as D
 from . import graph as G
@@ -1501,7 +1501,7 @@ class Engine:
             need, extra = 0.0, 0.0
             for cspec in clips:
                 inst = self.tracks[cspec['track']]['inst']
-                evs = self._events_of(parse_notes(cspec['notes']), inst)
+                evs = self._events_of(self._clip_notes(cspec['notes']), inst)
                 need = max(need, self._lead_beats(cspec['track'], evs, extra))
                 extra += sum(self._event_s(cspec['track'], dd) for _, dd in evs[:32] if dd is not None)
             try:
@@ -1620,6 +1620,11 @@ class Engine:
             need = max(need, done_s / self.spb - on)
         return need
 
+    def _clip_notes(self, text):
+        """A clip's note text -> [(start, midi, dur, vel)], each start moved by its @offset as the studio does. A note
+        nudged before the clip's first beat starts on it: begin the clip a beat earlier to keep its lead-in."""
+        return [(max(0.0, s), m, d, v) for s, m, d, v in with_offsets(parse_notes(text, offsets=True), self.bpm)]
+
     def _events_of(self, notes, inst):
         """(onset, duration) in beats of each render event (a note, or a mono phrase); duration None for an event
         identical to an earlier one (same pitches, lengths and velocities), which renders only once."""
@@ -1665,7 +1670,7 @@ class Engine:
         notes = []
         try:
             if it.get('notes'):
-                notes += parse_notes(it['notes'])
+                notes += self._clip_notes(it['notes'])
             span = max((s + d for s, _, d, _ in notes), default=0.0)
             for pitch, pat in (it.get('lanes') or {}).items():
                 m = pitch_to_midi(pitch)

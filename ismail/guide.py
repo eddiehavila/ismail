@@ -27,8 +27,11 @@ THE PERSON
 
 CONVENTIONS
 - Every tool takes `project` (a directory). Bars are 1-indexed; ranges [a, b] are inclusive.
-- Note text: '<beat> <pitch> <dur_beats> [vel]' per line or ';'-separated, beats relative to the target bar
+- Note text: '<beat> <pitch> <dur_beats> [vel] [@-40ms]' per line or ';'-separated, beats relative to the target bar
   (0 = beat 1). Chords 'C4,E4,G4'. C4 = 60. ' #' starts a comment.
+- Sounds land by their start. A sound whose attack comes late (a measured phrase, a bowed note, a bird call)
+  is nudged: '@-40ms' on a note, or track_set(offset_ms=-35) for a whole part; the note stays on its beat.
+  Never time-warp a recording to land it.
 - Audio sources for analysis: render | ref | ref:drums|bass|other|vocals | track:<name> | sound:<name> | a path.
   Omitted source = the reference if the project has one, else your render. track:<name> needs render(stems=True)
   and is the track after its fx and fader, scaled by the master chain's gain (tracks sum to the mix).
