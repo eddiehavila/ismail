@@ -20,7 +20,7 @@ import re
 import sys
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SKIP = re.compile(r'[\\/](backups?|_backups|renders|proj|cache|history|node_modules|\.git)[\\/]')
+SKIP = re.compile(r'[\\/](backups?|_backups|renders|proj|cache|history|history_src|node_modules|\.git)[\\/]')
 
 
 def _songs_default():

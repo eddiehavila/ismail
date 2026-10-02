@@ -34,6 +34,7 @@ from . import decks as D
 from . import graph as G
 from . import worker
 from .safety import Safety
+from . import outputs as O
 from .timeline import EPS, QueueError, Timeline, fmt_bar
 
 BLOCK = 1024
@@ -46,6 +47,7 @@ PRELOAD_S = 60.0        # a clip queued for later renders up to this much of its
 FEED_PER_WORKER = 2     # render jobs handed to each worker at a time; the rest wait in the engine, earliest-needed first
 AIR_S = 120.0           # output history kept for live_listen
 HOLD_S = 10             # live_status also shows each track's loudest level over this many seconds
+WATCH_S = 4.0           # how often the default output device is checked (a speaker connecting)
 STALL_S = 2.0           # the device asking for no audio this long = a stalled output (Bluetooth sleep, a busy device)
 CHUNK_PRE_S = 1.0       # a performer's bar chunk renders this much of the part before it as context
 CHUNK_XF_S = 0.01       # chunks crossfade at the bar line
@@ -122,12 +124,18 @@ def _mono_groups(notes, inst):
 
 
 class Engine:
-    def __init__(self, root, bpm, bpb=4, workers=2, device='default'):
+    def __init__(self, root, bpm, bpb=4, workers=2, device='default', follow=True):
         self.root = os.path.abspath(root)
         self.bpm = float(bpm)
         self.bpb = int(bpb)
         self.spb = 60.0 / self.bpm
         self.device = device
+        self.follow = bool(follow)      # device 'default': move to a new system default (a speaker connecting)
+        self.out_name = None            # the device the stream opened on, by name
+        self.stream = None
+        self._null_on = False
+        self._out_lock = threading.Lock()
+        self._out_tried = 0.0
         self.lock = threading.RLock()
         self.tl = Timeline(self.bpb)
         self.tracks = {}
@@ -746,7 +754,7 @@ class Engine:
     def _null_loop(self):
         t0 = time.time()
         done = 0
-        while self.running:
+        while self.running and self._null_on:
             want = int((time.time() - t0) * SR) - done
             if want >= BLOCK:
                 self._pull(want)
@@ -779,37 +787,117 @@ class Engine:
             threads.append(self._collect)
         for fn in threads:
             threading.Thread(target=fn, daemon=True).start()
-        if self.device in (None, 'none', 'null'):
-            threading.Thread(target=self._null_loop, daemon=True).start()
-            self.stream = None
-        else:
-            import sounddevice as sd
+        with self._out_lock:
+            self._open_output(self.device, rescan=False)
+        if self.device not in (None, 'none', 'null'):
+            threading.Thread(target=self._watch_output, daemon=True).start()
 
-            def cb(outdata, frames, t, status):
-                outdata[:] = self._pull(frames)
-            dev = None if self.device in ('default', '') else (int(self.device) if str(self.device).isdigit() else self.device)
-            self.stream = sd.OutputStream(samplerate=SR, channels=2, dtype='float32', callback=cb, device=dev,
-                                          latency='high')
-            self.stream.start()
+    # ------------------------------------------------------------------ output device
+    def _open_output(self, device, rescan=True):
+        """Open the output on `device` ('default', a name or index, or 'none'). rescan re-reads the system's device
+        list first (a speaker that connected after this process started is not in it)."""
+        if device in (None, 'none', 'null'):
+            self.stream, self.out_name = None, 'none'
+            if not self._null_on:
+                self._null_on = True
+                threading.Thread(target=self._null_loop, daemon=True).start()
+            return
+        import sounddevice as sd
+        self._null_on = False
+        if rescan:
+            sd._terminate()
+            sd._initialize()
+
+        def cb(outdata, frames, t, status):
+            outdata[:] = self._pull(frames)
+        dev = None if device in ('default', '') else (int(device) if str(device).isdigit() else device)
+        st = sd.OutputStream(samplerate=SR, channels=2, dtype='float32', callback=cb, device=dev, latency='high')
+        st.start()
+        self.stream = st
+        try:
+            self.out_name = sd.query_devices(st.device, 'output')['name'] if dev is not None else \
+                sd.query_devices(kind='output')['name']
+        except Exception:
+            self.out_name = str(device)
+        self.last_pull = time.time()
+
+    def _close_output(self):
+        st, self.stream = self.stream, None
+        if st is None:
+            return True
+
+        def close():
+            try:
+                st.stop()
+                st.close()
+            except Exception:
+                pass
+        t = threading.Thread(target=close, daemon=True)
+        t.start()
+        t.join(3.0)                     # a dead device (a Bluetooth speaker gone) can block stop() forever
+        return not t.is_alive()
+
+    def cmd_device(self, device='default', follow=None):
+        """Move the sound to another output mid-set: the timeline, the queue and the audio mixed ahead carry on (a
+        gap of about a second). device: 'default' (whatever the system's default is now), a name or part of one, an
+        index, or 'none'."""
+        if follow is not None:
+            self.follow = bool(follow)
+        old = self.out_name or self.device
+        with self._out_lock:
+            if not self._close_output():
+                self.news.append("the previous output did not close (a vanished device); it was left behind")
+            try:
+                self._open_output(device)
+            except Exception as e:
+                try:
+                    self._open_output(self.device)
+                    back = f"; still on {self.out_name}"
+                except Exception:
+                    self._open_output('none')
+                    back = "; nothing could be opened, so the set plays silently (live_device to try again)"
+                names = _output_names()
+                raise LiveError(f"could not open {device!r}: {e}{back}. Outputs now: {', '.join(names) or 'none'}")
+            self.device = device
+        return f"output: {self.out_name} (was {old})" + (
+            "; follows the system default" if device == 'default' and self.follow else '')
+
+    def _watch_output(self):
+        """Device 'default' follows the system's default output (a Bluetooth speaker connecting moves the set
+        there), and a device that stopped asking for audio (gone, asleep) is reopened."""
+        while self.running:
+            time.sleep(WATCH_S)
+            if self.running:
+                self._check_output()
+
+    def _check_output(self):
+        """One look at the output: moves it when the default changed or the device stopped taking audio."""
+        if self.fade is not None:
+            return
+        stalled = self.stream is not None and self.last_pull is not None and \
+            time.time() - self.last_pull > STALL_S
+        moved = None
+        if self.device == 'default' and self.follow and self.stream is not None:
+            now = O.default_output_name()
+            if now and self.out_name and now != self.out_name:
+                moved = now
+        if not (moved or stalled) or time.time() - self._out_tried < 2 * WATCH_S:
+            return
+        self._out_tried = time.time()
+        was = self.out_name
+        try:
+            self.cmd_device('default' if stalled else self.device)      # a vanished device falls back to the default
+            self.news.append(f"output moved from {was} to {self.out_name} "
+                             + ("(the system's default changed)" if moved else "(the device stopped taking audio)"))
+        except LiveError as e:
+            self.news.append(f"output: {e}")
 
     def shutdown(self):
         self.running = False
         if getattr(self, '_on_board', None) is not None:
             self._on_board.close()
         if getattr(self, 'stream', None) is not None:
-            # a dead device (a Bluetooth speaker gone) can block stop() forever: give it 3 s, then leave it
-            st = self.stream
-
-            def close():
-                try:
-                    st.stop()
-                    st.close()
-                except Exception:
-                    pass
-            t = threading.Thread(target=close, daemon=True)
-            t.start()
-            t.join(3.0)
-            self.device_hung = t.is_alive()
+            self.device_hung = not self._close_output()
         if self.rec is not None:
             self.rec.close()
             self.rec = None
@@ -1856,7 +1944,8 @@ class Engine:
             heard = self.beat(self.played)
             lines = [f"live {fmt_num(self.bpm)} BPM {self.bpb}/4 | heard {fmt_bar(math.floor(heard), self.bpb)} "
                      f"({self.played / SR:.0f} s) | mixed ahead {max(0.0, (self.pos - self.played) / SR):.2f} s | "
-                     f"device {self.device}" + (f" | recording {os.path.basename(self.rec_path)}" if self.rec else '')]
+                     f"output {self.out_name or self.device}" + (" (follows the default)" if self.device == 'default' and self.follow and self.stream is not None else '')
+                     + (f" | recording {os.path.basename(self.rec_path)}" if self.rec else '')]
             stall = self._stalled()
             if stall:
                 lines.append(stall)
@@ -2024,6 +2113,14 @@ class Engine:
         self.shutdown()
 
 
+def _output_names():
+    try:
+        import sounddevice as sd
+        return sorted({d['name'] for d in sd.query_devices() if d['max_output_channels'] > 0})
+    except Exception:
+        return []
+
+
 def registry_path(pid=None):
     """Every running engine leaves a note here (any project folder), so live_start can name the ones still
     holding a device."""
@@ -2059,7 +2156,7 @@ def serve(engine, port=0, idle_min=None):
            'bus': engine.cmd_bus, 'fx': engine.cmd_fx, 'deck': engine.cmd_deck, 'load': engine.cmd_load,
            'transition': engine.cmd_transition, 'moves': engine.cmd_moves,
            'cancel': engine.cmd_cancel, 'view': engine.cmd_view, 'listen': engine.cmd_listen_dump,
-           'record': engine.cmd_record, 'stop': engine.cmd_stop}
+           'record': engine.cmd_record, 'stop': engine.cmd_stop, 'device': engine.cmd_device}
 
     class H(BaseHTTPRequestHandler):
         def log_message(self, *a):
@@ -2113,11 +2210,12 @@ def main():
     ap.add_argument('--device', default='default')
     ap.add_argument('--workers', type=int, default=2)
     ap.add_argument('--port', type=int, default=0)
+    ap.add_argument('--no-follow', action='store_true', help="device 'default' stays where it opened")
     a = ap.parse_args()
     import scipy.signal  # noqa: F401  (seconds to import: do it before audio starts, never mid-set)
     from .. import mimic  # noqa: F401  (normalize() imports it for mimic tracks)
     warm_effects()
-    eng = Engine(a.project, a.bpm, a.bpb, a.workers, a.device)
+    eng = Engine(a.project, a.bpm, a.bpb, a.workers, a.device, follow=not a.no_follow)
     httpd = serve(eng, a.port)
     eng.start()
     waited = eng.wait_ready()           # engine.json appears (live_start returns) once the workers can render
