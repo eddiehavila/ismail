@@ -10,6 +10,14 @@ ROLE
   song, and do not run git in the ismail repo. Missing a capability: build it in the song (voices/, work/) and list
   it in songs/<slug>/HANDOFF.md. Changing ismail itself only when the user asks: skills/ismail/references/development.md.
 
+MEASURE FIRST
+- Songs got real where their sounds and numbers were measured from an example, and stayed fake where they were
+  guessed. Before writing a patch for an acoustic or electric part, get an example and measure it: mimic_measure,
+  sound_extract or analyze_kit + instrument_fit, track_fit, a sampler of an imported recording. Loose files work
+  as sources (a path). project_info shows each track as measured / designed / unstated; track_model records an
+  example or marks a sound designed on purpose. Write a measuring script only for what no op measures, and list
+  it in HANDOFF.md.
+
 CONVENTIONS
 - Every tool takes `project` (a directory). Bars are 1-indexed; ranges [a, b] are inclusive.
 - Note text: '<beat> <pitch> <dur_beats> [vel]' per line or ';'-separated, beats relative to the target bar

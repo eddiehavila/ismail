@@ -104,6 +104,7 @@ def instrument_fit(project: str, target: str, instrument, params: dict, notes: s
     if apply_to_track:
         tr = P.track(apply_to_track)
         tr['instrument'] = compact
+        tr['model'] = {'on': target, 'by': 'instrument_fit'}
         out.append(f"applied instrument to track {apply_to_track!r} (its fx chain is unchanged; fitted fx below)")
     if save_as or apply_to_track:
         P.save()
@@ -289,6 +290,8 @@ def track_fit(project: str, track: str, params: dict, bars: list, iters: int = 3
         from .trackfit import _path_set
         for k, v in vals.items():
             _path_set(tr, k, v)
+        if any(k.startswith('inst.') for k in vals) and not tr.get('model'):
+            tr['model'] = {'on': f'ref:{stem}', 'by': f'track_fit bars {bars[0]}-{bars[1]}'}
         P.save()
         out.append("  applied (render + cmp_run to confirm on the whole song)")
     elif apply:
