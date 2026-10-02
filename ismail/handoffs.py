@@ -120,6 +120,8 @@ def main(argv=None):
     ap.add_argument('--all', action='store_true', help='also list sections whose text only moved')
     ap.add_argument('--mark', action='store_true', help='remember everything as seen (after triage)')
     a = ap.parse_args(argv)
+    if hasattr(sys.stdout, 'reconfigure'):
+        sys.stdout.reconfigure(errors='replace')     # handoffs quote symbols a Windows console code page lacks
     rows, state, state_file = scan(a.songs)
     if a.mark:
         os.makedirs(os.path.dirname(state_file), exist_ok=True)
