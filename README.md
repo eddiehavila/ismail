@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="assets/logo/ismail-dark.svg">
-    <img src="assets/logo/ismail.svg" alt="ismail logo: four automaton musicians on a boat" width="260">
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/newsbubbles/ismail/main/assets/logo/ismail-dark.svg">
+    <img src="https://raw.githubusercontent.com/newsbubbles/ismail/main/assets/logo/ismail.svg" alt="ismail logo: four automaton musicians on a boat" width="260">
   </picture>
 </p>
 
@@ -10,6 +10,8 @@
 **A DAW for AI agents. It can't hear, so it reads. And it plays live.**
 
 Your agent writes the song as notes, sounds and code, reads back what it made, and then performs it: DJ decks, transitions, requests taken while the music plays.
+
+<!-- mcp-name: io.github.newsbubbles/ismail -->
 
 [![tests](https://github.com/newsbubbles/ismail/actions/workflows/tests.yml/badge.svg)](https://github.com/newsbubbles/ismail/actions/workflows/tests.yml)
 
@@ -27,7 +29,6 @@ Your agent writes the song as notes, sounds and code, reads back what it made, a
 | [AstraSMB](https://newsbubbles.github.io/ismail/#astrasmb) | drum and bass at 174 BPM |
 | [Clash](https://newsbubbles.github.io/ismail/#clash) | hybrid orchestral fight cue, every instrument synthesized |
 | [Two Kinds of Tears](https://newsbubbles.github.io/ismail/#tears) | solo piano, a minor theme that returns in major |
-| [Bass of Storms](https://newsbubbles.github.io/ismail/#bassofstorms) | fan remix of Song of Storms as dubstep |
 
 [![Luigi Manson on YouTube](https://i.ytimg.com/vi/ZzT1T9GUoRo/hqdefault.jpg)](https://www.youtube.com/watch?v=ZzT1T9GUoRo)
 
@@ -65,8 +66,8 @@ Everything goes in as text (notes, instrument patches, effect chains, automation
 
 One set of operations, three ways in:
 
-- **MCP server** for Claude Code, Cursor or any MCP client: `python -m ismail.mcp_server` (stdio, 97 tools)
-- **CLI**: `python -m ismail -p <project> <op> [args]`
+- **MCP server** for Claude Code, Cursor or any MCP client: `ismail mcp` (stdio, 97 tools)
+- **CLI**: `ismail -p <project> <op> [args]` (same as `python -m ismail ...`)
 - **Python**: `from ismail import api`
 
 ## Where it is going
@@ -89,12 +90,20 @@ send what would help others back as a pull request.
 Python 3.10 or newer.
 
 ```bash
+pip install ismail                    # engine, analysis, CLI, MCP server
+pip install "ismail[perceptual]"      # optional: CLAP perceptual metric (torch + transformers, model about 600 MB)
+pip install "ismail[separate]"        # optional: demucs stem separation for reference tracks
+pip install "ismail[live]"            # optional: play live to your speakers (sounddevice)
+```
+
+Or run the MCP server without installing anything, with [uv](https://docs.astral.sh/uv/): `uvx ismail mcp`.
+
+To work on ismail itself (or to have the skill and examples on disk), clone it and install in place:
+
+```bash
 git clone https://github.com/newsbubbles/ismail
 cd ismail
-pip install -e .                      # engine, analysis, CLI, MCP server
-pip install -e ".[perceptual]"        # optional: CLAP perceptual metric (torch + transformers, model about 600 MB)
-pip install -e ".[separate]"          # optional: demucs stem separation for reference tracks
-pip install -e ".[live]"              # optional: play live to your speakers (sounddevice)
+pip install -e ".[dev]"
 ```
 
 If `demucs` fights your torch install, use `pip install --no-deps demucs` and then `pip install dora-search einops julius lameenc openunmix`.
@@ -111,10 +120,21 @@ Runs on Windows, macOS and Linux; CI tests all three on every push. The one OS-s
 
 ## Use it with Claude Code
 
-1. **Tools.** Open Claude Code in this folder and the bundled `.mcp.json` registers the server; the tools show up as `mcp__ismail__*`. To use ismail from any folder instead:
+**As a plugin (tools and skill in one step).** Needs [uv](https://docs.astral.sh/uv/). In Claude Code:
+
+```
+/plugin marketplace add newsbubbles/ismail
+/plugin install ismail@ismail
+```
+
+The plugin runs the server with `uvx ismail mcp` and loads the composing skill.
+
+**By hand:**
+
+1. **Tools.** Open Claude Code in a clone of this repo and the bundled `.mcp.json` registers the server; the tools show up as `mcp__ismail__*`. To use ismail from any folder instead:
 
    ```bash
-   claude mcp add -s user ismail -- python -m ismail.mcp_server
+   claude mcp add -s user ismail -- uvx ismail mcp      # or, after pip install: -- ismail mcp
    ```
 
 2. **Skill (recommended).** `skills/ismail` teaches the agent how to compose with ismail: plan a Session Sheet before writing notes, write a Listening Report after every render, and judge reference matches with the comparison tools instead of by feel. Link it into your skills folder:
@@ -135,12 +155,12 @@ Runs on Windows, macOS and Linux; CI tests all three on every push. The one OS-s
 1. **Tools.** Opening this folder in Cursor picks up `.cursor/mcp.json`. To use ismail in other projects, add the same entry to `~/.cursor/mcp.json`:
 
    ```json
-   {"mcpServers": {"ismail": {"command": "python", "args": ["-m", "ismail.mcp_server"]}}}
+   {"mcpServers": {"ismail": {"command": "uvx", "args": ["ismail", "mcp"]}}}
    ```
 
 2. **Skill.** `.cursor/rules/ismail.mdc` is an agent-requested rule that points Cursor's agent at `skills/ismail/SKILL.md`. Copy that rule (and the `skills/ismail` folder) into another project to use it there.
 
-Any other MCP client works the same way: run `python -m ismail.mcp_server` over stdio.
+Any other MCP client works the same way: run `ismail mcp` (or `uvx ismail mcp`) over stdio.
 
 ## Quick start (CLI)
 

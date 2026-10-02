@@ -1,6 +1,16 @@
 # Changelog
 
-## Unreleased
+## 0.3.0
+
+### Install and distribution
+
+- On PyPI: `pip install ismail`, or `uvx ismail mcp` to run the MCP server without installing. New console
+  commands `ismail` (the CLI, same as `python -m ismail`) and `ismail-mcp`; `ismail mcp` starts the server.
+- Claude Code plugin: `/plugin marketplace add newsbubbles/ismail`, then `/plugin install ismail@ismail` loads the
+  server and the composing skill together (`.claude-plugin/`).
+- Listed in the official MCP Registry as `io.github.newsbubbles/ismail` (`server.json`); a tag push publishes to
+  PyPI and the registry (`.github/workflows/publish.yml`).
+- `Dockerfile` (stdio server) and `glama.json` for directories that build and inspect servers; `CITATION.cff`.
 
 ### Roadmap
 
