@@ -52,6 +52,7 @@ RIGS = {
 }
 
 INFO = {
+    "measured": "strings, pickups and rigs fitted to a late-60s record's guitar and bass stems; strat70 lead notes passed the user's blind exam 20 of 22",
     "summary": "electric guitar / bass performer: waveguide strings with pick, pickup comb and LC resonance; "
                "legato, slides, bends, whammy, vibrato and mutes as lanes",
     "range": "guitar Eb2-Eb6 (half-step-down tuning by default), bass Eb1-G3",
