@@ -5,6 +5,12 @@ import numpy as np
 import soundfile as sf
 
 
+def uses_gpu():
+    """Whether separate() will run on the GPU (it takes the machine's GPU slot then, else a CPU slot)."""
+    import torch
+    return torch.cuda.is_available()
+
+
 def separate(path, outdir, model='htdemucs_ft'):
     import torch
     from demucs.pretrained import get_model

@@ -6,7 +6,7 @@ import os
 import numpy as np
 import soundfile as sf
 
-from .api import op, OpError, _load, _resolve_instrument, _write_sound
+from .api import op, heavy, OpError, _load, _resolve_instrument, _write_sound
 from . import sounddesign as SD
 from . import instruments as inst_mod
 from .notation import parse_notes, NotationError
@@ -43,6 +43,7 @@ def sound_compare(project: str, a: str, b: str, a_window: list = None, b_window:
 
 
 @op(mutates=True)
+@heavy()
 def instrument_fit(project: str, target: str, instrument, params: dict, notes: str = '0 C4 1',
                    length_sec: float = None, fx: list = None, iters: int = 80, save_as: str = None,
                    apply_to_track: str = None, target_window: list = None, seed: int = 0, fmin: float = 25.0,
@@ -254,6 +255,7 @@ def _set_deep(d, path, v):
 
 
 @op(mutates=True)
+@heavy()
 def track_fit(project: str, track: str, params: dict, bars: list, iters: int = 30, apply: bool = False,
               seed: int = 0) -> str:
     """Tune a track IN CONTEXT: render the track's whole stem group (stem_map) over bars [a, b] and score it against
@@ -377,6 +379,7 @@ def _pitch_of(name):
 
 
 @op(mutates=True)
+@heavy()
 def mimic_measure(project: str, name: str, notes: list = None, folder: str = None, kind: str = 'auto',
                   vel: float = 0.7, check: bool = True, defaults: dict = None) -> str:
     """Measure an instrument from recorded notes into a mimic profile (<project>/voices/<name>.mimic.json), then

@@ -12,6 +12,36 @@
   window that started after the note ended and produced a non-finite buffer.
 - `analyze_timbre` (and every analysis reading a source in stereo) works on a mono file: both channels read the same.
 
+### Roles and the migration process
+
+- `development.md`: the roles as a multi-agent system (the user, song agents, the dev agent, subagents: what each
+  owns and writes, and the contracts between them); the inclusion review before anything goes into the public repo
+  (general beyond its song? measured from the user, who must say yes first? fitted to a commercial record or
+  carrying a brand name, held for the user's decision? provenance recorded); preparing a voice or an engine for
+  ismail in eleven steps (copy never move, strip the song out, render the same anywhere, live parity, INFO as manual
+  and provenance, nothing existing changes by accident, tests, cost, docs, evidence in the PR); how to take an API
+  change a song asks for (find the workaround and its cost, check it does not exist already, extend before adding,
+  design the text first, close the loop, keep old names, prove it on the asking song); lessons from running the loop.
+
+### The shared machine
+
+- `ismail.machine`, the governor for one computer shared by many sessions (2026-10-02: six sessions stacked heavy
+  jobs on a laptop GTX 1080 until it sat at 92 C pinned at 139 MHz and the user stopped everything). Op
+  `machine_status` (and `python -m ismail.machine`): GPU heat, clock and throttle reasons (an idle card at 139 MHz is
+  not trouble; a thermal bit or 85 C is), CPU, free commit, and every heavy job running in any session. Heavy jobs
+  take slots on a board in `songs/_machine/`: one GPU job and two CPU jobs machine-wide, a live engine on air holds
+  one. render, separate (GPU slot when it runs on CUDA), mimic_measure, instrument_fit, track_fit and live_parity
+  take a slot and refuse with what is running, whose it is, when it should end, and what to do; a render whose
+  memory estimate does not fit the free commit is refused instead of dying. Commands outside ismail run in a slot
+  with `python -m ismail.machine run --gpu|--cpu -- <command>` at below-normal priority. Heavy jobs cap numeric
+  threads at 2. The test suite takes a slot too.
+- The governor also refuses a new CPU job while the CPU is 80% busy or more over 2 s, whoever is using it, and names
+  the top processes: most load on this machine is not on the board (the desktop app, a node server). The board shows
+  the top processes.
+- Skill: "The machine is shared" is a non-negotiable (check before anything over a minute, one heavy job of your own,
+  a hot GPU is not a free CPU, size jobs to the question, no sleep-poll loops, never leave heavy jobs running
+  untold); development.md: touched tests locally, the full suite in CI; announcements never ask for work.
+
 ### Roles and collaboration
 
 - Skill: "Your role, and where things live": making music is the default role and writes only inside

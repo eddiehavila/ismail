@@ -9,6 +9,7 @@ Normally started by the live_start op, which also writes <project>/live/engine.j
 """
 import argparse
 import collections
+import contextlib
 import copy
 import gc
 import heapq
@@ -25,7 +26,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import numpy as np
 
 from . import fx_blocks as F
-from .. import instruments
+from .. import instruments, machine
 from ..dsp import SR
 from ..notation import NotationError, format_notes, parse_notes, parse_steps, pitch_to_midi, fmt_num
 from ..presets import PRESETS
@@ -767,6 +768,12 @@ class Engine:
         # the mixer's numpy calls each take the GIL back; while another thread runs Python (a big queue being
         # parsed) each could wait out the default 5 ms switch interval
         sys.setswitchinterval(0.001)
+        # on the machine's job board as a live engine: it holds a CPU slot and heavy jobs elsewhere make room
+        self._on_board = contextlib.ExitStack()
+        try:
+            self._on_board.enter_context(machine.slot('live', f"live engine {os.path.basename(self.root)}", threads=None))
+        except Exception:                      # the board is advice for others; the set plays regardless
+            pass
         threads = [self._schedule_loop, self._mix_loop]
         if self.n_workers:
             threads.append(self._collect)
@@ -787,6 +794,8 @@ class Engine:
 
     def shutdown(self):
         self.running = False
+        if getattr(self, '_on_board', None) is not None:
+            self._on_board.close()
         if getattr(self, 'stream', None) is not None:
             # a dead device (a Bluetooth speaker gone) can block stop() forever: give it 3 s, then leave it
             st = self.stream

@@ -18,6 +18,7 @@ import time
 import numpy as np
 
 from . import analysis as A
+from . import machine
 from . import fx as fxmod
 from . import rig as rigmod
 from . import instruments as inst_mod
@@ -66,10 +67,28 @@ def op(mutates=False):
                 sig.bind(*a, **kw)
             except TypeError as e:
                 raise OpError(f"bad arguments for {fn.__name__}: {e}. Signature: {fn.__name__}{sig}")
-            return fn(*a, **kw)
+            try:
+                return fn(*a, **kw)
+            except machine.MachineBusy as e:
+                raise OpError(str(e))
         OPS[fn.__name__] = wrapped
         if mutates:
             MUTATING.add(fn.__name__)
+        return wrapped
+    return deco
+
+
+def heavy(kind='cpu'):
+    """An op that runs in one of the machine's heavy-job slots (ismail.machine) for its whole length; it refuses
+    with the reason when the machine is busy or hot. Goes under @op()."""
+    def deco(fn):
+        import functools
+
+        @functools.wraps(fn)
+        def wrapped(*a, **kw):
+            proj = str(kw.get('project', a[0] if a else '')).replace(os.sep, '/').rstrip('/')
+            with machine.slot(kind, f"{fn.__name__} {os.path.basename(proj)}"):
+                return fn(*a, **kw)
         return wrapped
     return deco
 
@@ -1030,7 +1049,9 @@ def render(project: str, bars: list = None, tracks: list = None, stems: bool = F
             P.track(t)
     try:
         R = Renderer(P.d, P.root, bars[0] if bars else None, (bars[1] + 1) if bars else None, tracks, cache)
-        y, st = R.run()
+        with machine.slot('cpu', f"render {os.path.basename(P.root)}" + (f" bars {bars[0]}-{bars[1]}" if bars else ''),
+                          mem_gb=_render_gb(P.d, R.n, tracks)):
+            y, st = R.run()
     except (RenderError, fxmod.FxError, inst_mod.InstrumentError) as e:
         raise OpError(f"render failed: {e}")
     rd = os.path.join(P.root, 'renders')
@@ -1086,6 +1107,14 @@ def render(project: str, bars: list = None, tracks: list = None, stems: bool = F
     elif not any(t == 'master' and gr < -0.5 for (t, _), gr in R.gain_reduction.items()):
         L.append("  master limiter: idle (gain reduction under 0.5 dB)")
     return '\n'.join(L)
+
+
+def _render_gb(d, n, only=None):
+    """Peak memory estimate of one render of n samples (ismail.machine.render_memory_gb)."""
+    from .render import Renderer
+    tracks = [t for k, t in d['tracks'].items() if only is None or k in only]
+    deps = set().union(*(Renderer.deps(None, t) for t in d['tracks'].values()))
+    return machine.render_memory_gb(n, len(tracks), len(d.get('buses', {})), len(deps))
 
 
 def _record_window(rd, files, window):
@@ -1282,15 +1311,27 @@ def spectrogram(project: str, source: str = None, bars: list = None, out: str = 
 def separate(project: str, source: str = 'ref', model: str = 'htdemucs_ft') -> str:
     """Split a source into drums/bass/other/vocals stems with demucs (GPU if available). For 'ref' the stems become
     'ref:drums' etc."""
-    from .separate import separate as sep
+    from .separate import separate as sep, uses_gpu
     P = _load(project)
     path = P.resolve_audio(source)
     outdir = os.path.join(P.root, 'stems', os.path.splitext(os.path.basename(path))[0])
-    names = sep(path, outdir, model)
+    with machine.slot('gpu' if uses_gpu() else 'cpu', f"separate {os.path.basename(path)}"):
+        names = sep(path, outdir, model)
     if source == 'ref':
         P.d['reference']['stems_dir'] = outdir
         P.save()
     return f"stems {names} in {outdir}" + (" (available as ref:<stem>)" if source == 'ref' else '')
+
+
+# ------------------------------------------------------------------ the shared machine
+
+@op()
+def machine_status(project: str = None) -> str:
+    """The shared machine before anything heavy (a render over a minute, separate, mimic_measure, a fit, Blender,
+    whisper): GPU heat and throttling, CPU, free memory, every heavy job running now in any session, and whether a new
+    GPU or CPU job may start. Heavy ops check it themselves and refuse with the reason; run commands outside ismail
+    through `python -m ismail.machine run --gpu|--cpu -- <command>` so they take a slot too."""
+    return machine.board()
 
 
 # ------------------------------------------------------------------ batch
