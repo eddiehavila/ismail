@@ -33,22 +33,35 @@ Your agent writes the song as notes, sounds and code, reads back what it made, a
 
 *Luigi Manson, made with ismail (fan remix of the Luigi's Mansion theme).*
 
-## Not a music generator
+## What makes this hard
 
-ismail is not a model that turns a prompt into audio, like Suno. It is a set of tools your own agent uses to write the song as notes, sounds and code, render it, read back what came out, and edit it. That changes what you get:
+Making music with an AI agent runs into the same few walls. ismail is built around each of them, and every number below comes from a song made with it.
 
-- **Iterative, precise edits.** Change one note, one patch, one bar or one fader and re-render; nothing else moves.
-- **Songs are code.** A project file and a build script: git history, diffs, branches and code review work on a track.
-- **Any sound.** Synths, drum synths, samplers, voices written in Python and speech; any sound can become an instrument.
-- **Local and open.** MIT licensed, runs on your machine, no content filter and no music subscription (you bring the agent).
-- **It improves with your model.** The music is the agent's own work, so a stronger model with the same prompt should write a better song.
-- **It plays live.** The same songs, instruments and effects run in real time: the agent loads finished songs on decks and mixes them, jams with you, and changes the music between its turns while it keeps playing. A text-to-song service hands you a finished file; streaming models such as Lyria RealTime steer a style with prompts, but cannot play the exact song you wrote or change one bar of it.
+**The agent can't hear what it made.** Two thirds of developers name "almost right, but not quite" as their top frustration with AI tools ([Stack Overflow 2025](https://survey.stackoverflow.co/2025/ai)), and with music the output is sound the agent can't check. ismail turns every render into text the agent reads: levels per bar, drum patterns as step strings, chords, a piano roll, vowels, song structure, and comparisons against a reference, scored against that reference's own variation. Each judgment the agent makes comes from a reading it can show you.
 
-Suno is still better at realistic sung vocals, a polished song from one sentence in under a minute, and genre sound learned from recorded music. And why not Ableton or FL Studio? They were built for a person with ears and a mouse; an agent can press their buttons through bridges but still can't hear what it did. ismail puts everything an agent needs to write and to perceive into compact text, and if something is missing, your agent can add it. More on the [showcase page](https://newsbubbles.github.io/ismail/#compare).
+**Synthesized instruments sound fake, and the numbers miss it.** In one study the spectrum matched the reference within 1.8 dB and the stem balance within 0.7 dB while the listener heard "30% there". So ismail measures instruments from a few recorded notes. A violin note rebuilt from its neighbours lands closer to the real note than a real neighbouring note repitched (11.2 against 14.6), about three times closer than a hand-set synth patch. Drum kits are built piece by piece from the reference's own drums, and guitars, basses and the piano are fitted to recordings.
 
-## What it is
+**Guesses are audible.** A swing guessed at 0.07 of a beat, against a measured 0.03, could be heard. A guessed gnawa groove was "cool"; the measured one, three strokes at 0, 0.32 and 0.74 of a beat, was "I love it... closer". So tempo, bar 1, tuning, swing, the pieces of a kit and the fader balance all come from measuring the reference.
 
-A DAW built to be operated by an AI agent. Everything goes in as text (notes, instrument patches, effect chains, automation) and everything comes back as text: levels, spectra, drum patterns, piano rolls, chords, vowels, song structure, and structured comparisons against a reference track. The agent never needs ears or images to work (a spectrogram PNG is there if you want one).
+**Your ear is the judge, and its time is short.** The agent measures everything it can and asks you only where its measurements run out, with blind exams: real and made sounds shuffled and hidden, your answers written to a file. On a 1970 guitar record the exam went from 3 of 28 notes passing as real to 20 of 22 in four rounds, and each round's misses named the next fix. In a 21-species bird piece the listener could not pick the recording on any of the 21 calls.
+
+**A finished audio file is a dead end.** A prompt-to-song service hands you a file, and bar 12 of it stays as it is. In ismail a song is notes, instrument patches and code in a project file, with git history and diffs. Change one note and re-render, and nothing else moves. The same song loads on live decks and plays sample for sample like the studio render (`live_parity` checks it), while the agent mixes, jams and takes requests between its turns.
+
+**Who wrote it.** Producers welcome AI for labor and push back on AI taste: in a 2026 survey of 1,100 working creators, 57.9% wanted AI as an assistant and 8.8% supported full automation ([Sonarworks and Sound On Sound](https://www.sonarworks.com/blog/research/future-music-production-human-producer-survey-2026)). ismail trains on nobody's music. The agent writes the notes and the code, reference recordings are measured for numbers and kept out of the render, and you decide what is good. Your feedback is saved with the song.
+
+## Where it falls short
+
+- Singing: ismail speaks (text to speech) and has no singing voice yet. Suno sings far better, and makes a polished song from one sentence in under a minute.
+- Mimic needs more notes for instruments whose colour changes from note to note, like the piano (the `grand_piano` voice is the better piano today). Bowed strings miss a last crispness, and notes don't glide into each other yet.
+- One tempo per project, no MIDI import or export, no plugin hosting.
+- Live changes land between the agent's turns, 5 to 30 seconds apart.
+- It needs a capable agent, and your ear stays the final judge. The blind exams so far had one listener.
+
+How it compares with Suno, streaming models such as Lyria RealTime, and bridges into Ableton or FL Studio: see the [showcase page](https://newsbubbles.github.io/ismail/#compare).
+
+## How it works
+
+Everything goes in as text (notes, instrument patches, effect chains, automation) and everything comes back as text: levels, spectra, drum patterns, piano rolls, chords, vowels, song structure, and structured comparisons against a reference track. The agent never needs ears or images to work (a spectrogram PNG is there if you want one). Songs are code: a project file and a build script, so git history, diffs, branches and code review work on a track. Any sound can become an instrument: synths, drum synths, samplers, voices written in Python, speech. MIT licensed and local; you bring the agent.
 
 One set of operations, three ways in:
 
@@ -221,7 +234,7 @@ Bring your own reference audio (`project_new(..., reference=<file>)`); none is i
 
 1. `analyze_grid(source='ref')`, then `align` a rendered drum track against `ref:drums` and correct `offset_sec`. If it reports the record 15 cents or more off A440 (a sped-up sample), run `ref_retune()` first: otherwise every note reads as a pair of semitones.
 2. `separate(source='ref')` (demucs) and read `analyze_structure(source='ref')`. Measure the drums before writing them: `analyze_swing` and `analyze_kit(source='ref:drums')`.
-3. Transcribe with `notes_from_audio_loop`. It keeps only notes that recur across repetitions of the loop, because raw transcription copies echoes, leakage and distortion partials as hard notes. If the song alternates versions of its loop, transcribe each from its own repetitions and pass `base_bars` so the shared notes stay identical.
+3. Transcribe with `notes_from_audio_loop`. Raw transcription copies echoes, leakage and distortion partials as hard notes, so it filters in three layers the agent can tune: partials are attributed to the note they belong to, quiet notes fall under level thresholds (`rel_db`, `min_rel_db`, `floor_db`), and a vote across loop repetitions drops what changes between them. A loud echo locked to the tempo repeats every loop and can survive all three; then the agent tightens the thresholds or asks. If the song alternates versions of its loop, transcribe each from its own repetitions and pass `base_bars` so the shared notes stay identical.
 4. Design sounds: `sound_extract` a repeated hit or stab, then `instrument_fit` (evolution strategy over instrument and effect parameters, scored on spectrum, envelope, width and pitch clarity). `track_fit` tunes a part in context against the reference stem.
 5. `stem_map_set`, `render(stems=True)`, `levels_from_ref` (faders from the reference's stem balance), `cmp_run`, then drill down: `cmp_summary`, `cmp_arrangement`, `cmp_sections`, `cmp_worst`, `cmp_bars`, `cmp_zoom(bar)`. `cmp_list` tracks progress across runs.
 
