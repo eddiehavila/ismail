@@ -34,6 +34,7 @@ from . import decks as D
 from . import graph as G
 from . import worker
 from .safety import Safety
+from . import outputs as O
 from .timeline import EPS, QueueError, Timeline, fmt_bar
 
 BLOCK = 1024
@@ -46,6 +47,7 @@ PRELOAD_S = 60.0        # a clip queued for later renders up to this much of its
 FEED_PER_WORKER = 2     # render jobs handed to each worker at a time; the rest wait in the engine, earliest-needed first
 AIR_S = 120.0           # output history kept for live_listen
 HOLD_S = 10             # live_status also shows each track's loudest level over this many seconds
+WATCH_S = 4.0           # how often the default output device is checked (a speaker connecting)
 STALL_S = 2.0           # the device asking for no audio this long = a stalled output (Bluetooth sleep, a busy device)
 CHUNK_PRE_S = 1.0       # a performer's bar chunk renders this much of the part before it as context
 CHUNK_XF_S = 0.01       # chunks crossfade at the bar line
@@ -122,12 +124,20 @@ def _mono_groups(notes, inst):
 
 
 class Engine:
-    def __init__(self, root, bpm, bpb=4, workers=2, device='default'):
+    def __init__(self, root, bpm, bpb=4, workers=2, device='default', follow=True):
         self.root = os.path.abspath(root)
         self.bpm = float(bpm)
         self.bpb = int(bpb)
         self.spb = 60.0 / self.bpm
         self.device = device
+        self.follow = bool(follow)      # device 'default': move to a new system default (a speaker connecting)
+        self.out_name = None            # the device the stream opened on, by name
+        self.stream = None
+        self._null_on = False
+        self._out_lock = threading.Lock()
+        self._out_tried = 0.0
+        self.hub = O.StreamHub(SR)
+        self.controls = O.Controls(os.path.join(self.root, 'live', 'controls.jsonl'))
         self.lock = threading.RLock()
         self.tl = Timeline(self.bpb)
         self.tracks = {}
@@ -565,6 +575,7 @@ class Engine:
         post = {}
         bus_in = {b: np.zeros((2, n)) for b, _ in buses}
         decks = list(self.decks.items())
+        streamed = {}                       # bus and deck outputs a stream listens to
         deck_in = {dn: np.zeros((2, n)) for dn, _ in decks}
         bus_fed, deck_fed = set(), set()
         ramp = np.linspace(0, 1, n)
@@ -645,6 +656,8 @@ class Engine:
                 y = y * 10 ** (np.asarray(vsch.curve(p0, n)) / 20)
             if self.tap is not None:
                 self.tap('bus:' + bname, p0, y, G.LAT_BUDGET)
+            if self.hub.wants('bus:' + bname):
+                streamed['bus:' + bname] = y.copy()
             deck_in.get(b['deck'], master).__iadd__(y)
             ms = float(np.mean(y ** 2))
             b['ms'] = b['ms'] * a + ms * (1 - a)
@@ -665,6 +678,8 @@ class Engine:
             if self.tap is not None:
                 self.tap('deck:' + dn, p0, deck_in[dn], G.LAT_BUDGET)
             y = dk.strip.process(deck_in[dn], {k: self._deck_param(dn, k, p0, n) for k in D.PARAMS})
+            if self.hub.wants('deck:' + dn):
+                streamed['deck:' + dn] = y.copy()
             dk.quiet = 0 if dn in deck_fed else dk.quiet + n
             dk.ms = dk.ms * a + float(np.mean(y ** 2)) * (1 - a)
             j = min(i + n, dk.air.shape[1])
@@ -673,13 +688,18 @@ class Engine:
                 dk.air[:, :n - (j - i)] = y[:, j - i:]
             if not dk.cue:
                 master += y
+        fade = None
         if self.fade is not None:
             left, total = self.fade
             g0 = left / total
             g1 = max(0.0, (left - n) / total)
-            master *= np.linspace(g0, g1, n)
+            fade = np.linspace(g0, g1, n)
+            master *= fade
             self.fade = (max(0, left - n), total)
         y = self.safety.process(master).astype(np.float32)
+        self.hub.push('master', y, limited=True)
+        for name, s in streamed.items():
+            self.hub.push(name, s * fade if fade is not None else s)
         # the output lags the mix by the path budget + the safety limiter's lookahead: keep live_listen's bars aligned
         i = (p0 - self.safety.la - G.LAT_BUDGET) % self.air.shape[1]
         j = min(i + n, self.air.shape[1])
@@ -746,7 +766,7 @@ class Engine:
     def _null_loop(self):
         t0 = time.time()
         done = 0
-        while self.running:
+        while self.running and self._null_on:
             want = int((time.time() - t0) * SR) - done
             if want >= BLOCK:
                 self._pull(want)
@@ -779,37 +799,117 @@ class Engine:
             threads.append(self._collect)
         for fn in threads:
             threading.Thread(target=fn, daemon=True).start()
-        if self.device in (None, 'none', 'null'):
-            threading.Thread(target=self._null_loop, daemon=True).start()
-            self.stream = None
-        else:
-            import sounddevice as sd
+        with self._out_lock:
+            self._open_output(self.device, rescan=False)
+        if self.device not in (None, 'none', 'null'):
+            threading.Thread(target=self._watch_output, daemon=True).start()
 
-            def cb(outdata, frames, t, status):
-                outdata[:] = self._pull(frames)
-            dev = None if self.device in ('default', '') else (int(self.device) if str(self.device).isdigit() else self.device)
-            self.stream = sd.OutputStream(samplerate=SR, channels=2, dtype='float32', callback=cb, device=dev,
-                                          latency='high')
-            self.stream.start()
+    # ------------------------------------------------------------------ output device
+    def _open_output(self, device, rescan=True):
+        """Open the output on `device` ('default', a name or index, or 'none'). rescan re-reads the system's device
+        list first (a speaker that connected after this process started is not in it)."""
+        if device in (None, 'none', 'null'):
+            self.stream, self.out_name = None, 'none'
+            if not self._null_on:
+                self._null_on = True
+                threading.Thread(target=self._null_loop, daemon=True).start()
+            return
+        import sounddevice as sd
+        self._null_on = False
+        if rescan:
+            sd._terminate()
+            sd._initialize()
+
+        def cb(outdata, frames, t, status):
+            outdata[:] = self._pull(frames)
+        dev = None if device in ('default', '') else (int(device) if str(device).isdigit() else device)
+        st = sd.OutputStream(samplerate=SR, channels=2, dtype='float32', callback=cb, device=dev, latency='high')
+        st.start()
+        self.stream = st
+        try:
+            self.out_name = sd.query_devices(st.device, 'output')['name'] if dev is not None else \
+                sd.query_devices(kind='output')['name']
+        except Exception:
+            self.out_name = str(device)
+        self.last_pull = time.time()
+
+    def _close_output(self):
+        st, self.stream = self.stream, None
+        if st is None:
+            return True
+
+        def close():
+            try:
+                st.stop()
+                st.close()
+            except Exception:
+                pass
+        t = threading.Thread(target=close, daemon=True)
+        t.start()
+        t.join(3.0)                     # a dead device (a Bluetooth speaker gone) can block stop() forever
+        return not t.is_alive()
+
+    def cmd_device(self, device='default', follow=None):
+        """Move the sound to another output mid-set: the timeline, the queue and the audio mixed ahead carry on (a
+        gap of about a second). device: 'default' (whatever the system's default is now), a name or part of one, an
+        index, or 'none'."""
+        if follow is not None:
+            self.follow = bool(follow)
+        old = self.out_name or self.device
+        with self._out_lock:
+            if not self._close_output():
+                self.news.append("the previous output did not close (a vanished device); it was left behind")
+            try:
+                self._open_output(device)
+            except Exception as e:
+                try:
+                    self._open_output(self.device)
+                    back = f"; still on {self.out_name}"
+                except Exception:
+                    self._open_output('none')
+                    back = "; nothing could be opened, so the set plays silently (live_device to try again)"
+                names = _output_names()
+                raise LiveError(f"could not open {device!r}: {e}{back}. Outputs now: {', '.join(names) or 'none'}")
+            self.device = device
+        return f"output: {self.out_name} (was {old})" + (
+            "; follows the system default" if device == 'default' and self.follow else '')
+
+    def _watch_output(self):
+        """Device 'default' follows the system's default output (a Bluetooth speaker connecting moves the set
+        there), and a device that stopped asking for audio (gone, asleep) is reopened."""
+        while self.running:
+            time.sleep(WATCH_S)
+            if self.running:
+                self._check_output()
+
+    def _check_output(self):
+        """One look at the output: moves it when the default changed or the device stopped taking audio."""
+        if self.fade is not None:
+            return
+        stalled = self.stream is not None and self.last_pull is not None and \
+            time.time() - self.last_pull > STALL_S
+        moved = None
+        if self.device == 'default' and self.follow and self.stream is not None:
+            now = O.default_output_name()
+            if now and self.out_name and now != self.out_name:
+                moved = now
+        if not (moved or stalled) or time.time() - self._out_tried < 2 * WATCH_S:
+            return
+        self._out_tried = time.time()
+        was = self.out_name
+        try:
+            self.cmd_device('default' if stalled else self.device)      # a vanished device falls back to the default
+            self.news.append(f"output moved from {was} to {self.out_name} "
+                             + ("(the system's default changed)" if moved else "(the device stopped taking audio)"))
+        except LiveError as e:
+            self.news.append(f"output: {e}")
 
     def shutdown(self):
         self.running = False
         if getattr(self, '_on_board', None) is not None:
             self._on_board.close()
         if getattr(self, 'stream', None) is not None:
-            # a dead device (a Bluetooth speaker gone) can block stop() forever: give it 3 s, then leave it
-            st = self.stream
-
-            def close():
-                try:
-                    st.stop()
-                    st.close()
-                except Exception:
-                    pass
-            t = threading.Thread(target=close, daemon=True)
-            t.start()
-            t.join(3.0)
-            self.device_hung = t.is_alive()
+            self.device_hung = not self._close_output()
         if self.rec is not None:
             self.rec.close()
             self.rec = None
@@ -1848,6 +1948,81 @@ class Engine:
             out.append(self.news.popleft())
         return out
 
+    # ------------------------------------------------------------------ streams and controls
+    def _stream_ok(self, name):
+        if name == 'master':
+            return True
+        if name.startswith('bus:') and name[4:] in self.buses:
+            return True
+        if name.startswith('deck:') and name[5:] in self.decks:
+            return True
+        raise LiveError(f"no {name!r} to stream; streams: 'master', " + ', '.join(
+            [f"'bus:{b}'" for b in self.buses] + [f"'deck:{d}'" for d in self.decks]))
+
+    def cmd_stream(self, name='master'):
+        self._stream_ok(name)
+        return {'path': f"/stream?name={name}", 'rate': SR, **O.FORMAT, 'listening': self.hub.names().get(name, 0)}
+
+    def cmd_map(self, control, target=None, param='volume_db', range=None, curve='linear', at='now', remove=False):
+        if remove:
+            if self.controls.maps.pop(control, None) is None:
+                raise LiveError(f"no control {control!r}; mapped: {sorted(self.controls.maps) or 'none'}")
+            return f"{control}: unmapped"
+        if not target:
+            raise LiveError("target: the track, 'bus:<name>' or 'deck:<name>' the control drives")
+        try:
+            kind, name, _, _ = O.parse_param(target, param)
+            m = self.controls.set(control, target, param, range, curve, at)
+        except ValueError as e:
+            raise LiveError(str(e))
+        with self.lock:
+            if kind == 'track':
+                self._target(name)
+            elif kind == 'bus' and name not in self.buses:
+                raise LiveError(f"no bus {name!r}; buses: {list(self.buses) or 'none'}")
+            elif kind == 'deck':
+                self._deck(name)
+        return f"{control} -> {O.describe(m)}: its moves apply in the engine at once and are logged by bar"
+
+    def cmd_control(self, control, value):
+        """A control moved (a knob turned on the stage): apply its mapping now and log it by bar."""
+        m = self.controls.maps.get(control)
+        if m is None:
+            raise LiveError(f"no control {control!r}; live_map it first. Mapped: {sorted(self.controls.maps) or 'none'}")
+        x = O.scale(value, m['range'], m['curve'])
+        kind, name, what, detail = m['spec']
+        if what == 'volume_db':
+            x = min(6.0, x)
+        if kind == 'deck':
+            self.cmd_deck(name, **{what: x}, at=m['at'])
+        elif what == 'fx':
+            self.cmd_fx(name if kind == 'track' else 'bus:' + name, detail[0], {detail[1]: x}, at=m['at'])
+        elif kind == 'bus':
+            self.cmd_bus(name, volume_db=x)
+        else:
+            self.cmd_track(name, **{what: x})
+        # the bar being heard; an engine with no output running (tests, a harness) has only its mixed position
+        beat = self.beat(self.played if (self.stream is not None or self._null_on) else self.pos)
+        self.controls.log({'t': round(time.time(), 3), 'beat': round(beat, 4), 'control': control,
+                           'value': float(value), 'target': m['target'], 'param': m['param'], 'applied': x})
+        return {'applied': x, 'bar': fmt_bar(beat, self.bpb)}
+
+    def cmd_controls(self, control=None, last=20):
+        """What the controls did, as automation: per control and target, [bar, value] points in this engine's bars."""
+        rec = self.controls.read(control)
+        if not rec:
+            return "no control moves logged" + (f" for {control!r}" if control else '') + \
+                (f"; mapped: {sorted(self.controls.maps)}" if self.controls.maps else '; live_map one first')
+        out = collections.OrderedDict()
+        for r in rec:
+            out.setdefault((r['control'], r['target'], r['param']), []).append(
+                [round(r['beat'] / self.bpb + 1, 4), round(r['applied'], 4)])
+        L = []
+        for (c, t, p), pts in out.items():
+            L.append(f"{c} -> {t} {p}: {len(pts)} moves, bars {pts[0][0]:g}-{pts[-1][0]:g}")
+            L.append(f"  automation points [bar, value]: {json.dumps(pts[-int(last):])}")
+        return '\n'.join(L)
+
     def cmd_status(self, deck=None):
         if deck is not None and deck not in self.decks:
             raise LiveError(f"no deck {deck!r}; decks: {list(self.decks) or 'none'}")
@@ -1856,7 +2031,13 @@ class Engine:
             heard = self.beat(self.played)
             lines = [f"live {fmt_num(self.bpm)} BPM {self.bpb}/4 | heard {fmt_bar(math.floor(heard), self.bpb)} "
                      f"({self.played / SR:.0f} s) | mixed ahead {max(0.0, (self.pos - self.played) / SR):.2f} s | "
-                     f"device {self.device}" + (f" | recording {os.path.basename(self.rec_path)}" if self.rec else '')]
+                     f"output {self.out_name or self.device}" + (" (follows the default)" if self.device == 'default' and self.follow and self.stream is not None else '')
+                     + (f" | recording {os.path.basename(self.rec_path)}" if self.rec else '')]
+            sn = self.hub.names()
+            if sn:
+                lines.append("streams: " + ', '.join(f"{k} ({v} listening" + (f", {self.hub.dropped[k]} blocks dropped" if self.hub.dropped[k] else '') + ")" for k, v in sn.items()))
+            if self.controls.maps:
+                lines.append("controls: " + '; '.join(f"{c} -> {O.describe(m)}" for c, m in self.controls.maps.items()))
             stall = self._stalled()
             if stall:
                 lines.append(stall)
@@ -2024,6 +2205,14 @@ class Engine:
         self.shutdown()
 
 
+def _output_names():
+    try:
+        import sounddevice as sd
+        return sorted({d['name'] for d in sd.query_devices() if d['max_output_channels'] > 0})
+    except Exception:
+        return []
+
+
 def registry_path(pid=None):
     """Every running engine leaves a note here (any project folder), so live_start can name the ones still
     holding a device."""
@@ -2059,11 +2248,45 @@ def serve(engine, port=0, idle_min=None):
            'bus': engine.cmd_bus, 'fx': engine.cmd_fx, 'deck': engine.cmd_deck, 'load': engine.cmd_load,
            'transition': engine.cmd_transition, 'moves': engine.cmd_moves,
            'cancel': engine.cmd_cancel, 'view': engine.cmd_view, 'listen': engine.cmd_listen_dump,
-           'record': engine.cmd_record, 'stop': engine.cmd_stop}
+           'record': engine.cmd_record, 'stop': engine.cmd_stop, 'device': engine.cmd_device,
+           'stream': engine.cmd_stream, 'map': engine.cmd_map, 'control': engine.cmd_control,
+           'controls': engine.cmd_controls}
 
     class H(BaseHTTPRequestHandler):
         def log_message(self, *a):
             pass
+
+        def do_GET(self):
+            # /stream?name=master|bus:<b>|deck:<d>: raw PCM, int16 LE stereo at SR, until the client leaves
+            from urllib.parse import urlparse, parse_qs
+            u = urlparse(self.path)
+            if u.path != '/stream':
+                self.send_error(404, "GET /stream?name=master (or bus:<name>, deck:<name>); everything else is POST")
+                return
+            name = (parse_qs(u.query).get('name') or ['master'])[0]
+            try:
+                engine._stream_ok(name)
+            except LiveError as e:
+                self.send_error(404, str(e))
+                return
+            sub = engine.hub.subscribe(name)
+            try:
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/octet-stream')
+                self.send_header('X-Sample-Rate', str(SR))
+                self.send_header('X-Channels', '2')
+                self.send_header('X-Format', 's16le')
+                self.send_header('Cache-Control', 'no-store')
+                self.end_headers()
+                while engine.running:
+                    b = sub.get(1.0)
+                    if b:
+                        self.wfile.write(b)
+                        self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError):
+                pass
+            finally:
+                engine.hub.unsubscribe(name, sub)
 
         def do_POST(self):
             try:
@@ -2113,11 +2336,12 @@ def main():
     ap.add_argument('--device', default='default')
     ap.add_argument('--workers', type=int, default=2)
     ap.add_argument('--port', type=int, default=0)
+    ap.add_argument('--no-follow', action='store_true', help="device 'default' stays where it opened")
     a = ap.parse_args()
     import scipy.signal  # noqa: F401  (seconds to import: do it before audio starts, never mid-set)
     from .. import mimic  # noqa: F401  (normalize() imports it for mimic tracks)
     warm_effects()
-    eng = Engine(a.project, a.bpm, a.bpb, a.workers, a.device)
+    eng = Engine(a.project, a.bpm, a.bpb, a.workers, a.device, follow=not a.no_follow)
     httpd = serve(eng, a.port)
     eng.start()
     waited = eng.wait_ready()           # engine.json appears (live_start returns) once the workers can render

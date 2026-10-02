@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Live outputs: follow the device, stream to a scene, controls
+
+- The live output follows the system default (`device='default'`): a Bluetooth speaker that connects mid-set takes
+  over within a few seconds, and a device that stops taking audio falls back to the default. `live_device` moves a
+  running set to another output by hand. The timeline, queue and audio mixed ahead carry on (about a second's gap);
+  `live_start(follow_device=False)` keeps the old behaviour.
+- `live_stream`: the master, a bus or a deck as raw PCM (int16 stereo, 44.1 kHz) over a GET on the engine's
+  localhost port, each with its own safety limiter; a listener that falls behind loses its oldest audio and never
+  slows the set. For a VR stage that plays each object's own bus at its place (relayed by the page's server).
+- `live_map`, `live_control`, `live_controls`: a named control (a knob, slider or switch) mapped once to a track,
+  bus or deck volume, a deck EQ or an effect param, with linear, log, switch or raw scaling; moves apply in the
+  engine at once and are logged by bar, and read back as `[bar, value]` automation points.
+- The handoff scanner skips `history_src/` backups.
+
 ### Placement offsets
 
 - Sounds land by their start; music lands on an anchor. A note can now be nudged off its beat in milliseconds:

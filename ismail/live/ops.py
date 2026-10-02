@@ -115,7 +115,8 @@ def _other_engines(project):
 
 
 @op()
-def live_start(project: str, bpm: float, beats_per_bar: int = 4, device: str = 'default', workers: int = None) -> str:
+def live_start(project: str, bpm: float, beats_per_bar: int = 4, device: str = 'default', workers: int = None,
+               follow_device: bool = True) -> str:
     """Start the live engine for `project` (any folder; a project.json there lends its sound bank, song voices and
     'track:<name>' instruments). It plays from bar 1 immediately, silent until you queue clips, and keeps playing
     between your calls: clips loop until replaced. Tempo is fixed for the run (live_stop, then start again to change
@@ -154,7 +155,8 @@ def live_start(project: str, bpm: float, beats_per_bar: int = 4, device: str = '
         # a hidden console, not none: the render workers inherit it instead of each opening a window
         flags = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
     subprocess.Popen([sys.executable, '-m', 'ismail.live.engine', '--project', root, '--bpm', str(bpm),
-                      '--bpb', str(beats_per_bar), '--device', str(device), '--workers', str(workers)],
+                      '--bpb', str(beats_per_bar), '--device', str(device), '--workers', str(workers)]
+                     + ([] if follow_device else ['--no-follow']),
                      cwd=pkg_root, env=env, stdout=log, stderr=subprocess.STDOUT, creationflags=flags,
                      start_new_session=os.name != 'nt')
     t0 = time.time()
@@ -459,3 +461,56 @@ def live_parity(song: str, bars: list, tracks: list = None) -> str:
         L.append("  a part that DIFFERS sounds different on a deck than in a render: that is an engine gap. Say so "
                  "(the song's HANDOFF.md, for the dev agent) instead of changing the song to hide it.")
     return '\n'.join(L)
+
+
+@op()
+def live_device(project: str, device: str = 'default', follow: bool = None) -> str:
+    """Move a running set to another audio output without stopping it: the timeline, the queue and the audio mixed
+    ahead carry on, with a gap of about a second. device: 'default' (the system's default output now: use it after
+    connecting a Bluetooth speaker), a name or part of one ('JBL'), an index, or 'none'. With device 'default' the
+    engine also follows the system default by itself (checked every few seconds; follow=False stops that), and a
+    device that stops taking audio (a speaker switched off) falls back to the default."""
+    return _call(project, 'device', device=device, follow=follow, timeout=20)
+
+
+@op()
+def live_stream(project: str, name: str = 'master') -> str:
+    """Where to listen to the set over the network: the master, a bus ('bus:lucy') or a deck ('deck:A') as raw PCM
+    (int16 little-endian, stereo, 44.1 kHz) on the engine's localhost port, GET /stream?name=.... A bus streamed on
+    its own lets a VR stage play each object's sound at its place (route Lucy's tracks to bus 'lucy'); each stream
+    has its own safety limiter. The engine listens on localhost only: a page on another device reaches it through
+    its own server, which relays the stream. A stream plays sound wherever it is received: tell the user first."""
+    r = _call(project, 'stream', name=name)
+    with open(_info_path(project), encoding='utf8') as f:
+        port = json.load(f)['port']
+    return (f"stream {name}: http://127.0.0.1:{port}{r['path']} | {r['format']} {r['channels']} ch {r['rate']} Hz | "
+            f"{r['listening']} listening")
+
+
+@op()
+def live_map(project: str, control: str, target: str = None, param: str = 'volume_db', range: list = None,
+             curve: str = 'linear', at: str = 'now', remove: bool = False) -> str:
+    """Map a named control (a knob, slider or switch on the VR stage, or any client) to a live parameter, so its
+    moves apply in the engine at once with no agent in the loop. target: a track, 'bus:<name>' or 'deck:<name>'.
+    param: 'volume_db', 'pan' (tracks), a deck's 'low_db'/'mid_db'/'high_db'/'filter'/'volume_db', or an effect
+    param 'fx:<index or type>.<param>' ('fx:filter.cutoff', 'fx:delay.mix'). The control sends 0..1; range=[value
+    at 0, value at 1]; curve 'linear', 'log' (Hz, ratios), 'switch' (below 0.5 = the first value), or 'raw' (the
+    value passes in the param's own units). at: when a move lands for effect and deck params ('now', 'next_bar').
+    Every move is logged by bar: live_controls reads them back as automation. remove=True unmaps."""
+    return _call(project, 'map', control=control, target=target, param=param, range=range, curve=curve, at=at,
+                 remove=remove)
+
+
+@op()
+def live_control(project: str, control: str, value: float) -> str:
+    """Move a mapped control (what the stage sends when a knob turns; an agent can turn one too, the same way).
+    value: 0..1, or the param's own units for a 'raw' map. Applies at once and is logged with its bar."""
+    r = _call(project, 'control', control=control, value=value)
+    return f"{control} = {value:g} -> {r['applied']:g} at {r['bar']}"
+
+
+@op()
+def live_controls(project: str, control: str = None, last: int = 20) -> str:
+    """The control moves of this set as automation: for each control, its target and [bar, value] points in this
+    engine's bars (the last `last` of them), ready to become automation_set points in a studio project."""
+    return _call(project, 'controls', control=control, last=last)
