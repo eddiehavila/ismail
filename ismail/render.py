@@ -229,7 +229,7 @@ class Renderer:
             notes = self.track_notes_sec(tr)
             if notes:
                 y += instruments.render_instrument(inst, notes, n, inst_auto, self.bpm, self.sr, self.root,
-                                                  self.r_b0 if not self.full else -self.offset / self.spb)
+                                                  self.r_b0 if not self.full else -self.offset / self.spb, self.bpb)
         for clip in tr.get('audio', []):
             snd = self.load_sound(clip['sound'])
             s0 = int(round(self.beat_to_win_sec(clip['at_beat']) * self.sr))
