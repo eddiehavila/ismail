@@ -430,3 +430,31 @@ def live_listen(project: str, bars=4, view: str = 'bars', band: str = None, reco
 def live_record(project: str, on: bool = True) -> str:
     """Record the live output (after the safety chain) to <project>/live/rec_<time>.wav; on=False stops it."""
     return _call(project, 'record', on=on)
+
+
+@op()
+def live_parity(song: str, bars: list, tracks: list = None) -> str:
+    """Does this song play on a deck as it renders in the studio? Renders bars=[a, b] in the studio and plays them
+    on a silent engine of its own (no live_start needed, nothing is late), then compares each track, each bus and
+    the mix: level, envelope, octave bands, and the residual (how close to sample for sample; -100 dB and below is
+    identical; under -80 dB nobody can tell). Judged from the second bar: in the first, the studio rings in what came before the window and a
+    deck starts clean (its own line, 'edge'). tracks limits both sides to those tracks. Takes about as long as
+    rendering the bars twice."""
+    from . import parity
+    song = os.path.abspath(song)
+    if not os.path.exists(os.path.join(song, 'project.json')):
+        raise OpError(f"no project at {song}")
+    if not isinstance(bars, (list, tuple)) or len(bars) != 2:
+        raise OpError("bars=[first, last], song bars (inclusive), e.g. [9, 16]")
+    try:
+        res, _, head = parity.run(song, [int(bars[0]), int(bars[1])], tracks)
+    except ValueError as e:
+        raise OpError(str(e))
+    bad = [k for k, m in res.items() if not parity.verdict(m).startswith('ok') and not k.endswith('(edge)')]
+    L = [f"studio vs live, {os.path.basename(song)} bars {bars[0]}-{bars[1]}: "
+         + (f"{len(bad)} of {len(res)} differ ({', '.join(bad)})" if bad else f"all {len(res)} match")]
+    L.append(parity.report(res, head))
+    if bad:
+        L.append("  a part that DIFFERS sounds different on a deck than in a render: that is an engine gap. Say so "
+                 "(the song's HANDOFF.md, for the dev agent) instead of changing the song to hide it.")
+    return '\n'.join(L)

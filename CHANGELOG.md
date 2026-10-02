@@ -118,6 +118,17 @@
   mixer peak about 1000% -> 130-180% of real time.
 - The live mixer keeps every effect's state out of denormal floats (a fuzz left in silence decayed into them and
   took a guitar chain to 100% of real time), and a track whose amp only hisses goes dormant like a silent one.
+- A standing parity check: op `live_parity(song, bars)` renders the bars in the studio and plays them on a silent
+  engine of its own, then compares each track, bus and the mix (level, envelope, octave bands, residual), judged
+  from the window's second bar. `tests/test_live_song_parity.py` holds every instrument type and library voice to
+  it: voices that are not performers match the studio sample for sample, performers by ear.
+- Synths and drums seed their random phase and noise on where a note sits in its bar, not where it sits in the
+  render buffer: a studio render of a bar range now sounds as those bars do in the whole song, and live plays it
+  sample for sample (it was a different take of the noise and phases each time). Studio renders of synth and drum
+  parts get a new realization; nothing else changes.
+- Code and mimic voices get each note whole even when a render window ends first: a voice whose noise draws or
+  filters depend on the length it is given (the `sfx` voice) sounded different near a window's end and live.
+- Fix: an engine rendering inline (`workers=0`) now finds a loaded song's sampler sounds; its samplers were silent.
 
 ## 0.2.0 (2026-09-30)
 

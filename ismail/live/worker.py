@@ -106,7 +106,7 @@ def _auto_curves(lanes, lead_s, total):
 
 def render_event(inst, notes, lead_s, bpm, root):
     """notes: [(start_s, midi, dur_s, vel)] relative to the event onset; lead_s: where the onset sits inside the
-    bar (keeps drum noise seeds and bar-locked LFO phase as offline). Returns float32 (2, n) from the onset.
+    bar of '_bpb' beats (keeps synth and drum seeds and bar-locked LFO phase as in the studio). Returns float32 (2, n) from the onset.
     inst may carry '_bake' (studio effects run on this event), '_expr' (lanes for a performer voice), '_tail'
     (seconds rendered after the last note ends, MAX_TAIL_S if absent), '_beat0' (the song beat at the onset, for
     a performer) and '_chunk' (a slice of a performer's part: {'pre': seconds of earlier notes rendered as context
@@ -114,8 +114,9 @@ def render_event(inst, notes, lead_s, bpm, root):
     fading out, because the next chunk plays what still rings)."""
     bake, expr, iauto = inst.get('_bake') or [], inst.get('_expr'), inst.get('_auto') or {}
     tail = float(inst.get('_tail', MAX_TAIL_S))
-    beat0, chunk = float(inst.get('_beat0', 0.0)), inst.get('_chunk')
-    inst = {k: v for k, v in inst.items() if k not in ('_bake', '_expr', '_auto', '_whole', '_tail', '_beat0', '_chunk')}
+    beat0, chunk, bpb = float(inst.get('_beat0', 0.0)), inst.get('_chunk'), inst.get('_bpb', 4)
+    inst = {k: v for k, v in inst.items()
+            if k not in ('_bake', '_expr', '_auto', '_whole', '_tail', '_beat0', '_chunk', '_bpb')}
     lead = int(round(lead_s * SR))
     span = max(s + d for s, _, d, _ in notes)
     total = lead + int((span + tail) * SR)
@@ -125,8 +126,9 @@ def render_event(inst, notes, lead_s, bpm, root):
     if inst.get('performer'):
         y = _perform(inst, shifted, total, bpm, root, expr, beat0 - lead_s * bpm / 60.0)
     else:
+        # onset at lead_s into its bar: synth and drum seeds land where the studio puts them
         y = instruments.render_instrument(inst, shifted, total, _auto_curves(iauto, lead_s, total) or None, bpm,
-                                          SR, root)
+                                          SR, root, 0.0, bpb)
     if bake:
         from .. import fx as studio_fx
         ctx = _BakeCtx(bpm)
