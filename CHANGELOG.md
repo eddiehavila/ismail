@@ -14,6 +14,9 @@
   memory estimate does not fit the free commit is refused instead of dying. Commands outside ismail run in a slot
   with `python -m ismail.machine run --gpu|--cpu -- <command>` at below-normal priority. Heavy jobs cap numeric
   threads at 2. The test suite takes a slot too.
+- The governor also refuses a new CPU job while the CPU is 80% busy or more over 2 s, whoever is using it, and names
+  the top processes: most load on this machine is not on the board (the desktop app, a node server). The board shows
+  the top processes.
 - Skill: "The machine is shared" is a non-negotiable (check before anything over a minute, one heavy job of your own,
   a hot GPU is not a free CPU, size jobs to the question, no sleep-poll loops, never leave heavy jobs running
   untold); development.md: touched tests locally, the full suite in CI; announcements never ask for work.

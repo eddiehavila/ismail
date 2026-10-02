@@ -18,6 +18,7 @@ def board(tmp_path, monkeypatch):
     monkeypatch.setenv('ISMAIL_MACHINE_DIR', str(tmp_path / 'board'))
     monkeypatch.setattr(machine, 'gpu', lambda: dict(COOL))
     monkeypatch.setattr(machine, 'memory', lambda: (40.0, 70.0, 30.0))
+    monkeypatch.setattr(machine, 'cpu_load', lambda: (12.0, []))
     depth = getattr(machine._held, 'depth', 0)
     machine._held.depth = 0                  # the suite's own slot (conftest) would make every slot pass through
     yield tmp_path / 'board'
@@ -64,6 +65,15 @@ def test_a_hot_gpu_stops_cpu_jobs_too_and_memory_that_does_not_fit_is_refused(bo
     assert machine.check('cpu', mem_gb=10) == ''
 
 
+def test_load_that_is_not_on_the_board_still_stops_a_cpu_job_and_names_who(board, monkeypatch):
+    # 2026-10-02: 98% CPU from the desktop app and a node server, an empty board, and the governor said go
+    monkeypatch.setattr(machine, 'cpu_load', lambda: (98.0, [(59.0, 'claude.exe', 1), (31.0, 'node.exe', 2)]))
+    why = machine.check('cpu')
+    assert '98% busy' in why and 'claude.exe 59%' in why and 'node.exe 31%' in why
+    assert machine.check('gpu') == ''
+    assert 'BUSY' in machine.board()
+
+
 def test_a_job_of_a_dead_process_leaves_the_board(board):
     os.makedirs(board / 'jobs')
     dead = {'kind': 'gpu', 'what': 'crashed', 'who': 'x', 'pid': 2 ** 22 + 7, 'pid_start': 0, 'started': 0}
@@ -98,6 +108,7 @@ def test_a_busy_machine_turns_a_render_into_an_op_error_that_says_why(board, tmp
 def test_the_cli_runs_a_command_in_a_slot_and_waits_its_turn(board):
     env = dict(os.environ, ISMAIL_MACHINE_DIR=str(board))
     code = "import json,os; d=os.environ['ISMAIL_MACHINE_DIR']; print(len(os.listdir(os.path.join(d, 'jobs'))))"
-    out = subprocess.run([sys.executable, '-m', 'ismail.machine', 'run', '--cpu', '--what', 'probe', '--',
+    # --force: this checks the wrapper, not today's load (the real machine may be hot while the test runs)
+    out = subprocess.run([sys.executable, '-m', 'ismail.machine', 'run', '--cpu', '--force', '--what', 'probe', '--',
                           sys.executable, '-c', code], capture_output=True, text=True, env=env, timeout=60)
     assert out.returncode == 0 and out.stdout.strip() == '1'      # its own job was on the board while it ran
