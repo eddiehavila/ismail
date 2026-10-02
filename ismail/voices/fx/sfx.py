@@ -4,6 +4,7 @@ import numpy as np
 from ismail import dsp
 
 INFO = {
+    "designed": "effects designed by ear, not modeled on recordings",
     "summary": "one-shot sound effects picked by velocity: gunshot, reload, shell casing, bone crunch, punch, rip, gong",
     "velocity": "the note velocity picks the effect (velocity // 10): 1 gunshot (vel 10), 2 reload (20), 3 shell casing (30), 4 bone crunch (40), "
                 "5 punch (50), 6 rip (60), 7 gong (70)",

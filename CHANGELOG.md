@@ -17,6 +17,17 @@
 - Skill: `references/user-experience.md` (the lexicon, exams and pages, objectives, consent, what never to
   record), a SKILL.md non-negotiable, and a THE PERSON section in `guide`.
 
+### Measure first, in the tools
+
+- Every track says what its sound is modeled on: `project_info` lists each as measured (a mimic profile, a measured
+  library voice, a sample imported or extracted from a recording, a fit), designed (on purpose) or unstated, and
+  `render` names the unstated ones with the ops that measure. Fits record it themselves (`instrument_fit`
+  apply_to_track, `track_fit` apply); the new `track_model` op records an example the tools could not see or marks
+  a sound designed. Agents skipped measuring when the rule was only in the skill, most of all after a context
+  summary; the tool replies keep it in view.
+- Library voices state their provenance in INFO (`measured` or `designed`).
+- `guide` opens with MEASURE FIRST.
+
 ### Fixes from song handoffs
 
 - Render memory: a track's whole output stays in memory only while an effect reads it (a sidechain or vocoder

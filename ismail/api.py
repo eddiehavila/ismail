@@ -19,6 +19,7 @@ import numpy as np
 
 from . import analysis as A
 from . import machine
+from . import provenance
 from . import fx as fxmod
 from . import rig as rigmod
 from . import instruments as inst_mod
@@ -333,6 +334,7 @@ def project_info(project: str) -> str:
     L.append(f"master: fx [{', '.join(f['type'] for f in d['master'].get('fx', []))}] vol {d['master'].get('volume_db', 0):+.1f}")
     if d.get('sounds'):
         L.append(f"sounds: {', '.join(d['sounds'])}")
+    L += provenance.summary(d, P.root)[0]
     return '\n'.join(L)
 
 
@@ -661,9 +663,42 @@ def instrument_set(project: str, track: str, instrument, merge: bool = True) -> 
         new = _resolve_instrument(new, P)
     else:
         new = _resolve_instrument(instrument, P)
+    old = tr.get('instrument') or {}
+    dropped = tr.get('model') and old.get('type') != new['type']
+    if dropped:
+        tr.pop('model')
     tr['instrument'] = new
     P.save()
-    return f"instrument of {track!r} is now {new['type']}"
+    return f"instrument of {track!r} is now {new['type']}" + (
+        f" (its model record no longer applies and was cleared: {provenance.of_track(tr, P.d, P.root)[1]})"
+        if dropped else '')
+
+
+@op(mutates=True)
+def track_model(project: str, track: str, on: str, by: str = None) -> str:
+    """Record what a track's sound is modeled on, shown by project_info and render. on: the example it was
+    measured from ('ref', 'ref:<stem>', 'sound:<name>', a path, or a note like 'kit comp_2 of the ref drums'),
+    'designed' for a sound made on purpose (most electronic music), or '' to clear. by: how (an op, a song script,
+    'ear exam'). Fits record it themselves (instrument_fit apply_to_track, track_fit apply=True); mimic profiles,
+    measured library voices and imported samples need nothing."""
+    P = _load(project)
+    tr = P.track(track)
+    on = (on or '').strip()
+    if not on:
+        tr.pop('model', None)
+        P.save()
+        return f"cleared; {track!r} is now {' '.join(provenance.of_track(tr, P.d, P.root))}"
+    if on.startswith('sound:') and on[6:] not in (P.d.get('sounds') or {}):
+        raise OpError(f"no sound {on[6:]!r} in the bank (sound_list); sound_import the example first")
+    if on.startswith('ref') and not P.d.get('reference'):
+        raise OpError("the project has no reference; project_set(reference=<file>) or give the example's path")
+    looks_path = os.sep in on or '/' in on or os.path.splitext(on)[1].lower() in ('.wav', '.mp3', '.flac', '.ogg')
+    if looks_path and not on.startswith(('ref', 'sound:')) and not os.path.exists(os.path.join(P.root, on)) \
+            and not os.path.exists(on):
+        raise OpError(f"{on!r} not found; give an existing file, 'ref', 'ref:<stem>', 'sound:<name>' or 'designed'")
+    tr['model'] = {'on': on, **({'by': by} if by else {})}
+    P.save()
+    return f"{track!r}: {' '.join(provenance.of_track(tr, P.d, P.root))}"
 
 
 @op()
@@ -1197,6 +1232,9 @@ def render(project: str, bars: list = None, tracks: list = None, stems: bool = F
         L.append("  master: no limiter (fx_add target='master' fx={'type': 'limiter', 'ceiling_db': -0.3} catches peaks)")
     elif not any(t == 'master' and gr < -0.5 for (t, _), gr in R.gain_reduction.items()):
         L.append("  master limiter: idle (gain reduction under 0.5 dB)")
+    short = provenance.summary(P.d, P.root, tracks)[1]
+    if short:
+        L.append(short)
     return '\n'.join(L)
 
 
