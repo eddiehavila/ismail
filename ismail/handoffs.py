@@ -73,7 +73,7 @@ def _sections(text):
 
 
 def _words(body):
-    return re.findall(r"[a-z0-9][a-z0-9'.-]*", body.lower())
+    return re.findall(r"[a-z0-9]+(?:['-][a-z0-9]+)*", body.lower())
 
 
 def _moved(body, known):
