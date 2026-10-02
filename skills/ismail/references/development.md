@@ -219,6 +219,15 @@ rather than rewriting old sections:
 ## For the skill         lessons and rules the song learned, in the user's words where possible
 ```
 
+## Sharing back: from any user's project to the public repo
+
+ismail is meant to grow from what its users build. An agent working for anyone (not only this machine's user) that
+builds something general should say so and offer the path: a fork of newsbubbles/ismail, the change on a branch with
+its tests and docs, a pull request that carries the evidence (exam scores, round trips, cost). The same inclusion
+review applies before anything is offered: it works beyond the project, nothing measured from a person goes in
+without their yes, no commercial material, provenance recorded. The person decides and sends it; the agent prepares.
+ROADMAP.md says where help is most useful.
+
 ## Lessons from running the loop (2026-10-02)
 
 - **Two songs building the same thing is the strongest signal** (two exam servers, two measured kits): merge them in

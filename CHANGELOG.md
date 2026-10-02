@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Roadmap
+
+- ROADMAP.md: where ismail is going (worlds, visiting each other's, hands and 4D editing, agents in the room,
+  sound, pictures, the person, a hub for shared work) with a status on each; a "Where it is going" section in the
+  README.
+- SKILL.md: share what would help others (a fork and a pull request, after the inclusion review); development.md:
+  sharing back from any user's project; user-experience.md: pictures have a vernacular too.
+
 ### Live output follows the device
 
 - The live output follows the system default (`device='default'`): a Bluetooth speaker that connects mid-set takes
