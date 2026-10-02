@@ -9,7 +9,7 @@ import time
 import urllib.error
 import urllib.request
 
-from ..api import OpError, op
+from ..api import OpError, heavy, op
 from .. import analysis as A
 
 VIEWS = {'bars': A.bar_table, 'envelope': A.envelope, 'pitches': A.pitches, 'drums': A.drums, 'chords': A.chords}
@@ -433,6 +433,7 @@ def live_record(project: str, on: bool = True) -> str:
 
 
 @op()
+@heavy()
 def live_parity(song: str, bars: list, tracks: list = None) -> str:
     """Does this song play on a deck as it renders in the studio? Renders bars=[a, b] in the studio and plays them
     on a silent engine of its own (no live_start needed, nothing is late), then compares each track, each bus and
