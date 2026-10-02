@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Roadmap, and the stage in the skill
+
+- ROADMAP.md: where ismail is going (worlds, visiting each other's, hands and 4D editing, agents in the room,
+  sound, pictures, the person, a hub for shared work) with a status on each; a "Where it is going" section in the
+  README.
+- `references/stage.md`: building a scene with a person inside it, from the Crossroads build: which surface for
+  which decision, eye exams for pictures, bodies and contact, contact with a person in a headset, shared-editing
+  rules that never lose their work, agents first.
+- user-experience.md: pictures have a vernacular too; when the person is inside the work. SKILL.md: share what
+  would help others. development.md: sharing back from any user's project.
+
 ### Placement offsets
 
 - Sounds land by their start; music lands on an anchor. A note can now be nudged off its beat in milliseconds:

@@ -47,6 +47,10 @@ The words never change; the mapping and the outcome do, and the file keeps every
 - Before explaining a change: `lexicon_find(text="eq peak")` finds the person's word for it, so say "less boxy"
   instead of "a 3 dB cut at 400 Hz", unless they speak in Hz themselves.
 
+**Pictures have a vernacular too.** Words about how something looks ("waxy", "cluttered", "flat", "the shadows are
+muddy") go in the same lexicon, with the visual crafts (director,
+cinematographer, colourist), mapped to what changed: a material setting, a light, a grade value.
+
 **Crafts.** Each entry names the role the word belongs to, the roles a record used to need people for: composer,
 arranger, performer, sound designer, recording engineer, mixing engineer, mastering engineer, producer, DJ,
 director, cinematographer, colourist, editor, choreographer, listener.
@@ -68,6 +72,12 @@ a view of the stage) has been the fastest route to a good result. The rules that
 - Two or three numbered questions, one per variable.
 - Log every answer verbatim in the song's `notes/feedback.md`, carry a lock into the build as a constant, and note
   any new words in the lexicon.
+
+## When the person is inside the work
+
+In a scene, a headset or a live set, the person cannot see your terminal. `stage.md` has the practice: answer at
+once and briefly, capture what they point at when they speak, show which version runs, address every note, and
+choose the surface (image sheet, stage, render, page, panel) where each decision is fastest for them to make.
 
 ## Their intent: objectives
 

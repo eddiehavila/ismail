@@ -56,6 +56,21 @@ One set of operations, three ways in:
 - **CLI**: `python -m ismail -p <project> <op> [args]`
 - **Python**: `from ismail import api`
 
+## Where it is going
+
+ismail is becoming an experience engine: agents build sound, pictures, rooms and whole scenes, run them live, and
+adapt them with the people inside them, measuring the world instead of guessing it and asking a person's senses
+only what a measurement cannot settle. Next on the road:
+
+- a browser and VR stage for building scenes with your hands and your voice, with an agent beside you;
+- worlds you can visit: a friend's scene from their headset, yours from theirs;
+- objects that work: knobs wired to the live engine, a radio that plays a set where you carry it;
+- one exam page for any sense, and a clock of the hours you spend inside;
+- a hub of voices, instruments and scenes that passed review, each with its provenance.
+
+The whole map, with what is done and what is next, is in **[ROADMAP.md](ROADMAP.md)**. Fork it, build on it, and
+send what would help others back as a pull request.
+
 ## Install
 
 Python 3.10 or newer.
