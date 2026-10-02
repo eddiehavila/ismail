@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Roadmap
+
+- ROADMAP.md: where ismail is going (worlds, visiting each other's, hands and 4D editing, agents in the room,
+  sound, pictures, the person, a hub for shared work) with a status on each; a "Where it is going" section in the
+  README.
+- SKILL.md: share what would help others (a fork and a pull request, after the inclusion review); development.md:
+  sharing back from any user's project; user-experience.md: pictures have a vernacular too.
+
 ### Placement offsets
 
 - Sounds land by their start; music lands on an anchor. A note can now be nudged off its beat in milliseconds:
