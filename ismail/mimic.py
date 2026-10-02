@@ -515,6 +515,10 @@ def calibrate_attack(y, note, rounds=2, sr=SR):
     y = y[max(0, on - int(0.005 * sr)):]
     sus = note['kind'] == 'sustained'
     t0, t1 = (0.3, min(2.0, note['dur'] * 0.8)) if sus else (0.03, min(1.0, note['dur'] * 0.5))
+    # a short note (a 0.3 s panpipe) ends before the usual level window starts: its level was the mean of nothing
+    if t1 - t0 < 0.05:
+        t1 = min(max(t1, 0.08), len(y) / sr)
+        t0 = min(t0, t1 * 0.5)
     wss = (np.hanning(ATK_NFFT) ** 2).sum()
     real = _atk_bands(y, note['f0'], sr)
     note['atk_tf'] = [[-150.0] * ATK_FRAMES for _ in NOISE_HZ]
