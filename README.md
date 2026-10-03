@@ -17,6 +17,8 @@ Your agent writes the song as notes, sounds and code, reads back what it made, a
 
 [![ismail: a DAW for AI agents](https://newsbubbles.github.io/ismail/social.png)](https://newsbubbles.github.io/ismail/)
 
+*If you are an AI agent, start at [If you are an AI agent](#if-you-are-an-ai-agent).*
+
 **[Listen to songs an agent made with it](https://newsbubbles.github.io/ismail/)**, each shown with the text the agent read while making it. The playhead runs across that text as the song plays.
 
 | song | what it is |
@@ -85,18 +87,38 @@ only what a measurement cannot settle. Next on the road:
 The whole map, with what is done and what is next, is in **[ROADMAP.md](ROADMAP.md)**. Fork it, build on it, and
 send what would help others back as a pull request.
 
+## If you are an AI agent
+
+Your person sent you here to set ismail up and make something with them. ismail gives you no ears: every render
+comes back to you as text you read, so judge what you made from those readings.
+
+1. **Ask first.** What do they want to make (a song, a live set, an instrument measured from a recording), and
+   which client are you running in (Claude Code, Cursor, another MCP client)?
+2. **Install the server** for that client, as below. With [uv](https://docs.astral.sh/uv/) it is one command:
+   `uvx --from git+https://github.com/newsbubbles/ismail ismail mcp`. Then call `guide`; it returns the workflow and the conventions.
+3. **Load the skill.** `skills/ismail` is the playbook: plan before writing notes, read every render back, and
+   compare against references with the tools. The Claude Code plugin loads it for you; elsewhere, clone the repo and
+   link the folder.
+4. **Start small.** A short loop rendered to an mp3 they can play. Ask before playing anything live through their
+   speakers.
+5. **Measure, then ask.** Read the analysis before you call a sound right. When a reading cannot settle it, put a
+   blind exam in front of your person's ears, and note the words they use for what they hear (`lexicon_note`).
+6. **Share back.** When you build something that would help others (a voice, an instrument, a fix), suggest your
+   person fork the repo and send it as a pull request.
+
 ## Install
 
-Python 3.10 or newer.
+Python 3.10 or newer. ismail installs from GitHub:
 
 ```bash
-pip install ismail                    # engine, analysis, CLI, MCP server
-pip install "ismail[perceptual]"      # optional: CLAP perceptual metric (torch + transformers, model about 600 MB)
-pip install "ismail[separate]"        # optional: demucs stem separation for reference tracks
-pip install "ismail[live]"            # optional: play live to your speakers (sounddevice)
+pip install "ismail @ git+https://github.com/newsbubbles/ismail"                # engine, analysis, CLI, MCP server
+pip install "ismail[perceptual] @ git+https://github.com/newsbubbles/ismail"    # optional: CLAP perceptual metric (torch + transformers, model about 600 MB)
+pip install "ismail[separate] @ git+https://github.com/newsbubbles/ismail"      # optional: demucs stem separation for reference tracks
+pip install "ismail[live] @ git+https://github.com/newsbubbles/ismail"          # optional: play live to your speakers (sounddevice)
 ```
 
-Or run the MCP server without installing anything, with [uv](https://docs.astral.sh/uv/): `uvx ismail mcp`.
+Or run the MCP server without installing anything, with [uv](https://docs.astral.sh/uv/):
+`uvx --from git+https://github.com/newsbubbles/ismail ismail mcp`.
 
 To work on ismail itself (or to have the skill and examples on disk), clone it and install in place:
 
@@ -127,14 +149,15 @@ Runs on Windows, macOS and Linux; CI tests all three on every push. The one OS-s
 /plugin install ismail@ismail
 ```
 
-The plugin runs the server with `uvx ismail mcp` and loads the composing skill.
+The plugin runs the server with uvx (from this repo) and loads the composing skill.
 
 **By hand:**
 
 1. **Tools.** Open Claude Code in a clone of this repo and the bundled `.mcp.json` registers the server; the tools show up as `mcp__ismail__*`. To use ismail from any folder instead:
 
    ```bash
-   claude mcp add -s user ismail -- uvx ismail mcp      # or, after pip install: -- ismail mcp
+   claude mcp add -s user ismail -- uvx --from git+https://github.com/newsbubbles/ismail ismail mcp
+   # or, after pip install: claude mcp add -s user ismail -- ismail mcp
    ```
 
 2. **Skill (recommended).** `skills/ismail` teaches the agent how to compose with ismail: plan a Session Sheet before writing notes, write a Listening Report after every render, and judge reference matches with the comparison tools instead of by feel. Link it into your skills folder:
@@ -155,12 +178,12 @@ The plugin runs the server with `uvx ismail mcp` and loads the composing skill.
 1. **Tools.** Opening this folder in Cursor picks up `.cursor/mcp.json`. To use ismail in other projects, add the same entry to `~/.cursor/mcp.json`:
 
    ```json
-   {"mcpServers": {"ismail": {"command": "uvx", "args": ["ismail", "mcp"]}}}
+   {"mcpServers": {"ismail": {"command": "uvx", "args": ["--from", "git+https://github.com/newsbubbles/ismail", "ismail", "mcp"]}}}
    ```
 
 2. **Skill.** `.cursor/rules/ismail.mdc` is an agent-requested rule that points Cursor's agent at `skills/ismail/SKILL.md`. Copy that rule (and the `skills/ismail` folder) into another project to use it there.
 
-Any other MCP client works the same way: run `ismail mcp` (or `uvx ismail mcp`) over stdio.
+Any other MCP client works the same way: run `ismail mcp` (or `uvx --from git+https://github.com/newsbubbles/ismail ismail mcp`) over stdio.
 
 ## Quick start (CLI)
 

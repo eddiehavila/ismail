@@ -11,6 +11,8 @@
 - Listed in the official MCP Registry as `io.github.newsbubbles/ismail` (`server.json`); a tag push publishes to
   PyPI and the registry (`.github/workflows/publish.yml`).
 - `Dockerfile` (stdio server) and `glama.json` for directories that build and inspect servers; `CITATION.cff`.
+- The README, the plugin and the client configs install from GitHub (`uvx --from git+https://github.com/newsbubbles/ismail ismail mcp`),
+  which works whether or not a release is on PyPI. README: an "If you are an AI agent" section.
 
 ### Roadmap
 
