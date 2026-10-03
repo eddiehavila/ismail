@@ -67,6 +67,13 @@
 - Library voices state their provenance in INFO (`measured` or `designed`).
 - `guide` opens with MEASURE FIRST.
 
+### Live: the set says when it runs out
+
+- `live_status` adds `RUNWAY ENDED N bars ago` when a set that has played has had nothing new queued for 8 bars
+  (what loops on unchanged, or that it rings out), and `THIN for N s` when one track is left where the set has had
+  several, or the mix sits 20 dB under its usual level, for 30 s. A set ran 10 minutes on one hat loop after its
+  outro forgot to stop it, and `SILENT ON AIR` never fired.
+
 ### Sources and credits in the tools
 
 - `project_info` lists a song's sources: the recordings, videos and scores in its `ref/` folders, which of them

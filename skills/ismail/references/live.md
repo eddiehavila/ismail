@@ -156,8 +156,10 @@ sessions' renders, Blender and video jobs.
   on new underruns past a small allowance, late notes, a mixer above ~65% twice, or STALLED holds a set safely.
   Four pauses triggered by whole-machine CPU came with zero underruns.
 - **Every watchdog runs as a tracked background task**, so its exit wakes you. A detached guard paused a set and
-  the person sat in 50 minutes of silence; a helper loop that crashed left 9 more. `SILENT ON AIR` in
-  `live_status` is the last line of defence.
+  the person sat in 50 minutes of silence; a helper loop that crashed left 9 more. `live_status` flags what a
+  guard should wake you for: `SILENT ON AIR` (nothing sounding for 10 s), `RUNWAY ENDED` (nothing new queued for 8
+  bars) and `THIN` (one track left, or the mix 20 dB under the set's usual level, for 30 s: a set once ran 10
+  minutes on a lone hat loop after its outro forgot to stop it).
 - **Under load, shrink the rig instead of stopping.** Dropping idle tracks and insert effects (bitcrush,
   compressor, chorus, distortion) while keeping the parts the person named took the mixer from 85% to 47% with
   the same music. Raising the live engine to AboveNormal priority (render workers stay Normal)
