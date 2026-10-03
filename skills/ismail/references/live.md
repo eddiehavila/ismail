@@ -144,6 +144,44 @@ it replaced had already started.
 - Judge a sparse part by `live_status`'s "max 10 s" level, not the snapshot: a vocal call read -70 dB when the
   snapshot fell in its rest.
 
+### Watch the machine as well as the room
+
+A 16-hour run (prog house into a sleep session, a sunrise, a morning groove and a video-game set on decks) held
+because the performer watched the computer as closely as the audience. The machine is shared with other
+sessions' renders, Blender and video jobs.
+
+- **Read `python -m ismail.machine` before the set and before every slow step.** It names the other jobs. Go on
+  when it says go; the person can overrule the heat.
+- **Guard on audio trouble, never on machine CPU alone.** A guard that polls `live_status` every ~15 s and pauses
+  on new underruns past a small allowance, late notes, a mixer above ~65% twice, or STALLED holds a set safely.
+  Four pauses triggered by whole-machine CPU came with zero underruns.
+- **Every watchdog runs as a tracked background task**, so its exit wakes you. A detached guard paused a set and
+  the person sat in 50 minutes of silence; a helper loop that crashed left 9 more. `SILENT ON AIR` in
+  `live_status` is the last line of defence.
+- **Under load, shrink the rig instead of stopping.** Dropping idle tracks and insert effects (bitcrush,
+  compressor, chorus, distortion) while keeping the parts the person named took the mixer from 85% to 47% with
+  the same music. Raising the live engine to AboveNormal priority (render workers stay Normal)
+  helps when other jobs hog the CPU.
+- **One deck at a time on a busy machine.** A cued deck of a 20-track song costs the mixer as much as one on air,
+  and its first section renders in a burst: every breakup in one morning lined up with a deck load. Switch songs
+  with a stop and a start (a short gap) until the machine has room.
+- **The set follows the person's clock.** Read the time at every checkpoint and shape the arc to their day:
+  energy, a let-down, a sleep session queued whole so it runs with no agent and ends by itself, silence, a sunrise
+  (a dawn chorus entering in the order birds wake), a morning groove. Plans move when they say so.
+- **Pause and resume are a performance move.** Snapshot the status to a file, stop the recording, a short fade,
+  stop. Resume with a short ease-in at a level that fits the hour, never the exact old state. Each resume is a new
+  take file, logged in `notes/feedback.md`.
+- **Keep a runway, always.** Queue 8 to 16 minutes ahead, set a checkpoint timer that fires well before the runway
+  ends, and never let a section end into silence.
+- **Change it before they ask.** One chord for an hour read as repetitive. Progressions with every part built from
+  its chord, a new hook every 2 minutes and alternating section forms (full, a drive with no break, a deep one that
+  starts underwater) kept it moving. Builds escalate every 4 bars and drops land louder (`Set.gap` brings each track
+  back to its own level).
+- **Use what the person is doing elsewhere.** Other sessions' work makes material: their birds, a gnawa groove, a
+  song's villain, a series on decks, a song built by a background agent while the set plays. Check each borrowed
+  voice's blind-test notes and provenance before it goes on air; two unproven voices once had to be pulled.
+- **Log their words verbatim** (`lexicon_note`, `notes/feedback.md`) with what was playing and what changed.
+
 ### Dynamics with the kit
 
 ```python
@@ -180,7 +218,8 @@ songs/<slug>/
     setlog.md           written by the kit: every call, landing bars, clip ids per section
   voices/               code voices made for the set; each docstring cites the measurement it came from
   ref/
-    SOURCES.md          per reference: title, URL, date, who supplied or approved it, "analysis only"
+    SOURCES.md          per source: title, link, who made or played it, licence, what was measured,
+                        who supplied or approved it, date, "analysis only"
     <name>.wav          the reference
     <name>/             its analysis project (excerpt, stems)
   work/                 measurement scripts and their saved output (groove.txt, timbre.txt): voices and

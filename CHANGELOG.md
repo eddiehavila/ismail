@@ -67,6 +67,19 @@
 - Library voices state their provenance in INFO (`measured` or `designed`).
 - `guide` opens with MEASURE FIRST.
 
+### Skill: provenance, the deliverable, the machine-aware performer
+
+- SKILL.md: provenance is kept from the first download to the public page. Every source a song uses, measuring-only
+  ones included, gets a `ref/SOURCES.md` row (who made or played it, licence, what was measured); every track says
+  what it is modeled on; performers and communities measured from recordings are credited; public pages take their
+  credits from `SOURCES.md`. instruments.md and music-video.md log sources and assets the same way.
+- SKILL.md: long work stays on its deliverable. `PROGRESS.md` at the song root, read at every start and after every
+  compaction; reread the story before designing for it; a tool is a side track unless it unblocks the next step.
+  music-video.md: the cast comes from the story, never from the track list, and effort follows the cast's order.
+- live.md, "Watch the machine as well as the room": lessons of a 16-hour set (guards keyed on audio trouble,
+  tracked watchdogs, shrinking the rig under load, one deck on a busy machine, the set on the person's clock, pause
+  and resume as a move, borrowed voices checked before they go on air).
+
 ### Fixes from song handoffs
 
 - Render memory: a track's whole output stays in memory only while an effect reads it (a sidechain or vocoder
