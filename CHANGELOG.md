@@ -67,6 +67,15 @@
 - Library voices state their provenance in INFO (`measured` or `designed`).
 - `guide` opens with MEASURE FIRST.
 
+### The machine: a line, and priority from the user
+
+- `python -m ismail.machine run --wait 30m` (and `slot(..., wait=)`) stands in line for a heavy-job slot instead
+  of being refused, and a job that does not wait yields to every waiter ahead of it. The board lists the line.
+- `python -m ismail.machine priority <session> --for 3h --by "the user"` puts that session first in line until it
+  expires (`--clear` ends it); it needs `--by`, since only the user gives it. Priority orders the line only: the
+  heat limit, the busy CPU and the memory reserve hold for everyone (`--force` skips the heat limit and was the
+  only way to go first; the voice session asked for this to finish its blind exams).
+
 ### What to reach for when
 
 - SKILL.md: "What to reach for when", one table from the situation to the op, reference or rule (the start of a

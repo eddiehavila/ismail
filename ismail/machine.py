@@ -14,6 +14,11 @@ this machine is not on the board (the desktop app, servers, other tools), and th
 dying with a MemoryError. A refused job says what is running, whose it is and when to retry; force=True (only when
 the user says so) runs it anyway. Jobs of processes that died are cleared on the next look.
 
+Waiting and priority: a job may wait for its slot (`run --wait 30m`, `slot(..., wait=1800)`) instead of being
+refused. Waiters line up: the session the user gave priority to first (`python -m ismail.machine priority vox --for
+3h --by "the user"`, it expires by itself), then by arrival; a job that does not wait yields to every waiter ahead
+of it. Priority orders the line only: the heat limit, the busy CPU and the memory reserve hold for everyone.
+
 The board lives in <songs>/_machine/ (one per machine, shared by every checkout and worktree), or $ISMAIL_MACHINE_DIR.
 """
 import argparse
@@ -38,6 +43,7 @@ GPU_BAD = {0x8: 'hardware slowdown', 0x20: 'thermal slowdown (driver)', 0x40: 't
 CPU_BUSY = 80.0                    # % of all cores, averaged over CPU_SAMPLE_S
 CPU_SAMPLE_S = 2.0
 RESERVE_GB = 4.0                   # commit kept free for the desktop, the sessions and the live engine
+WAIT_POLL_S = 5.0                  # a waiting job looks again this often
 THREADS = 2                        # numeric threads per heavy job
 
 
@@ -167,6 +173,72 @@ def jobs():
     return out
 
 
+def priority():
+    """-> the priority grant {'who', 'until', 'by', 'why', 'set'} if one is in force, else None."""
+    try:
+        with open(os.path.join(board_dir(), 'priority.json'), encoding='utf8') as f:
+            p = json.load(f)
+    except (OSError, ValueError):
+        return None
+    return p if p.get('until', 0) > time.time() else None
+
+
+def set_priority(who, for_s, by, why=''):
+    """Give `who` (a session's name on the board) first place in the line for for_s seconds. Only the user decides
+    this: by names who asked (a session asking for itself is not enough)."""
+    if not by or not str(by).strip():
+        raise ValueError("by: who gave the priority (the user); a session does not give itself priority")
+    p = {'who': who, 'until': time.time() + float(for_s), 'by': str(by).strip(), 'why': why, 'set': time.time()}
+    with _board_lock():
+        with open(os.path.join(board_dir(), 'priority.json'), 'w', encoding='utf8') as f:
+            json.dump(p, f)
+    return p
+
+
+def clear_priority():
+    with _board_lock():
+        try:
+            os.remove(os.path.join(board_dir(), 'priority.json'))
+        except OSError:
+            pass
+
+
+def waiters():
+    """Jobs waiting for a slot, alive ones only, in line order."""
+    d = os.path.join(board_dir(), 'waiting')
+    out = []
+    if os.path.isdir(d):
+        for f in sorted(os.listdir(d)):
+            p = os.path.join(d, f)
+            try:
+                with open(p, encoding='utf8') as fh:
+                    w = json.load(fh)
+            except (OSError, ValueError):
+                continue
+            if _alive(w):
+                w['_path'] = p
+                out.append(w)
+            else:
+                try:
+                    os.remove(p)
+                except OSError:
+                    pass
+    pr = priority()
+    return sorted(out, key=lambda w: _rank(w['who'], w['since'], pr))
+
+
+def _rank(who, since, pr):
+    return (0 if pr and who == pr['who'] else 1, since)
+
+
+def _ahead(kind, who, since, me=None):
+    """Waiters for this kind of slot that are ahead of a job (who, since) in the line."""
+    pr = priority()
+    mine = _rank(who, since, pr)
+    return [w for w in waiters() if w.get('id') != me and (w['kind'] == kind or (kind == 'cpu' and w['kind'] == 'live'))
+            and _rank(w['who'], w['since'], pr) < mine]
+
+
 @contextlib.contextmanager
 def _board_lock(timeout=10.0):
     os.makedirs(os.path.join(board_dir(), 'jobs'), exist_ok=True)
@@ -219,8 +291,9 @@ def duration_s(text):
     return v * (unit or 60)
 
 
-def check(kind, mem_gb=0.0, _jobs=None):
-    """-> '' when a `kind` job ('gpu' or 'cpu') of mem_gb may start now, else why not and what to do."""
+def check(kind, mem_gb=0.0, _jobs=None, who=None, since=None, me=None):
+    """-> '' when a `kind` job ('gpu' or 'cpu') of mem_gb may start now, else why not and what to do. who/since:
+    the asking job's place in the line (a job that is not waiting stands at the back of it, now)."""
     js = jobs() if _jobs is None else _jobs
     why = []
     hot = gpu_trouble(gpu())
@@ -234,6 +307,14 @@ def check(kind, mem_gb=0.0, _jobs=None):
     same = [j for j in js if j['kind'] == kind or (kind == 'cpu' and j['kind'] == 'live')]
     if len(same) >= SLOTS[kind]:
         why.append(f"the {kind} slots are full ({SLOTS[kind]}): " + '; '.join(_describe(j) for j in same))
+    else:
+        ahead = _ahead(kind, who or _who(), time.time() if since is None else since, me)
+        free = SLOTS[kind] - len(same)
+        if len(ahead) >= free:
+            pr = priority()
+            why.append(f"{len(ahead)} waiting ahead for the {kind} slot: " + '; '.join(
+                f"'{w['what']}' ({w['who']}" + (', priority from ' + pr['by'] if pr and w['who'] == pr['who'] else '')
+                + ")" for w in ahead) + ": wait in line (`run --wait`), or do lighter work")
     if mem_gb:
         free, limit, _ = memory()
         if mem_gb > free - RESERVE_GB:
@@ -246,9 +327,10 @@ _held = threading.local()
 
 
 @contextlib.contextmanager
-def slot(kind, what, est_s=None, mem_gb=0.0, who=None, force=False, threads=THREADS):
+def slot(kind, what, est_s=None, mem_gb=0.0, who=None, force=False, threads=THREADS, wait=None):
     """Hold a heavy-job slot while the block runs. Re-entrant: a job inside a job of this thread (a fit that
-    renders) runs in the slot it already holds. Raises MachineBusy with what to do when it may not start."""
+    renders) runs in the slot it already holds. Raises MachineBusy with what to do when it may not start; with
+    wait (seconds) it stands in line until it may, then raises only if the wait runs out."""
     if getattr(_held, 'depth', 0):
         _held.depth += 1
         try:
@@ -258,15 +340,38 @@ def slot(kind, what, est_s=None, mem_gb=0.0, who=None, force=False, threads=THRE
         return
     if kind not in SLOTS and kind != 'live':
         raise ValueError(f"kind is 'gpu', 'cpu' or 'live', not {kind!r}")
-    if kind == 'cpu' and not force:
-        cpu_load()                     # sample outside the board's lock (it takes CPU_SAMPLE_S); check() reuses it
+    who = who or _who()
+    me = psutil.Process()
+    since, wid, wpath = time.time(), None, None
+    deadline = since + float(wait) if wait else None
+    try:
+        while True:
+            if kind == 'cpu' and not force:
+                cpu_load()             # sample outside the board's lock (it takes CPU_SAMPLE_S); check() reuses it
+            with _board_lock():
+                why = '' if force or kind == 'live' else check(kind, mem_gb, who=who, since=since, me=wid)
+                if not why or not deadline or time.time() >= deadline:
+                    if why:
+                        raise MachineBusy(f"not starting {kind} job '{what}': {why}. Retry when that clears (the "
+                                          f"machine op shows the board), wait in line (`run --wait 30m`), do lighter "
+                                          f"work meanwhile, or pass force=True only if the user says so.")
+                    break
+                if wid is None:        # stand in line
+                    wid = f"{me.pid}_{int(since * 1000)}_{os.urandom(3).hex()}"
+                    os.makedirs(os.path.join(board_dir(), 'waiting'), exist_ok=True)
+                    wpath = os.path.join(board_dir(), 'waiting', wid + '.json')
+                    with open(wpath, 'w', encoding='utf8') as f:
+                        json.dump({'id': wid, 'kind': kind, 'what': what, 'who': who, 'pid': me.pid,
+                                   'pid_start': me.create_time(), 'since': since}, f)
+            time.sleep(WAIT_POLL_S)
+    finally:
+        if wpath:
+            try:
+                os.remove(wpath)
+            except OSError:
+                pass
     with _board_lock():
-        why = '' if force or kind == 'live' else check(kind if kind != 'live' else 'cpu', mem_gb)
-        if why:
-            raise MachineBusy(f"not starting {kind} job '{what}': {why}. Retry when that clears (the machine op "
-                              f"shows the board), do lighter work meanwhile, or pass force=True only if the user says so.")
-        me = psutil.Process()
-        job = {'kind': kind, 'what': what, 'who': who or _who(), 'pid': me.pid, 'pid_start': me.create_time(),
+        job = {'kind': kind, 'what': what, 'who': who, 'pid': me.pid, 'pid_start': me.create_time(),
                'started': time.time(), 'est_s': est_s, 'mem_gb': mem_gb, 'forced': bool(force)}
         # unique per slot: two slots taken in the same millisecond by one process overwrote each other
         path = os.path.join(board_dir(), 'jobs', f"{me.pid}_{int(job['started'] * 1000)}_{os.urandom(3).hex()}.json")
@@ -323,6 +428,14 @@ def board():
     js = jobs()
     L.append(f"heavy jobs ({len(js)}; slots: gpu {SLOTS['gpu']}, cpu {SLOTS['cpu']}, a live engine holds a cpu slot):")
     L += [f"  {_describe(j)}" for j in js] or ["  none"]
+    pr = priority()
+    if pr:
+        L.append(f"priority: {pr['who']} goes first in line until {time.strftime('%H:%M', time.localtime(pr['until']))}"
+                 f" (given by {pr['by']}" + (f": {pr['why']}" if pr.get('why') else '') + ")")
+    ws = waiters()
+    if ws:
+        L.append(f"waiting in line ({len(ws)}):")
+        L += [f"  {w['kind']} '{w['what']}' ({w['who']}, waiting {_ago(w['since'])})" for w in ws]
     for kind in ('gpu', 'cpu'):
         why = check(kind, _jobs=js)
         L.append(f"a new {kind} job: " + ('go' if not why else f"WAIT: {why}"))
@@ -340,10 +453,35 @@ def main(argv=None):
     r.add_argument('--est', default=None, help='expected duration: 10m, 600s, 1.5h (a bare number is minutes)')
     r.add_argument('--what', default=None, help='what it is, for the board')
     r.add_argument('--force', action='store_true', help='only when the user says so')
+    r.add_argument('--wait', nargs='?', const='30m', default=None,
+                   help='stand in line for the slot instead of being refused: a duration (default 30m)')
     r.add_argument('command', nargs=argparse.REMAINDER)
+    p = sub.add_parser('priority', help='the user gives a session first place in line: priority vox --for 3h --by "the user"')
+    p.add_argument('who', nargs='?', help="the session's name as the board shows it")
+    p.add_argument('--for', dest='for_', default='2h', help='how long: 30m, 3h (default 2h)')
+    p.add_argument('--by', default=None, help='who gave it (the user)')
+    p.add_argument('--why', default='', help='what it is for, for the board')
+    p.add_argument('--clear', action='store_true')
     a = ap.parse_args(argv)
     if hasattr(sys.stdout, 'reconfigure'):
         sys.stdout.reconfigure(errors='replace')
+    if a.cmd == 'priority':
+        if a.clear:
+            clear_priority()
+            print("priority cleared")
+            return 0
+        if not a.who:
+            pr = priority()
+            print(f"priority: {pr['who']} until {time.strftime('%H:%M', time.localtime(pr['until']))} (by {pr['by']})"
+                  if pr else "no priority in force")
+            return 0
+        try:
+            pr = set_priority(a.who, duration_s(a.for_), a.by, a.why)
+        except ValueError as e:
+            ap.error(str(e))
+        print(f"priority: {pr['who']} goes first in line until {time.strftime('%H:%M', time.localtime(pr['until']))} "
+              f"(given by {pr['by']}); the heat limit and the busy CPU still hold")
+        return 0
     if a.cmd != 'run':
         print(board())
         return 0
@@ -356,8 +494,12 @@ def main(argv=None):
     except ValueError as e:
         ap.error(str(e))
     try:
+        wait_s = duration_s(a.wait) if a.wait else None
+    except ValueError as e:
+        ap.error(str(e))
+    try:
         with slot(kind, a.what or ' '.join(cmd)[:80], est_s=est_s, mem_gb=a.mem,
-                  force=a.force, threads=None):
+                  force=a.force, threads=None, wait=wait_s):
             p = subprocess.Popen(cmd)
             try:
                 psutil.Process(p.pid).nice(psutil.BELOW_NORMAL_PRIORITY_CLASS if sys.platform == 'win32' else 10)

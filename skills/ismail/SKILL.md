@@ -158,7 +158,10 @@ nudges you, follow it.
   `machine_status` before anything that runs over a minute and wait when it says WAIT. Heavy ops (render, separate,
   mimic_measure, the fits, live_parity) take a slot themselves and refuse with the reason; anything outside ismail
   (Blender, whisper, demucs, a long script) runs through `python -m ismail.machine run --gpu|--cpu -- <command>` so
-  it takes one too; give `--est` a unit (`--est 10m`, `600s`) so the board tells others when you will be done. A hot GPU means the machine is hot, not that the CPU is free (they share the cooler). Never run
+  it takes one too; give `--est` a unit (`--est 10m`, `600s`) so the board tells others when you will be done.
+  `run --wait 30m` (or `slot(..., wait=)`) stands in line for a slot instead of being refused. Only the user gives
+  a session priority (`python -m ismail.machine priority <session> --for 3h --by "the user"`): it goes first in
+  line, and the heat limit still holds for it. A session never sets priority for itself. A hot GPU means the machine is hot, not that the CPU is free (they share the cooler). Never run
   two heavy jobs of your own at once. When another session holds the slot, do lighter work or ask the user. Size
   the job to the question: the smallest model that answers, 2-bar windows, one file at a time with a check between.
   Do not sleep-poll a long job: run it in the background and let the harness say when it ends, and never end a turn
