@@ -67,6 +67,17 @@
 - Library voices state their provenance in INFO (`measured` or `designed`).
 - `guide` opens with MEASURE FIRST.
 
+### What to reach for when
+
+- SKILL.md: "What to reach for when", one table from the situation to the op, reference or rule (the start of a
+  task and every compaction, measuring, real instruments, eye and blind exams, the person's words, sources and
+  credits, versions, the shared machine, live sets, sharing back). The tools say back what is missing; the table
+  says what to reach for.
+- README, "If you are an AI agent": measure first, then ask the person's senses with exams (an eye exam for a
+  direction, a blind exam to know when you are done, from one note up to the full mix).
+- blind-tests.md: why exams (the person's senses as data, their words into the lexicon) and climbing from the
+  smallest unit, since a test pitched too hard gives no direction.
+
 ### Sources and credits in the tools
 
 - `project_info` lists a song's sources: the recordings, videos and scores in its `ref/` folders, which of them

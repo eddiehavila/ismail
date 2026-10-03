@@ -98,6 +98,27 @@ Mix targets:       master <LUFS for the genre or reference>, peak -1 dBFS, limit
 
 Registers must not collide: at most one part per octave band doing sustained work. Every part needs its own rhythm; if two parts share a rhythm they should share a sound (layer them) or one should move.
 
+## What to reach for when
+
+ismail is built so the right move is the easy one: the tools say back what is missing (a part modeled on nothing,
+a source with no row, a set that ran out of runway), and this table says what to reach for. When a tool's reply
+nudges you, follow it.
+
+| when | reach for |
+|---|---|
+| a task starts, and after every compaction | `guide`; the song's `PROGRESS.md` and `HANDOFF.md` |
+| a number that can be measured (grid, swing, kit, key, levels) | the analysis ops, never a guess |
+| an instrument must sound real | an example first (`references/instruments.md`), then `mimic_measure` or a fit; `track_model` names its source |
+| the numbers plateau and you need a direction | an eye exam: lenses that each change one named thing (`references/blind-tests.md`) |
+| you think a sound is done | a blind exam, real vs yours, hidden: one note first, then phrases, then the mix |
+| the person names a quality ("boxy", "too clean") | `lexicon_note`, verbatim, then map it to what you change |
+| a recording, video or score comes in | a `ref/SOURCES.md` row before you use it; `credits` when the piece goes public |
+| a version of another piece | `project_new(derived_from=)`, and the objective in their words |
+| a job over a minute | `machine_status` first; `python -m ismail.machine run` for anything outside ismail |
+| a live set | a runway queued ahead; a guard on `live_status` (`SILENT ON AIR`, `RUNWAY ENDED`, `THIN`) |
+| a song sounds different live | `live_parity`, then the song's `HANDOFF.md` |
+| something you built would help others | the inclusion review (`references/development.md`), then a fork and a pull request |
+
 ## Where things are
 
 - `references/composition.md`: arranging and writing with ismail's notation: rhythm cells as step strings, harmony voicing, motif and answer, feel and phrasing for played parts (phrase placement, band feel, bends to chord tones), 8-bar variation, transitions, energy curves. Read when writing notes.

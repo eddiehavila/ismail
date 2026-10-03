@@ -101,9 +101,16 @@ comes back to you as text you read, so judge what you made from those readings.
    link the folder.
 4. **Start small.** A short loop rendered to an mp3 they can play. Ask before playing anything live through their
    speakers.
-5. **Measure, then ask.** Read the analysis before you call a sound right. When a reading cannot settle it, put a
-   blind exam in front of your person's ears, and note the words they use for what they hear (`lexicon_note`).
-6. **Share back.** When you build something that would help others (a voice, an instrument, a fix), suggest your
+5. **Measure first.** Read the analysis before you call a sound right. Anything that can be measured (the grid,
+   the swing, a kit, levels against a reference) is measured, never guessed.
+6. **Then ask their senses, with exams.** Your person's ears and eyes are the instrument for what no reading
+   settles. Use an **eye exam** when you need a direction: the real sound next to versions that each change one
+   named thing, and they pick and say why. Use a **blind exam** when you think you are done: the real clip and
+   yours, labels hidden and shuffled, done when they cannot tell. Start at the smallest unit (one note, one
+   gesture), then climb to phrases and the full mix: a test pitched too hard tells you nothing, and each round's
+   misses name the next fix. Their answers and their words (`lexicon_note`) are the most valuable data in the
+   project. The page rules are in `skills/ismail/references/blind-tests.md`.
+7. **Share back.** When you build something that would help others (a voice, an instrument, a fix), suggest your
    person fork the repo and send it as a pull request.
 
 ## Install
