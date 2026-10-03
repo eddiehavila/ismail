@@ -32,12 +32,16 @@ asks for it explicitly: read `references/development.md` first (it holds the mig
 ismail/                  the engine ("the engine" always means ismail/ on main)
 songs/                   git-ignored by the ismail repo, always: no song is ever committed to it
 songs/<slug>/            everything one song owns
+  PROGRESS.md            the deliverable, who and what matters most, what is locked, what is next in order, and
+                         the side tracks that must not take over: read at every start and after every compaction
   HANDOFF.md             what can migrate into ismail: elements, evidence, files, proposed ops, tests, skill text
   build.py               rebuilds proj/ (never deletes: an old proj/ moves to backups/)
   voices/                the song's voices, profiles and song-local engine modules (build.py copies them
                          into proj/voices/, where the engine looks)
   work/                  analysis, measurement and exam scripts, and their saved output
-  ref/                   reference audio (analysis only) and SOURCES.md (where from, licence)
+  ref/                   reference audio (analysis only) and SOURCES.md: one row for every recording, video,
+                         score or MIDI the song used, even only to measure (title, link, who made or played it,
+                         licence, what was measured from it, who approved the download, date)
   notes/                 the Session Sheet, feedback.md (the user's words, verbatim)
   exam/                  ear-test pages
   proj/                  the ismail project (generated)
@@ -112,6 +116,20 @@ Registers must not collide: at most one part per octave band doing sustained wor
 ## Non-negotiables
 
 - **Share what would help others.** When something built in a project works beyond it (a voice, an op, a fix, a scene) and the inclusion review passes (development.md: general, consent, licence, provenance), tell the person they can contribute it to ismail: a fork and a pull request, or a HANDOFF.md entry for the dev agent. Never publish for them.
+- **Provenance is kept, from the first download to the public page.** Before a source is used, it gets its row
+  in `ref/SOURCES.md`, measuring-only sources included. Every track says what it is modeled on (`track_model`;
+  fits record it themselves), so `project_info` shows no track as unstated by the end. A performance measured from
+  people (a player's phrasing, a community's dance) credits the players and the community, as well as whoever
+  filmed it. A version made from another piece says so (`project_new(derived_from=)`). When a piece goes public (a
+  page, a video, a release), its credits come from `SOURCES.md`: CC BY and CC BY-SA require them, and they are
+  how the people a sound came from are known. Source audio never goes into a render, so a credits page can say
+  the piece holds only measurements of it. Anything measured from the person needs their yes first.
+- **Long work stays on its deliverable.** Over days and compactions, summaries fill up with tool work and lose the
+  story first; one session invented a band member the story never had. Keep `PROGRESS.md` at the song root and
+  read it at the start of every session and after every compaction. Before designing anything for a story (a
+  character, a shot, a scene), reread the story and the storyboard. A tool is a side track unless it unblocks the
+  next step of the deliverable: when a session spends longer on a tool than on the piece, stop and go back to
+  `PROGRESS.md`.
 - **The person's words are data.** When they name a quality, a problem or a fix ("boxy", "too clean"), `lexicon_note` it verbatim before acting, map it once you know what it meant, and say things back their way (`lexicon_find`). Words about the work only, never their emotions. Every piece states its objective in their words (`project_set(objective=)`); a version made from another says so (`project_new(derived_from=)`).
 - **The machine is shared.** Several sessions render, measure and run Blender on one computer with one cooler. Call
   `machine_status` before anything that runs over a minute and wait when it says WAIT. Heavy ops (render, separate,
