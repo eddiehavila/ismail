@@ -471,3 +471,23 @@ def test_silence_on_air_is_said(eng):
     run(eng, 12.0)
     st = eng.cmd_status()
     assert 'SILENT ON AIR for' in st and 'nothing has sounded since bar' in st
+
+
+def test_runway_ended_and_a_thin_mix_are_said(eng, monkeypatch):
+    # M59: a set ran 10 min on one hat loop after its runway ran out; SILENT ON AIR never fired on it
+    import ismail.live.engine as E
+    monkeypatch.setattr(E, 'RUNWAY_ENDED_BARS', 2)
+    monkeypatch.setattr(E, 'THIN_HISTORY_S', 4)
+    monkeypatch.setattr(E, 'THIN_S', 3)
+    for k, p in (('k', 'C1'), ('s', 'D1'), ('h', 'F#1')):
+        eng.cmd_track(k, instrument={'type': {'k': 'kick', 's': 'snare', 'h': 'hat'}[k]})
+    eng.cmd_queue([{'track': 'k', 'lanes': {'C1': 'x...x...x...x...'}, 'at': 'next_bar', 'loop': 3},
+                   {'track': 's', 'lanes': {'D1': '....x.......x...'}, 'at': 'next_bar', 'loop': 3},
+                   {'track': 'h', 'lanes': {'F#1': 'x.x.x.x.x.x.x.x.'}, 'at': 'next_bar'}])        # the hat loops on
+    run(eng, 6.0)
+    st = eng.cmd_status()
+    assert 'RUNWAY ENDED' not in st and 'THIN' not in st
+    run(eng, 10.0)                                   # kick and snare are done; the hat plays on alone
+    st = eng.cmd_status()
+    assert 'RUNWAY ENDED' in st and 'h loop on unchanged' in st
+    assert 'THIN for' in st and 'only h sounding' in st and 'SILENT ON AIR' not in st
