@@ -30,6 +30,14 @@
   `live_start(follow_device=False)` keeps the old behaviour.
 - The handoff scanner skips `history_src/` backups.
 
+### The stage in the skill
+
+- `references/stage.md`: building a scene with a person inside it, from the Crossroads build: which surface for
+  which decision, eye exams for pictures, bodies and contact, contact with a person in a headset (every interaction
+  a sound, the person's names for things, a first-time tutorial one gesture at a time), shared-editing rules that
+  never lose their work (no save before the scene has loaded), agents first.
+- user-experience.md: when the person is inside the work. SKILL.md points to stage.md.
+
 ### Placement offsets
 
 - Sounds land by their start; music lands on an anchor. A note can now be nudged off its beat in milliseconds:
