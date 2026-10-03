@@ -2,6 +2,11 @@
 
 You cannot hear. Your metrics average over time, and they stop being useful exactly where "sounds fake" lives: inside single notes (the attack, how each partial decays, pitch movement, noise, micro-dynamics, timing). The user's ear is the only instrument that catches those things, so it has to be put to work efficiently. An ear test is a small local HTML page of clips built so that each answer is a measurement you can act on. Treat building it as sound engineering, not as a chore: in a guitar study the test page moved the result further than any fit.
 
+Exams are how the person's senses enter the work. Their answers are the data no metric gives: the eye exam turns
+"something is off" into a direction in their words, the blind exam says when you are done, and the words they use
+go into the lexicon (`lexicon_note`), so later rounds speak their language and their ear for the craft grows with
+yours.
+
 There are two kinds of test. Use both, in this order.
 
 | | eye exam (tuning) | blind exam (verification) |
@@ -21,6 +26,11 @@ Put the real sound next to lenses, versions that each change exactly ONE named, 
 Per trial, three clips of the same moment: **R** the recording, **A** my instrument with the recording's exact expression copied onto it (its pitch curve, filter or wah curve, level curve), **B** my instrument played by my player model (my own vibrato, bends, dynamics, effect moves). The two lenses separate the two questions: A failing means the instrument or rig is wrong; A passing while B fails means the performance is wrong. Hide which is which, shuffle per trial, and reveal the answers with scores and spectrogram strips only after the user submits.
 
 In a guitar study the blind exam went from 3 of 28 undetected to 20 of 22 in four rounds. Each round's misses named the next fix. The design rules below each cost a round when they were missing.
+
+**Climb from the smallest unit.** Start where a miss can be fixed: one note or gesture, then a phrase, then the part
+in the band, then the full mix. The guitar study's single-gesture trials climbed round by round. A full-mix blind
+test pitched too hard was told apart every time, round after round, and its misses never pointed at one thing to
+fix. A round the person always gets, or never gets, gives no direction: make the next one easier or harder.
 
 **Make the test fair, or it measures the wrong thing.**
 - **One gesture per clip, on every side.** Cut at the next onset. When the real clip ran on into the player's next notes, every trial was decided by that and the round was wasted.
