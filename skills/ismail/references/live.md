@@ -337,6 +337,26 @@ hole at the bass swap. Pick `bars` so the section starts on its downbeat hit.
 - **Recording a long set** takes disk: 24-bit stereo is ~16 MB a minute (~480 MB for 30 minutes). Check free
   space first, or skip the take and use `live_listen` on the live output.
 
+## Streams and controls: the set inside a scene
+
+A live set can play inside a VR stage or any page, and the stage's objects can play it back.
+
+- **Streams.** `live_stream(name='bus:lucy')` gives a localhost URL that streams that bus (or `master`, or
+  `deck:A`) as raw PCM, int16 stereo at 44.1 kHz, with its own safety limiter. Route the tracks an object should
+  play to their own bus (`live_track(output='lucy')`) so each object plays its own sound at its own place; one master
+  stream would put everything in one spot. The engine listens on localhost only: a page on a headset reaches it
+  through the page's own server, which relays the stream (same origin, https). A listener that falls a second behind
+  loses its oldest audio and never slows the set. A stream plays sound wherever it is received: tell the user
+  before anything starts.
+- **Controls.** A knob turned in VR must answer in milliseconds, which a model cannot. So map it once and let the
+  engine apply it: `live_map(control='lucy.volume', target='bus:lucy', param='volume_db', range=[-40, 0])`,
+  `live_map(control='lucy.tone', target='lead', param='fx:filter.cutoff', range=[200, 8000], curve='log')`, a power
+  switch with `curve='switch'` and `range=[-120, 0]`. The stage (or you) sends `live_control(control, value)` with
+  0..1; the move applies at once. You watch the moves and act at phrase scale: a new song on Lucy, a new mapping.
+- **Recording controls.** Every move is logged by bar. `live_controls` reads them back as `[bar, value]` points,
+  ready to become `automation_set` lanes in a studio project: a take's knob moves land in the score, on the song's
+  clock, and replay the same way in a render and a video.
+
 ## Playing for a screen recording
 
 When the session itself is the show (the viewer sees your turns and hears the set):

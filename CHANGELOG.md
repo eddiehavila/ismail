@@ -30,6 +30,17 @@
   `live_start(follow_device=False)` keeps the old behaviour.
 - The handoff scanner skips `history_src/` backups.
 
+### Live: stream to a scene, controls
+
+- `live_stream`: the master, a bus or a deck as raw PCM (int16 stereo, 44.1 kHz) over a GET on the engine's
+  localhost port, each with its own safety limiter; a listener that falls behind loses its oldest audio and never
+  slows the set. For a VR stage that plays each object's own bus at its place (relayed by the page's server).
+- `live_map`, `live_control`, `live_controls`: a named control (a knob, slider or switch) mapped once to a track,
+  bus or deck volume, a deck EQ or an effect param, with linear, log, switch or raw scaling; moves apply in the
+  engine at once and are logged by bar, and read back as `[bar, value]` automation points.
+- A streamed bus or deck that goes quiet sends silence instead of nothing, so every listener stays in step (the
+  Crossroads stage had to fill the gaps itself), and `live_stream(project, name=...)` works (the op's `name` clashed
+  with the dispatcher's).
 ### The stage in the skill
 
 - `references/stage.md`: building a scene with a person inside it, from the Crossroads build: which surface for
