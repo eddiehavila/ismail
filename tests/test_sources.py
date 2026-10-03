@@ -61,7 +61,9 @@ def test_credits_are_written_from_the_rows_and_the_models(tmp_path):
     assert text.startswith('# Forest: credits') and 'contains none of the audio below' in text
     assert '| species | file | licence | recordist | source |' in text and 'approved' not in text
     assert 'https://commons.wikimedia.org/wiki/File%3AWren_XC1.mp3' in text            # links stay whole
-    assert '- abc | 4:50 | Paolo Cogliati | SONKARI / a panpipe | https://www.youtube.com/watch?v=abc' in text
+    assert 'SONKARI' not in text                     # no part names the video: consulted, left out (M61)
+    assert '- abc | 4:50 | Paolo Cogliati | SONKARI / a panpipe | https://www.youtube.com/watch?v=abc' in \
+        sources.credits_md(proj, api._load(proj).d, consulted=True)[0]
     assert '| measured | modeled on ref/birds/Wren_XC1.mp3 (a call profile) by song script | wren |' in text
     assert '| designed | designed | pad |' in text and '| hum |' not in text
     with pytest.raises(OpError, match='overwrite=True'):
@@ -96,3 +98,41 @@ def test_track_model_takes_a_file_in_the_songs_ref_folder(tmp_path):
         OPS['track_model'](proj, 'hum', on='ref/birds/missing.mp3')
     with pytest.raises(OpError, match='no reference'):
         OPS['track_model'](proj, 'hum', on='ref:drums')
+
+
+def test_credits_name_only_the_sources_the_piece_uses(tmp_path):
+    # M61: credits listed every SOURCES row, used or only consulted, and printed a video-id list twice
+    root, proj = song(tmp_path)
+    (root / 'ref' / 'village' / 'SOURCES.md').write_text(
+        "# Village\n\n## Video references\n\n| id | by | title | in the song |\n|---|---|---|---|\n"
+        "| abc123xyz | Paolo Cogliati | SONKARI | **in the song**: the player's phrases |\n"
+        "| zzz999yyy | Someone | Another dance | not yet (measured, unused) |\n", encoding='utf8')
+    (root / 'ref' / 'village' / 'SOURCES.txt').write_text(
+        "abc123xyz | 4:50 | Paolo Cogliati | SONKARI | https://www.youtube.com/watch?v=abc123xyz\n"
+        "zzz999yyy | 2:00 | Someone | Another dance | https://www.youtube.com/watch?v=zzz999yyy\n", encoding='utf8')
+    d = api._load(proj).d
+    text, warn = sources.credits_md(proj, d)
+    assert 'Wren_XC1.mp3' in text.split('## How each part')[0]          # named by the wren part's model
+    assert 'Potoo_XC2.ogg' not in text                                  # consulted only
+    assert '### Video references' in text and 'abc123xyz | Paolo Cogliati | SONKARI |' in text
+    assert 'zzz999yyy' not in text and 'in the song' not in text.split('## How each part')[0].lower()
+    assert '- abc123xyz' not in text                                    # the plain id list repeats the table
+    assert any('consulted ones left out' in w for w in warn) and any('repeat a table' in w for w in warn)
+    text, _ = sources.credits_md(proj, d, consulted=True)
+    also = text.split('## Also consulted')[1].split('## How each part')[0]
+    assert 'Potoo_XC2.ogg' in also and 'zzz999yyy' in also and 'abc123xyz' not in also
+
+
+def test_a_part_made_from_several_sources(tmp_path):
+    root, proj = song(tmp_path)
+    out = OPS['track_model'](proj, 'hum', on=['ref/birds/Potoo_XC2.ogg (quiet stretches)', 'ref/birds/Wren_XC1.mp3'])
+    assert 'modeled on ref/birds/Potoo_XC2.ogg (quiet stretches) + ref/birds/Wren_XC1.mp3' in out
+    assert api._load(proj).d['tracks']['hum']['model']['on'] == ['ref/birds/Potoo_XC2.ogg (quiet stretches)',
+                                                                 'ref/birds/Wren_XC1.mp3']
+    text, _ = sources.credits_md(proj, api._load(proj).d)
+    assert 'Potoo_XC2.ogg | CC BY 4.0' in text.split('## How each part')[0]   # now used, by the hum part
+    with pytest.raises(OpError, match='stands alone'):
+        OPS['track_model'](proj, 'hum', on=['designed', 'ref/birds/Wren_XC1.mp3'])
+    with pytest.raises(OpError, match='not found'):
+        OPS['track_model'](proj, 'hum', on=['ref/birds/Wren_XC1.mp3', 'ref/birds/nope.mp3'])
+    assert 'modeled on ref/birds' in OPS['track_model'](proj, 'pad', on='ref/birds')     # a folder of takes
