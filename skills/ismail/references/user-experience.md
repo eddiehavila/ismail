@@ -73,6 +73,12 @@ a view of the stage) has been the fastest route to a good result. The rules that
 - Log every answer verbatim in the song's `notes/feedback.md`, carry a lock into the build as a constant, and note
   any new words in the lexicon.
 
+## When the person is inside the work
+
+In a scene, a headset or a live set, the person cannot see your terminal. `stage.md` has the practice: answer at
+once and briefly, capture what they point at when they speak, show which version runs, address every note, and
+choose the surface (image sheet, stage, render, page, panel) where each decision is fastest for them to make.
+
 ## Their intent: objectives
 
 Every piece states what it is for, in the person's words: `project_set(objective="keep a listener asleep for 3

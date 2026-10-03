@@ -41,6 +41,13 @@
 - A streamed bus or deck that goes quiet sends silence instead of nothing, so every listener stays in step (the
   Crossroads stage had to fill the gaps itself), and `live_stream(project, name=...)` works (the op's `name` clashed
   with the dispatcher's).
+### The stage in the skill
+
+- `references/stage.md`: building a scene with a person inside it, from the Crossroads build: which surface for
+  which decision, eye exams for pictures, bodies and contact, contact with a person in a headset (every interaction
+  a sound, the person's names for things, a first-time tutorial one gesture at a time), shared-editing rules that
+  never lose their work (no save before the scene has loaded), agents first.
+- user-experience.md: when the person is inside the work. SKILL.md points to stage.md.
 
 ### Placement offsets
 
