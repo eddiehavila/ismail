@@ -229,8 +229,10 @@ air; only you hear it, through `live_listen(deck=...)`.
 1. `live_load(deck='B', song=<ismail project folder>, bars=[a, b])` puts a song (or a section) on deck B: its
    tracks, effects and buses come over as `B.<name>`, its notes play at the house tempo (re-rendered, not
    stretched), with its automation (effect sweeps, volume curves, instrument filter and pitch moves, the master
-   fade) and its group buses. It is cued while another deck is on air. The reply lists what did not come over
-   (placed audio clips, the master effect chain, effects whose source track was muted). A track with instrument
+   fade), its group buses and its master chain (the limiter runs on the deck). It is cued while another deck is
+   on air, and a cued deck plays from `at`: a song loaded early with `at='next_bar'` is bars into itself when it
+   comes in, so load it with `at='bar:<the transition's bar>'` to bring it in from its top. The reply lists what
+   did not come over (placed audio clips, effects whose source track was muted). A track with instrument
    automation renders its whole section as one event: load the deck several bars before it plays. A performer
    voice's studio lanes (`inst.lane.bend` ...) arrive as its clip's `expr`, so a guitar keeps its bends; other
    `inst.*` automation on a performer, and `inst.lane.*` on a voice that is not one, stay behind (listed under
@@ -246,7 +248,8 @@ air; only you hear it, through `live_listen(deck=...)`.
    Key-match with `live_deck(transpose=...)` (drums stay).
 3. `live_transition(to='B', style=..., bars=16, at='next_8')` queues the whole mix: `blend` (B up without bass,
    bass swap half-way, A out), `bass_swap`, `filter`, `cut`. It starts at the first boundary after B is
-   playing, puts B on air, and stops A when it ends. The reply is the timeline; `live_status` shows each deck's
+   playing, puts B on air, and when it ends stops A and takes it off air (cued), ready for the next `live_load`.
+   `live_status` says `SILENT ON AIR` when a set that has played sounds nothing for 10 s. The reply is the timeline; `live_status` shows each deck's
    fader and eq as they move.
 4. Watch `live_status`'s mixer load: two full songs is about 50%; above ~70% risks dropouts.
 

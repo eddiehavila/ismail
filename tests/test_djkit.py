@@ -70,3 +70,22 @@ def test_set_logs_sections_levels_and_boundaries(tmp_path):
     assert len(ops.calls[-1]['moves']) == 3
     log = (tmp_path / 'set' / 'setlog.md').read_text(encoding='utf8')
     assert 'queue [s02_house]' in log and 'moves (3)' in log
+
+
+def test_a_gap_brings_each_track_back_to_its_level(tmp_path):
+    # M51: a set ran its tracks at +4..+8 dB on the gain gap uses, and every drop came back at 0 dB, under its build
+    assert K.gap(['kick'], 9)[1]['params'] == {'gain_db': 0.0}
+    g = K.gap(['kick', 'bass'], 9, level_db={'kick': 6})
+    assert g[1]['params'] == {'gain_db': 6} and g[3]['params'] == {'gain_db': 0.0}
+    ops = FakeOps()
+    ops['live_track'] = lambda P, name, **kw: f"track {name}"
+    S = K.Set(str(tmp_path), ops=ops)
+    S.track('bass', instrument='preset:bass', fx=K.with_gain([]))
+    S.track('lead', instrument='preset:pad', fx=[{'type': 'gain', 'gain_db': 3}])
+    S.fx('kick', 'gain', {'gain_db': 5})
+    S.moves([K.sweep('bass', 'gain', 'gain_db', 8, 4, 12)])
+    S.gap(['kick', 'bass', 'lead', 'hat'], 17)
+    back = {m['target']: m['params']['gain_db'] for m in ops.calls[-1]['moves'] if m['at'] == 'bar:17'}
+    assert back == {'kick': 5.0, 'bass': 8.0, 'lead': 3.0, 'hat': 0.0}
+    S.gap(['bass'], 25)                                         # the last gap's own moves leave the level as it was
+    assert ops.calls[-1]['moves'][1]['params'] == {'gain_db': 8.0}

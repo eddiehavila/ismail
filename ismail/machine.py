@@ -198,8 +198,25 @@ def _describe(job):
     eta = ''
     if job.get('est_s'):
         left = job['started'] + job['est_s'] - time.time()
-        eta = f", expected done in {left / 60:.0f} min" if left > 0 else ", past its estimate"
-    return f"{job['kind']} '{job['what']}' ({job['who']}, pid {job['pid']}, {_ago(job['started'])}{eta})"
+        eta = f", expected done in {left / 60:.0f} min" if left > 0 else f", {-left / 60:.0f} min past its estimate"
+    what = str(job['what']).strip().splitlines() or ['']
+    what = what[0] + (' ...' if len(what) > 1 else '')          # a `python -c` job shows its first line
+    return f"{job['kind']} '{what}' ({job['who']}, pid {job['pid']}, {_ago(job['started'])}{eta})"
+
+
+def duration_s(text):
+    """'10m', '600s', '1.5h' -> seconds. A bare number is minutes; above 240 it is refused, because a number of
+    seconds passed as minutes put a 10-minute render on the board as 585 min and a peer thought a job had hung."""
+    t = str(text).strip().lower()
+    unit = {'s': 1, 'm': 60, 'h': 3600}.get(t[-1:]) if t[-1:].isalpha() else None
+    try:
+        v = float(t[:-1] if unit else t)
+    except ValueError:
+        raise ValueError(f"--est {text!r}: give a duration like 10m, 600s or 1.5h")
+    if unit is None and v > 240:
+        raise ValueError(f"--est {text}: a bare number is minutes ({v / 60:.1f} h). If you meant seconds, "
+                         f"write --est {t}s; if you meant minutes, write --est {t}m")
+    return v * (unit or 60)
 
 
 def check(kind, mem_gb=0.0, _jobs=None):
@@ -320,7 +337,7 @@ def main(argv=None):
     k.add_argument('--gpu', action='store_true')
     k.add_argument('--cpu', action='store_true')
     r.add_argument('--mem', type=float, default=0.0, help='expected peak memory, GB')
-    r.add_argument('--est', type=float, default=None, help='expected minutes')
+    r.add_argument('--est', default=None, help='expected duration: 10m, 600s, 1.5h (a bare number is minutes)')
     r.add_argument('--what', default=None, help='what it is, for the board')
     r.add_argument('--force', action='store_true', help='only when the user says so')
     r.add_argument('command', nargs=argparse.REMAINDER)
@@ -335,7 +352,11 @@ def main(argv=None):
         ap.error('run needs a command after --')
     kind = 'gpu' if a.gpu else 'cpu'
     try:
-        with slot(kind, a.what or ' '.join(cmd)[:80], est_s=a.est * 60 if a.est else None, mem_gb=a.mem,
+        est_s = duration_s(a.est) if a.est else None
+    except ValueError as e:
+        ap.error(str(e))
+    try:
+        with slot(kind, a.what or ' '.join(cmd)[:80], est_s=est_s, mem_gb=a.mem,
                   force=a.force, threads=None):
             p = subprocess.Popen(cmd)
             try:

@@ -90,19 +90,21 @@ class Deck:
         self.ms = 0.0
         self.air = np.zeros((2, int(60 * SR)), dtype=np.float32)
         self.song = None                # what live_load put here: {'name', 'bars', 'tracks'}
+        self.master = None              # the song's master chain (compressor, limiter), run on the deck's sum
         self.tp = []                    # [(beat, semitones)]: transpose from that beat on
         self.quiet = 0                  # samples since the deck last had input (dormant when long)
         self.held = None                # (bar line beat, first bar beat, 'bar N'): cued until that bar is rendered
 
-    def describe(self, level=True, values=None):
+    def describe(self, level=True, values=None, cue=None):
+        """cue: the state to show when a change is already scheduled (the reply to live_deck(cue=...))."""
         v = values or self.values
 
         def band(b):
             db = v[b + '_db']
             return f"{b[0].upper()} " + ('KILL' if db <= KILL_DB else f"{db:+g}")
         fader = 'off' if v['volume_db'] <= SILENT_DB else f"{v['volume_db']:+g} dB"
-        state = 'CUE (off air)' if self.cue else 'on air'
-        if self.held:
+        state = 'CUE (off air)' if (self.cue if cue is None else cue) else 'on air'
+        if self.held and cue is None:
             state = f"HELD off air: on air at {self.held[2]} if that whole bar is rendered by then, else a bar later"
         s = (state + f" | fader {fader} | eq "
              + ' '.join(band(b) for b in ('low', 'mid', 'high')) + f" | filter {v['filter']:+.2f}"
@@ -236,6 +238,7 @@ def read_song(path, deck, bars, house_bpb, performers=()):
     kept = {t['track'] for t in tracks} | {b[0] for b in buses}
     song = {'name': d.get('name') or os.path.basename(root.rstrip('/\\')), 'bars': [b0, b1],
             'bpm': d.get('bpm'), 'root': root, 'tracks': [t['track'] for t in tracks],
+            'master_fx': _rename_fx((d.get('master') or {}).get('fx'), deck, tnames),
             'automation': {k: v for k, v in auto.items() if k.split(':', 1)[1] in kept}, 'beats': [beat0, beat1]}
     return song, buses, tracks, clips, skipped
 
