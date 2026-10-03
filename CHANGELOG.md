@@ -67,6 +67,19 @@
 - Library voices state their provenance in INFO (`measured` or `designed`).
 - `guide` opens with MEASURE FIRST.
 
+### Sources and credits in the tools
+
+- `project_info` lists a song's sources: the recordings, videos and scores in its `ref/` folders, which of them
+  have a row in a SOURCES file, and rows without a licence or an author. `render` names files with no row. Stems,
+  separations and analysis projects are skipped; a video's id in a SOURCES row covers its download and the wav
+  made from it.
+- `credits` (new op, 98 tools) writes `CREDITS.md` at the song root from the SOURCES tables (approval, local path,
+  date and note columns left out), each part's model grouped by source, and the lineage. It says whether the piece
+  plays recorded audio (imported samples, audio clips) or holds only measurements, and lists what it could not
+  credit.
+- `track_model(on='ref/birds/x.mp3')` takes a file in the song's `ref/` folder: any `on` starting with "ref" was
+  read as the project reference and refused, and paths were looked for only under `proj/`.
+
 ### Skill: provenance, the deliverable, the machine-aware performer
 
 - SKILL.md: provenance is kept from the first download to the public page. Every source a song uses, measuring-only

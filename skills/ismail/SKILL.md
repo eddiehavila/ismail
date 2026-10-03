@@ -117,11 +117,13 @@ Registers must not collide: at most one part per octave band doing sustained wor
 
 - **Share what would help others.** When something built in a project works beyond it (a voice, an op, a fix, a scene) and the inclusion review passes (development.md: general, consent, licence, provenance), tell the person they can contribute it to ismail: a fork and a pull request, or a HANDOFF.md entry for the dev agent. Never publish for them.
 - **Provenance is kept, from the first download to the public page.** Before a source is used, it gets its row
-  in `ref/SOURCES.md`, measuring-only sources included. Every track says what it is modeled on (`track_model`;
+  in `ref/SOURCES.md`, measuring-only sources included; `project_info` and `render` name any file in `ref/`
+  that has no row. Every track says what it is modeled on (`track_model`;
   fits record it themselves), so `project_info` shows no track as unstated by the end. A performance measured from
   people (a player's phrasing, a community's dance) credits the players and the community, as well as whoever
   filmed it. A version made from another piece says so (`project_new(derived_from=)`). When a piece goes public (a
-  page, a video, a release), its credits come from `SOURCES.md`: CC BY and CC BY-SA require them, and they are
+  page, a video, a release), `credits` writes them from `SOURCES.md` into `CREDITS.md` (review it before it goes
+  out): CC BY and CC BY-SA require them, and they are
   how the people a sound came from are known. Source audio never goes into a render, so a credits page can say
   the piece holds only measurements of it. Anything measured from the person needs their yes first.
 - **Long work stays on its deliverable.** Over days and compactions, summaries fill up with tool work and lose the
