@@ -131,3 +131,68 @@ def test_the_board_shows_a_python_c_job_by_its_first_line_and_how_late_it_runs()
            'started': time.time() - 600, 'est_s': 300}
     d = machine._describe(job)
     assert "'python -c import x ...'" in d and '\n' not in d and '5 min past its estimate' in d
+
+
+def test_priority_from_the_user_puts_a_session_first_in_line_and_heat_still_holds(board, monkeypatch):
+    # M63 (vox, the user's words): finish the voice exams first; --force skips the heat limit, so it is not the answer
+    import threading
+    import time
+    monkeypatch.setattr(machine, 'WAIT_POLL_S', 0.05)
+    with pytest.raises(ValueError, match='the user'):
+        machine.set_priority('vox', 3600, by='')
+    machine.set_priority('vox', 3600, by='the user', why='finish the voice exams')
+    assert machine.priority()['who'] == 'vox'
+    got, errors = [], []
+
+    def take(who, what):
+        machine._held.depth = 0
+        try:
+            with machine.slot('gpu', what, who=who, wait=10):
+                got.append(who)
+        except machine.MachineBusy as e:
+            errors.append(str(e))
+    with machine.slot('gpu', 'demucs stems', who='crossroads'):
+        machine._held.depth = 0
+        bg = threading.Thread(target=take, args=('tambopata', 'render draft 5'))
+        bg.start()
+        time.sleep(0.3)                                   # tambopata is in line first
+        vx = threading.Thread(target=take, args=('vox', 'whisper small.en'))
+        vx.start()
+        time.sleep(0.3)
+        line = machine.waiters()
+        assert [w['who'] for w in line] == ['vox', 'tambopata']             # priority first, then arrival
+        b = machine.board()
+        assert 'priority: vox goes first in line' in b and 'given by the user: finish the voice exams' in b
+        assert 'waiting in line (2)' in b
+        assert 'slots are full' in machine.check('gpu', who='crossroads')
+        machine._held.depth = 1
+    vx.join(5)
+    bg.join(5)
+    assert got == ['vox', 'tambopata'] and not errors and machine.waiters() == []
+    # a job that does not wait yields to a waiter ahead of it, with the reason (the slot is free here)
+    me = __import__('psutil').Process()
+    os.makedirs(board / 'waiting', exist_ok=True)
+    (board / 'waiting' / 'w1.json').write_text(json.dumps({'id': 'w1', 'kind': 'gpu', 'what': 'whisper', 'who': 'vox',
+                                                           'pid': me.pid, 'pid_start': me.create_time(),
+                                                           'since': time.time()}), encoding='utf8')
+    why = machine.check('gpu', who='tambopata')
+    assert "1 waiting ahead for the gpu slot: 'whisper' (vox, priority from the user)" in why
+    assert machine.check('gpu', who='vox', me='w1') == ''                 # vox itself is not behind its own place
+    os.remove(board / 'waiting' / 'w1.json')
+    # the heat limit holds for the priority session too
+    monkeypatch.setattr(machine, 'gpu', lambda: dict(COOL, temp=88.0, reasons=0x0))
+    assert '88 C' in machine.check('gpu', who='vox')
+    machine.clear_priority()
+    assert machine.priority() is None
+
+
+def test_an_expired_priority_is_gone_and_the_cli_sets_one(board):
+    machine.set_priority('vox', -1, by='the user')
+    assert machine.priority() is None
+    env = dict(os.environ, ISMAIL_MACHINE_DIR=str(board))
+    out = subprocess.run([sys.executable, '-m', 'ismail.machine', 'priority', 'vox', '--for', '3h', '--by', 'the user'],
+                         capture_output=True, text=True, env=env, timeout=60)
+    assert out.returncode == 0 and 'vox goes first in line until' in out.stdout
+    out = subprocess.run([sys.executable, '-m', 'ismail.machine', 'priority', 'vox', '--for', '3h'],
+                         capture_output=True, text=True, env=env, timeout=60)
+    assert out.returncode != 0 and 'the user' in out.stderr
