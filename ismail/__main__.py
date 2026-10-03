@@ -6,6 +6,9 @@
   python -m ismail -p song notes_read '{"track": "bass", "bars": [1, 4]}'
   python -m ismail -p song render bars=[1,8] stems=true
   python -m ismail -p song batch @edits.json      (file holds {"ops": [...]} or a bare list)
+  python -m ismail mcp                       run the MCP server (stdio)
+
+Installed from PyPI, `ismail` is the same command: `ismail ops`, `ismail -p song render`, `ismail mcp`.
 """
 import inspect
 import json
@@ -44,6 +47,10 @@ def main(argv):
     if not argv or argv[0] in ('-h', '--help'):
         print(__doc__)
         return 0
+    if argv[0] == 'mcp':
+        from .mcp_server import main as serve
+        serve()
+        return 0
     if argv[0] == 'ops':
         for name, fn in OPS.items():
             print(f"{name:<18} {(fn.__doc__ or '').strip().splitlines()[0]}")
@@ -77,5 +84,9 @@ def main(argv):
         return 1
 
 
-if __name__ == '__main__':
+def cli():
     sys.exit(main(sys.argv[1:]))
+
+
+if __name__ == '__main__':
+    cli()

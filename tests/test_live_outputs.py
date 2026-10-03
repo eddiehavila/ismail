@@ -43,8 +43,12 @@ def test_a_bus_streams_on_its_own_and_the_master_streams_everything(eng):
     a, m = pcm(lucy.get(0.1)), pcm(master.get(0.1))
     assert len(a) > 0.8 * SR and len(m) > 0.8 * SR
     assert np.max(np.abs(a)) > 0.01 and np.max(np.abs(m)) > 0.01
-    # the kick is not on lucy: lucy's stream has the pluck only, so it is quieter than the master at the kicks
-    assert np.sqrt(np.mean(a ** 2)) < np.sqrt(np.mean(m ** 2))
+    # the kick is not on lucy: lucy's stream has the pluck only, so it has next to no energy under 100 Hz where the
+    # master has the kicks (a loudness comparison flaked: the master's trim and the window's alignment move it)
+    def low(x):
+        f = np.fft.rfftfreq(len(x), 1 / SR)
+        return float(np.sum(np.abs(np.fft.rfft(x.mean(1))[(f > 30) & (f < 100)]) ** 2))
+    assert low(a) < 0.1 * low(m)
     assert np.max(np.abs(a)) <= 1.0
     s = eng.cmd_stream('bus:lucy')
     assert s['path'] == '/stream?name=bus:lucy' and s['format'] == 's16le' and s['listening'] == 1

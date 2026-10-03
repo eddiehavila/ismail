@@ -40,6 +40,13 @@ from .timeline import EPS, QueueError, Timeline, fmt_bar
 BLOCK = 1024
 QUIET = 1e-6            # a path whose input stops and whose output stays below this goes dormant
 DORMANT_S = 0.5
+SOUND_FLOOR = 1e-4      # -80 dBFS: the mix made a sound (silence on air is measured against it)
+SILENT_ON_AIR_S = 10.0  # a set that has played and then sounds nothing this long says so in live_status
+RUNWAY_ENDED_BARS = 8   # nothing new scheduled for this many bars: live_status says RUNWAY ENDED
+THIN_TRACK_MS = 1e-5    # -50 dBFS mean square: a track counts as sounding above it
+THIN_DB = 20.0          # the mix this far under the set's usual level (its fuller moments) is thin
+THIN_S = 30             # ... for this many seconds in a row before live_status says THIN
+THIN_HISTORY_S = 60     # seconds of sound the set needs behind it before thinness means anything
 DORMANT_NOISY_S = 8.0     # a path that hisses (amp, tape) keeps hissing through rests this long, as in the studio
 AHEAD_S = 0.5           # finished audio kept ahead of the device
 HORIZON_S = 8.0         # how far ahead events are sent to render (slow voices need the head start)
@@ -160,6 +167,10 @@ class Engine:
         self.seq = 0
         self.pos = 0                    # samples mixed
         self.played = 0                 # samples handed to the device
+        self.sounded = None             # the mix position the set last made a sound at (silence on air)
+        self.levels = collections.deque(maxlen=600)   # per second: (pos, mix dB, tracks sounding, one of them)
+        self._lvl = [0.0, 0]            # the second being summed: energy, samples
+        self.runway_out = None          # the mix position the runway ran out (nothing new scheduled) at
         self.safety = Safety(SR)
         self.air = np.zeros((2, int(AIR_S * SR)), dtype=np.float32)
         self.fade = None                # (start gain, samples left, total) when stopping
@@ -430,11 +441,13 @@ class Engine:
                         g = self.meta[c.id]['groups'][ei]
                         tr = self.tracks[c.track]
                         extra = {'_bpb': self.bpb}
+                        wrapped = False
                         if isinstance(g, _Span):
                             # a performer's bar chunk: the notes before it render as context and are dropped
                             t0, ns, chunk = self._chunk(c, ei, k)
                             span = max(s + d for s, _, d, _ in ns) - t0
                             extra['_chunk'] = chunk
+                            wrapped = self._variant(c, ei, k)[0]
                         else:
                             ns = [c.notes[j] for j in g]
                             t0 = ns[0][0]
@@ -445,7 +458,10 @@ class Engine:
                         expr = None
                         if tr['inst'].get('performer'):
                             expr = self._event_expr(c, t0, span)
-                            extra['_beat0'] = c.beat0 + t0       # where it sits in the song: keyed variation
+                            # where it sits in the song: keyed variation. A wrapped chunk's context is the previous
+                            # pass, at negative clip beats: key it as pass 2, so a voice never sees a negative song
+                            # time and every pass after the first shares one render
+                            extra['_beat0'] = c.beat0 + t0 + (c.length if wrapped else 0.0)
                         iauto = self._event_iauto(tr, t0)
                         ck = (c.track, tr['gen'], round(lead, 6),
                               tuple((round(a, 6), m, round(d, 6), v) for a, m, d, v in notes_s),
@@ -677,7 +693,11 @@ class Engine:
                 continue
             if self.tap is not None:
                 self.tap('deck:' + dn, p0, deck_in[dn], G.LAT_BUDGET)
-            y = dk.strip.process(deck_in[dn], {k: self._deck_param(dn, k, p0, n) for k in D.PARAMS})
+            x = deck_in[dn]
+            if dk.master is not None:
+                # the song's own master chain, as in its studio render (live_parity compares the sum before it)
+                x = dk.master.process(x, self._blocks('master:' + dn, dk.master, p0, n, post, onsets))
+            y = dk.strip.process(x, {k: self._deck_param(dn, k, p0, n) for k in D.PARAMS})
             if self.hub.wants('deck:' + dn):
                 streamed['deck:' + dn] = y.copy()
             dk.quiet = 0 if dn in deck_fed else dk.quiet + n
@@ -696,6 +716,12 @@ class Engine:
             fade = np.linspace(g0, g1, n)
             master *= fade
             self.fade = (max(0, left - n), total)
+        if np.max(np.abs(master)) > SOUND_FLOOR:
+            self.sounded = p1
+        self._lvl[0] += float(np.sum(master * master))
+        self._lvl[1] += n
+        if self._lvl[1] >= SR:
+            self._second(p1, tracks)
         y = self.safety.process(master).astype(np.float32)
         self.hub.push('master', y, limited=True)
         for name, s in streamed.items():
@@ -1487,7 +1513,8 @@ class Engine:
                     dk.cue = c
                 self._swap_at(s0 + G.LAT_BUDGET, flip)              # deck audio runs the path budget behind
                 msg.append('cued (off air)' if cue else 'on air')
-            return f"deck {deck} ({when}): " + (', '.join(msg) or 'unchanged') + f"\n  {dk.describe(False)}"
+            return f"deck {deck} ({when}): " + (', '.join(msg) or 'unchanged') + \
+                f"\n  {dk.describe(False, cue=None if cue is None else bool(cue))}"
 
     def _deck_automation(self, info, start, loop):
         """A loaded song's automation as ramps from `start` (house beats): fx params on the effect's schedule, track
@@ -1566,6 +1593,14 @@ class Engine:
             self.cmd_track(t['track'], instrument=t['instrument'], volume_db=t['volume_db'], pan=t['pan'],
                            fx=t['fx'] or None, sends=t['sends'] or None, deck=deck, output=t['output'],
                            root=t['root'], warm=False)
+        master = None
+        if info.get('master_fx'):
+            try:
+                master = self._chain(info['master_fx'], f"deck {deck}'s master", 1.0)
+            except LiveError as e:
+                skipped['master chain'] = [str(e)]
+        with self.lock:
+            dk.master = master
         with self.lock:
             b0 = info['beats'][0]
             lane_note, deck_expr = [], {}
@@ -1687,7 +1722,14 @@ class Engine:
                      for k, t in self.tracks.items() if t['deck'] == from_deck]
             if stops:
                 self.cmd_queue(stops)
-                lines.append(f"  {fmt_bar(beat + L, self.bpb)}: deck {from_deck}'s tracks stop (tails ring out)")
+                lines.append(f"  {fmt_bar(beat + L, self.bpb)}: deck {from_deck}'s tracks stop (tails ring out) "
+                             f"and it goes off air (cued): load the next song onto it")
+            with self.lock:
+                old = self.decks[from_deck]
+
+                def off_air(dk=old):
+                    dk.cue = True
+                self._swap_at(self.sample(beat + L) + G.LAT_BUDGET, off_air)
         return '\n'.join(lines)
 
     def _event_s(self, track, dur_beats):
@@ -1935,6 +1977,69 @@ class Engine:
                 f"renders came back too late{speed}. Queue or load further ahead, or lighten the track (fewer studio-"
                 f"only effects, shorter notes)")
 
+    def _second(self, p1, tracks):
+        """Once a second of mix: its level and how many tracks sound (for THIN), and whether the runway is out."""
+        e, n = self._lvl
+        self._lvl = [0.0, 0]
+        db = 10 * math.log10(e / (2 * n) + 1e-20)
+        on = [k for k, t in tracks.items() if t.get('ms', 0.0) > THIN_TRACK_MS]
+        self.levels.append((p1, db, len(on), on[0] if on else ''))
+        with self.lock:                                  # the timeline changes under the lock (queue, cancel)
+            out = self.tl.last_change(self.beat(p1)) is None
+        if out:
+            if self.runway_out is None:
+                self.runway_out = p1
+        else:
+            self.runway_out = None
+
+    def _runway_ended(self):
+        """A line when a set that has played has had nothing new scheduled for RUNWAY_ENDED_BARS (a runway ran out
+        and one hat loop played on for 10 minutes; silence checks never fire on that)."""
+        if self.runway_out is None or self.sounded is None:
+            return ''
+        bars = (self.pos - self.runway_out) / SR / (self.spb * self.bpb)
+        if bars < RUNWAY_ENDED_BARS:
+            return ''
+        loops = [t for t in self.tracks if (cs := self.tl.track_clips(t)) and cs[-1].end is None]
+        what = f"{', '.join(loops[:4])}{' ...' if len(loops) > 4 else ''} loop on unchanged" if loops else "what is left rings out"
+        return (f"RUNWAY ENDED {bars:.0f} bars ago ({fmt_bar(self.beat(self.runway_out), self.bpb)}): nothing new is "
+                f"queued and {what}. Queue the next section, or an ending")
+
+    def _thin(self):
+        """A line when the mix has thinned out against the set so far: one track left where several played, or the
+        level THIN_DB under the set's usual level, for THIN_S seconds (silence is SILENT ON AIR's)."""
+        hist = [x for x in self.levels if x[1] > 20 * math.log10(SOUND_FLOOR)]
+        if len(hist) < THIN_HISTORY_S + THIN_S:
+            return ''
+        # the set at its fuller moments, before the window being judged (a long thin stretch must not become the
+        # set's normal)
+        base = hist[:-THIN_S]
+        med_db = float(np.percentile([x[1] for x in base], 75))
+        med_n = float(np.percentile([x[2] for x in base], 75))
+
+        def thin(x):
+            return x[1] > 20 * math.log10(SOUND_FLOOR) and ((x[2] <= 1 and med_n >= 3) or x[1] < med_db - THIN_DB)
+        run = 0
+        for x in reversed(self.levels):
+            if not thin(x):
+                break
+            run += 1
+        if run < THIN_S:
+            return ''
+        x = self.levels[-1]
+        why = (f"only {x[3] or 'one track'} sounding (the set has had {med_n:.0f} at its fuller moments)" if x[2] <= 1 and med_n >= 3
+               else f"the mix {med_db - x[1]:.0f} dB under the set's usual level")
+        return f"THIN for {run} s: {why}. An outro left running? Bring the set back or end it"
+
+    def _silent_on_air(self):
+        """A line when the set has played and then nothing has sounded for SILENT_ON_AIR_S (a crashed helper left
+        a set silent for 9 minutes and nothing said so)."""
+        if self.sounded is None or self.pos - self.sounded < SILENT_ON_AIR_S * SR:
+            return ''
+        s = (self.pos - self.sounded) / SR
+        return (f"SILENT ON AIR for {s:.0f} s: nothing has sounded since {fmt_bar(self.beat(self.sounded), self.bpb)}. "
+                f"Queue or load something (a deck that finished a transition is off air: load onto it), or live_stop")
+
     def drain_news(self):
         """Problems that arrived since the last reply, said once."""
         with self.lock:                                 # the mixer and scheduler write these
@@ -2041,6 +2146,9 @@ class Engine:
             stall = self._stalled()
             if stall:
                 lines.append(stall)
+            for flag in (self._silent_on_air(), self._runway_ended(), self._thin()):
+                if flag:
+                    lines.append(flag)
             lines.append("safety: " + self.safety.report())
             for dn, dk in self.decks.items():
                 n_tr = sum(1 for t in self.tracks.values() if t['deck'] == dn)
@@ -2048,7 +2156,9 @@ class Engine:
                 warming = sum(1 for t in self.tracks.values() if t['deck'] == dn and t['warming'])
                 now_vals = {k: (lambda v: float(v if np.isscalar(v) else v[0]))(self._deck_param(dn, k, self.pos, 1))
                             for k in D.PARAMS}
-                lines.append(f"deck {dn}: {dk.describe(values=now_vals)} | {n_tr} tracks" + (f", {warming} WARMING" if warming else '')
+                lines.append(f"deck {dn}: {dk.describe(values=now_vals)} | {n_tr} tracks"
+                             + (f" | master {dk.master.describe()}" if dk.master is not None else '')
+                             + (f", {warming} WARMING" if warming else '')
                              + (f", {errs} ERRORS (live_status(deck='{dn}'))" if errs else ''))
             shown = [(k, t) for k, t in self.tracks.items() if t['deck'] == deck]
             hidden = len(self.tracks) - len(shown)

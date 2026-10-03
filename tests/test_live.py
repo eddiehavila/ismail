@@ -313,8 +313,11 @@ def test_load_cue_transition(eng, tmp_path):
     assert 'from deck A to deck B' in out and 'goes on air' in out and 'stop' in out
     run(eng, 7.0)
     st = eng.cmd_status()
-    assert 'deck B: on air' in st and 'deck A: on air | fader off' in st
+    assert 'deck B: on air' in st and 'deck A: CUE (off air) | fader off' in st     # M57: off air when it ends
     assert not any(eng.tl.playing(k, eng.beat(eng.pos)) for k, t in eng.tracks.items() if t['deck'] == 'A')
+    assert 'loaded Song A' in eng.cmd_load('A', a, at='next_bar')    # the old deck takes the next song (was refused)
+    out = eng.cmd_deck('A', cue=False)
+    assert out.splitlines()[0].endswith('on air') and out.splitlines()[1].strip().startswith('on air')
 
 
 def test_deck_keeps_the_songs_mix(eng, tmp_path):
@@ -434,3 +437,57 @@ def test_performer_plays_phrases_with_expression(eng, tmp_path):
     def hz(x):
         return np.sum(np.diff(np.signbit(x).astype(int)) != 0) / 2 / (len(x) / SR)
     assert abs(hz(a) - 440) < 15 and abs(hz(b) - 880) < 25
+
+
+def test_a_deck_runs_the_songs_master_chain(tmp_path):
+    # M56: live_load dropped the master chain, so a deck played about 4 dB quieter and unlimited
+    from ismail.api import OPS
+
+    def level(with_master):
+        root = make_song(str(tmp_path / f'song{with_master}'), 'Song', 'C4')
+        if with_master:
+            OPS['fx_add'](root, 'master', {'type': 'gain', 'gain_db': -12})
+        e = Engine(str(tmp_path / f'eng{with_master}'), bpm=120, bpb=4, workers=0, device='none')
+        e.safety = type('Unity', (), {'la': 0, 'process': staticmethod(lambda x: x), 'report': lambda self: 'off'})()
+        out = e.cmd_load('A', root, at='next_bar', loop=False)
+        run(e, 4.0)
+        st = e.cmd_status()
+        e.shutdown()
+        return out, st, 10 * np.log10(np.mean(e.air[:, :e.pos] ** 2) + 1e-20)
+
+    _, st0, db0 = level(False)
+    out, st1, db1 = level(True)
+    assert 'master limiter' in st0                           # a new project's own limiter comes over
+    assert 'master limiter > gain' in st1                    # then the song's gain after it
+    assert abs((db1 - db0) + 12) < 0.5
+
+
+def test_silence_on_air_is_said(eng):
+    # M57: a crashed helper left a set silent for 9 minutes and nothing in live_status said so
+    eng.cmd_track('k', instrument={'type': 'kick'})
+    eng.cmd_queue([{'track': 'k', 'lanes': {'C1': 'x...x...x...x...'}, 'at': 'next_bar', 'loop': 1}])
+    run(eng, 4.0)
+    assert 'SILENT ON AIR' not in eng.cmd_status()
+    run(eng, 12.0)
+    st = eng.cmd_status()
+    assert 'SILENT ON AIR for' in st and 'nothing has sounded since bar' in st
+
+
+def test_runway_ended_and_a_thin_mix_are_said(eng, monkeypatch):
+    # M59: a set ran 10 min on one hat loop after its runway ran out; SILENT ON AIR never fired on it
+    import ismail.live.engine as E
+    monkeypatch.setattr(E, 'RUNWAY_ENDED_BARS', 2)
+    monkeypatch.setattr(E, 'THIN_HISTORY_S', 4)
+    monkeypatch.setattr(E, 'THIN_S', 3)
+    for k, p in (('k', 'C1'), ('s', 'D1'), ('h', 'F#1')):
+        eng.cmd_track(k, instrument={'type': {'k': 'kick', 's': 'snare', 'h': 'hat'}[k]})
+    eng.cmd_queue([{'track': 'k', 'lanes': {'C1': 'x...x...x...x...'}, 'at': 'next_bar', 'loop': 3},
+                   {'track': 's', 'lanes': {'D1': '....x.......x...'}, 'at': 'next_bar', 'loop': 3},
+                   {'track': 'h', 'lanes': {'F#1': 'x.x.x.x.x.x.x.x.'}, 'at': 'next_bar'}])        # the hat loops on
+    run(eng, 6.0)
+    st = eng.cmd_status()
+    assert 'RUNWAY ENDED' not in st and 'THIN' not in st
+    run(eng, 10.0)                                   # kick and snare are done; the hat plays on alone
+    st = eng.cmd_status()
+    assert 'RUNWAY ENDED' in st and 'h loop on unchanged' in st
+    assert 'THIN for' in st and 'only h sounding' in st and 'SILENT ON AIR' not in st

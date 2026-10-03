@@ -1,6 +1,6 @@
 """MCP server: every ismail op as an agent tool (stdio).
 
-Run:  python -m ismail.mcp_server
+Run:  python -m ismail.mcp_server   (or `ismail mcp`, or `uvx ismail mcp` without installing)
 Claude Code config (.mcp.json):
   {"mcpServers": {"ismail": {"command": "python", "args": ["-m", "ismail.mcp_server"]}}}   (after pip install -e .)
 All tools take `project` (a project directory) first; see the `guide` tool for the workflow.
@@ -45,5 +45,9 @@ for _name, _fn in OPS.items():
     mcp.tool(_wrap(_name, _fn), name=_name)
 
 
-if __name__ == '__main__':
+def main():
     mcp.run(show_banner=False)
+
+
+if __name__ == '__main__':
+    main()

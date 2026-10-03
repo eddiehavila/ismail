@@ -47,6 +47,10 @@ The words never change; the mapping and the outcome do, and the file keeps every
 - Before explaining a change: `lexicon_find(text="eq peak")` finds the person's word for it, so say "less boxy"
   instead of "a 3 dB cut at 400 Hz", unless they speak in Hz themselves.
 
+**Pictures have a vernacular too.** Words about how something looks ("waxy", "cluttered", "flat", "the shadows are
+muddy") go in the same lexicon, with the visual crafts (director, cinematographer, colourist), mapped to what
+changed: a material setting, a light, a grade value.
+
 **Crafts.** Each entry names the role the word belongs to, the roles a record used to need people for: composer,
 arranger, performer, sound designer, recording engineer, mixing engineer, mastering engineer, producer, DJ,
 director, cinematographer, colourist, editor, choreographer, listener.

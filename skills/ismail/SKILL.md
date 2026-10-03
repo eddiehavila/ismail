@@ -32,12 +32,16 @@ asks for it explicitly: read `references/development.md` first (it holds the mig
 ismail/                  the engine ("the engine" always means ismail/ on main)
 songs/                   git-ignored by the ismail repo, always: no song is ever committed to it
 songs/<slug>/            everything one song owns
+  PROGRESS.md            the deliverable, who and what matters most, what is locked, what is next in order, and
+                         the side tracks that must not take over: read at every start and after every compaction
   HANDOFF.md             what can migrate into ismail: elements, evidence, files, proposed ops, tests, skill text
   build.py               rebuilds proj/ (never deletes: an old proj/ moves to backups/)
   voices/                the song's voices, profiles and song-local engine modules (build.py copies them
                          into proj/voices/, where the engine looks)
   work/                  analysis, measurement and exam scripts, and their saved output
-  ref/                   reference audio (analysis only) and SOURCES.md (where from, licence)
+  ref/                   reference audio (analysis only) and SOURCES.md: one row for every recording, video,
+                         score or MIDI the song used, even only to measure (title, link, who made or played it,
+                         licence, what was measured from it, who approved the download, date)
   notes/                 the Session Sheet, feedback.md (the user's words, verbatim)
   exam/                  ear-test pages
   proj/                  the ismail project (generated)
@@ -94,6 +98,27 @@ Mix targets:       master <LUFS for the genre or reference>, peak -1 dBFS, limit
 
 Registers must not collide: at most one part per octave band doing sustained work. Every part needs its own rhythm; if two parts share a rhythm they should share a sound (layer them) or one should move.
 
+## What to reach for when
+
+ismail is built so the right move is the easy one: the tools say back what is missing (a part modeled on nothing,
+a source with no row, a set that ran out of runway), and this table says what to reach for. When a tool's reply
+nudges you, follow it.
+
+| when | reach for |
+|---|---|
+| a task starts, and after every compaction | `guide`; the song's `PROGRESS.md` and `HANDOFF.md` |
+| a number that can be measured (grid, swing, kit, key, levels) | the analysis ops, never a guess |
+| an instrument must sound real | an example first (`references/instruments.md`), then `mimic_measure` or a fit; `track_model` names its source |
+| the numbers plateau and you need a direction | an eye exam: lenses that each change one named thing (`references/blind-tests.md`) |
+| you think a sound is done | a blind exam, real vs yours, hidden: one note first, then phrases, then the mix |
+| the person names a quality ("boxy", "too clean") | `lexicon_note`, verbatim, then map it to what you change |
+| a recording, video or score comes in | a `ref/SOURCES.md` row before you use it; `credits` when the piece goes public |
+| a version of another piece | `project_new(derived_from=)`, and the objective in their words |
+| a job over a minute | `machine_status` first; `python -m ismail.machine run` for anything outside ismail |
+| a live set | a runway queued ahead; a guard on `live_status` (`SILENT ON AIR`, `RUNWAY ENDED`, `THIN`) |
+| a song sounds different live | `live_parity`, then the song's `HANDOFF.md` |
+| something you built would help others | the inclusion review (`references/development.md`), then a fork and a pull request |
+
 ## Where things are
 
 - `references/composition.md`: arranging and writing with ismail's notation: rhythm cells as step strings, harmony voicing, motif and answer, feel and phrasing for played parts (phrase placement, band feel, bends to chord tones), 8-bar variation, transitions, energy curves. Read when writing notes.
@@ -111,12 +136,32 @@ Registers must not collide: at most one part per octave band doing sustained wor
 
 ## Non-negotiables
 
+- **Share what would help others.** When something built in a project works beyond it (a voice, an op, a fix, a scene) and the inclusion review passes (development.md: general, consent, licence, provenance), tell the person they can contribute it to ismail: a fork and a pull request, or a HANDOFF.md entry for the dev agent. Never publish for them.
+- **Provenance is kept, from the first download to the public page.** Before a source is used, it gets its row
+  in `ref/SOURCES.md`, measuring-only sources included; `project_info` and `render` name any file in `ref/`
+  that has no row. Every track says what it is modeled on (`track_model`, a list when it comes from several sources;
+  fits record it themselves), so `project_info` shows no track as unstated by the end. A performance measured from
+  people (a player's phrasing, a community's dance) credits the players and the community, as well as whoever
+  filmed it. A version made from another piece says so (`project_new(derived_from=)`). When a piece goes public (a
+  page, a video, a release), `credits` writes them from `SOURCES.md` into `CREDITS.md` (review it before it goes
+  out): CC BY and CC BY-SA require them, and they are
+  how the people a sound came from are known. Source audio never goes into a render, so a credits page can say
+  the piece holds only measurements of it. Anything measured from the person needs their yes first.
+- **Long work stays on its deliverable.** Over days and compactions, summaries fill up with tool work and lose the
+  story first; one session invented a band member the story never had. Keep `PROGRESS.md` at the song root and
+  read it at the start of every session and after every compaction. Before designing anything for a story (a
+  character, a shot, a scene), reread the story and the storyboard. A tool is a side track unless it unblocks the
+  next step of the deliverable: when a session spends longer on a tool than on the piece, stop and go back to
+  `PROGRESS.md`.
 - **The person's words are data.** When they name a quality, a problem or a fix ("boxy", "too clean"), `lexicon_note` it verbatim before acting, map it once you know what it meant, and say things back their way (`lexicon_find`). Words about the work only, never their emotions. Every piece states its objective in their words (`project_set(objective=)`); a version made from another says so (`project_new(derived_from=)`).
 - **The machine is shared.** Several sessions render, measure and run Blender on one computer with one cooler. Call
   `machine_status` before anything that runs over a minute and wait when it says WAIT. Heavy ops (render, separate,
   mimic_measure, the fits, live_parity) take a slot themselves and refuse with the reason; anything outside ismail
   (Blender, whisper, demucs, a long script) runs through `python -m ismail.machine run --gpu|--cpu -- <command>` so
-  it takes one too. A hot GPU means the machine is hot, not that the CPU is free (they share the cooler). Never run
+  it takes one too; give `--est` a unit (`--est 10m`, `600s`) so the board tells others when you will be done.
+  `run --wait 30m` (or `slot(..., wait=)`) stands in line for a slot instead of being refused. Only the user gives
+  a session priority (`python -m ismail.machine priority <session> --for 3h --by "the user"`): it goes first in
+  line, and the heat limit still holds for it. A session never sets priority for itself. A hot GPU means the machine is hot, not that the CPU is free (they share the cooler). Never run
   two heavy jobs of your own at once. When another session holds the slot, do lighter work or ask the user. Size
   the job to the question: the smallest model that answers, 2-bar windows, one file at a time with a check between.
   Do not sleep-poll a long job: run it in the background and let the harness say when it ends, and never end a turn

@@ -39,7 +39,7 @@ python -m ismail.video edit    -s songs/<slug> [-- --sheet 33 41 16 | -- --range
 
 1. **Listen to the arrangement as data.** `sync`, then read `build/events.json`: tracks, notes as frames, families. Know the form map (intro, build, dropout, drops, break, the last-bar moment) by bar number before writing a single shot.
 2. **Treatment** in `plan.md`: one-line story, hook words and the picture for each, look, timeline by bars, shot list with frames and start bars. Show it to the user before rendering anything expensive.
-3. **Assets.** Models come from the user or from sources they approve. Always ask before downloading. `rip` the .dae files, put .obj folders under `assets/`.
+3. **Assets.** Models come from the user or from sources they approve. Always ask before downloading, and log each one (where from, author, licence) next to the song's `ref/SOURCES.md` so the video's credits can be written from it. `rip` the .dae files, put .obj folders under `assets/`.
 4. **One shot at a time:** write the script, run `posesheet` until every row says clean (see Animation below), then take stills at 2 or 3 frames at `--pct 25`, read them, fix, and repeat. For a black or empty frame, use `--top` (an ortho plan view with the camera as a red dot and its target as cyan) and `--dbg nofog`. Only a shot whose stills are right goes to `render`.
 5. **Render the queue** in the background (one `render` call with every approved shot). Contact-sheet each result as it lands.
 6. **Cut** in `cut.py` against the bar grid, then `edit -- --sheet a b n` on every section and read the sheets. Fix, then run the full `edit`.
@@ -119,6 +119,12 @@ C.auto_fx(); C.text(t0, t1, 'WORD', 96); C.main()
 Sources are decoded on demand (forward reads, a seek on a jump, the last frames kept in memory), so a full-song source costs no disk. Placed audio clips (speech, samples) sync as events too, with `fam` = the sound's name. `C.hold(effect, t0, t1, amp)` holds an effect over a stretch; `palette` maps every pixel to the nearest shade of `C.palette` (a list of RGB colours, dark to light; default four greys), for a limited-colour look. Effects follow the note families (`C.fx_map`, defaults in `FX_MAP`): wub remap, dive melt, grind datamosh, robot pixelation, screech tear, metal posterize plus edges, zap invert, howl ghost double exposure (`C.ghost_key`), talk chroma roll, chop stutter. Kicks zoom-punch, sub shakes, snares and crashes flash. Everything sits under a VHS grade (lifted blacks, scanlines, vignette, grain), and `rain=True` adds a rain layer to a shot. Output: 1080p H.264 crf 18 with maxrate 24M plus the master as AAC 320k. Grain must be in the frames, not from an ffmpeg noise filter, or the file triples in size.
 
 ## What made it work (creative rules)
+
+- **The cast comes from the story, never from the track list.** A song's tracks (rhythm guitar, strings, pads)
+  describe the mix: in one video the strings were the power lines singing and the rhythm guitar a layer nobody
+  plays on screen. Spend by the cast's order: the main character gets the most exams and shots, the secondary
+  one full design, background people the cheap path (stock variation, silhouettes, faces lit away). Reread the
+  story before designing anyone; `PROGRESS.md` names who matters.
 
 - **The story comes from the source's own lore**, so each shot means something to someone who knows it. The song's hook words each get one picture, shown exactly for the note's length.
 - **Cut rate is the arrangement.** Long shots in the intro, snare rolls set the cut rate in builds, triplet hooks cut on every hit, the drop 2 chains are the cadence, and the final section strobes on 6 frames.
