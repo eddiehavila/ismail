@@ -77,6 +77,21 @@
   direction, a blind exam to know when you are done, from one note up to the full mix).
 - blind-tests.md: why exams (the person's senses as data, their words into the lexicon) and climbing from the
   smallest unit, since a test pitched too hard gives no direction.
+### Credits name what the piece uses
+
+- `credits` credits only the sources the piece uses: a row is used when a part's model names its file, its folder
+  of takes or its id (a video id naming a stems folder), a mimic profile or a sample came from it, or its table's
+  'in the song' column says so (prose like "**in the song**: the drum kit" or "not yet" reads as yes or no).
+  `consulted=True` adds the rest under "Also consulted". A plain list that repeats a table's rows (a SOURCES.txt of
+  video ids) is left out, and a table under its own heading keeps it.
+- `track_model(on=[...])` takes several sources for one part (a forest bed from two recordings, a voice
+  cross-synthesized from bird takes and a player's stem), and a folder of takes (`on='ref/birds/potoo'`).
+### Live: the set says when it runs out
+
+- `live_status` adds `RUNWAY ENDED N bars ago` when a set that has played has had nothing new queued for 8 bars
+  (what loops on unchanged, or that it rings out), and `THIN for N s` when one track is left where the set has had
+  several, or the mix sits 20 dB under its usual level, for 30 s. A set ran 10 minutes on one hat loop after its
+  outro forgot to stop it, and `SILENT ON AIR` never fired.
 
 ### Sources and credits in the tools
 

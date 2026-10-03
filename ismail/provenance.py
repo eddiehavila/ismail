@@ -76,7 +76,8 @@ def of_track(tr, d, root):
     if m:
         if m.get('on') == 'designed':
             return DESIGNED, 'designed' + (f" ({m['by']})" if m.get('by') else '')
-        return MEASURED, f"modeled on {m['on']}" + (f" by {m['by']}" if m.get('by') else '')
+        on = m['on'] if isinstance(m['on'], str) else ' + '.join(m['on'])
+        return MEASURED, f"modeled on {on}" + (f" by {m['by']}" if m.get('by') else '')
     inst = tr.get('instrument')
     if not inst:
         return (MEASURED, f"{len(tr['audio'])} audio clips") if tr.get('audio') else (DESIGNED, 'empty audio track')
