@@ -67,6 +67,15 @@
 - Library voices state their provenance in INFO (`measured` or `designed`).
 - `guide` opens with MEASURE FIRST.
 
+### Credits name what the piece uses
+
+- `credits` credits only the sources the piece uses: a row is used when a part's model names its file, its folder
+  of takes or its id (a video id naming a stems folder), a mimic profile or a sample came from it, or its table's
+  'in the song' column says so (prose like "**in the song**: the drum kit" or "not yet" reads as yes or no).
+  `consulted=True` adds the rest under "Also consulted". A plain list that repeats a table's rows (a SOURCES.txt of
+  video ids) is left out, and a table under its own heading keeps it.
+- `track_model(on=[...])` takes several sources for one part (a forest bed from two recordings, a voice
+  cross-synthesized from bird takes and a player's stem), and a folder of takes (`on='ref/birds/potoo'`).
 ### Live: the set says when it runs out
 
 - `live_status` adds `RUNWAY ENDED N bars ago` when a set that has played has had nothing new queued for 8 bars

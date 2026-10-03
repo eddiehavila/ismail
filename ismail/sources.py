@@ -83,18 +83,21 @@ def _cells(line):
     return [c.strip() for c in line.strip().strip('|').split('|')]
 
 
-def tables(text):
-    """Markdown tables in a SOURCES file -> [(header cells, [row cells])]."""
+def tables(text, headings=False):
+    """Markdown tables in a SOURCES file -> [(header cells, [row cells])], or with headings=True
+    [(header cells, [row cells], the heading above the table or None)]."""
     out, lines = [], text.splitlines()
-    i = 0
+    i, heading = 0, None
     while i < len(lines):
+        if lines[i].startswith('#'):
+            heading = lines[i].lstrip('#').strip()
         if lines[i].lstrip().startswith('|') and i + 1 < len(lines) and re.match(r'^\s*\|[\s:|-]+\|?\s*$', lines[i + 1]):
             head, rows = _cells(lines[i]), []
             i += 2
             while i < len(lines) and lines[i].lstrip().startswith('|'):
                 rows.append(_cells(lines[i]))
                 i += 1
-            out.append((head, rows))
+            out.append((head, rows, heading) if headings else (head, rows))
         else:
             i += 1
     return out
@@ -204,6 +207,79 @@ def _public(text):
     return ''.join(out)
 
 
+USED_KEYS = ('in the song', 'in song', 'used', 'in the piece')
+YES = ('yes', 'used', 'true', 'in the song', 'in song', 'in the piece')
+NO = ('no', 'not', 'unused', 'false', 'consulted')
+
+
+def _says(cell):
+    """An 'in the song' cell -> True, False or None. It may be prose: '**in the song**: the kit ...',
+    'not yet (measured, unused)'."""
+    c = re.sub(r'[*_`]', '', cell).strip().lower()
+    if c in ('x', 'y', '✓', '✔'):
+        return True
+    if c.startswith(YES):
+        return True
+    if c.startswith(NO) or c in ('', '-'):
+        return False
+    return None
+
+
+def _model_ons(tr):
+    m = tr.get('model') or {}
+    on = m.get('on')
+    return [] if not on or on == 'designed' else ([on] if isinstance(on, str) else list(on))
+
+
+def used_refs(root, d):
+    """What the piece is made from, as lowercase strings to match sources against: every track's model (each
+    path, folder or note), mimic profile sources, sample notes, the reference file."""
+    out = []
+    for tr in d.get('tracks', {}).values():
+        out += _model_ons(tr)
+        inst = tr.get('instrument') or {}
+        insts = [inst] + list((inst.get('map') or {}).values()) if inst.get('type') == 'kit' else [inst]
+        for i in insts:
+            if i.get('type') == 'mimic':
+                out.append(provenance._mimic_source(root, i.get('profile', '')))
+            if i.get('type') == 'sampler':
+                out.append(((d.get('sounds') or {}).get(i.get('sound'), {}) or {}).get('note') or '')
+    ref = (d.get('reference') or {}).get('file')
+    if ref:
+        out.append(ref)
+    return [urllib.parse.unquote(x).replace('\\', '/').lower() for x in out if x]
+
+
+def _used_file(rel, refs):
+    """A file in ref/ (path from the song root) is used when a model names it, a folder holding it, or its
+    name without the extension (a video id that names its stems folder)."""
+    rel = rel.lower()
+    stem = os.path.splitext(os.path.basename(rel))[0]
+    for r in refs:
+        path = r.split(' (')[0].strip().rstrip('/')
+        if rel == path or rel.startswith(path + '/') or path.endswith('/' + rel) or rel.endswith('/' + path):
+            return True
+        if len(stem) >= 6 and stem in r:
+            return True
+    return False
+
+
+def _row_used(head, row, refs, used_names):
+    """-> True, False, or None when nothing says."""
+    for j, h in enumerate(head):
+        if any(k in h.lower() for k in USED_KEYS) and j < len(row):
+            said = _says(row[j])
+            if said is not None:
+                return said
+    text = ' '.join(row).lower()
+    if any(n in text for n in used_names):
+        return True
+    for tok in re.findall(r'[\w.%-]{6,}', text):
+        if '.' in tok and os.path.splitext(tok)[1] in MEDIA and any(tok in r for r in refs):
+            return True
+    return None
+
+
 def plays_source_audio(d):
     """[(track, why)] for tracks whose sound is audio from a recording (a sample imported or averaged from one,
     or placed audio clips), as opposed to a measurement rebuilt by synthesis."""
@@ -221,9 +297,21 @@ def plays_source_audio(d):
     return out
 
 
-def credits_md(root, d):
-    """-> (CREDITS.md text, warnings)."""
+def credits_md(root, d, consulted=False):
+    """-> (CREDITS.md text, warnings). Only the sources the piece uses, unless consulted=True."""
     s = scan(root, d)
+    refs = used_refs(root, d)
+    used_files = [f for f in s['files'] if _used_file(f, refs)]
+    # names that mark a row as used: each used file's name and its name without the extension (a video id)
+    used_names = set()
+    for f in used_files:
+        b = os.path.basename(f).lower()
+        used_names |= {b} | ({os.path.splitext(b)[0]} if len(os.path.splitext(b)[0]) >= 6 else set())
+    for r in refs:                                  # a stems folder named by a video id: ref/x/stems/<id>/drums.wav
+        m = re.search(r'stems/([^/]{6,})/', r)
+        if m:
+            used_names.add(m.group(1))
+    decided = any(_model_ons(t) for t in d.get('tracks', {}).values()) or bool(used_files)
     sr = song_root(root)
     title = d.get('name') if (d.get('name') or '').lower() not in ('', 'proj') else os.path.basename(sr)
     warn = []
@@ -243,24 +331,64 @@ def credits_md(root, d):
               "harmonics and noise, an instrument's response, a player's timing and phrasing) and the piece "
               "rebuilds it with synthesis. These recordings, and the people who made and played them, are where "
               "its sounds come from.", '']
+    table_text = ' '.join(' '.join(r) for p in s['sources'] for _, rows in tables(_read(p)) for r in rows).lower()
+    main, also, n_used, n_other, n_dup = [], [], 0, 0, 0
+    has_column = False
     for p in s['sources']:
         text = _read(p)
         head = next((ln.lstrip('#').strip() for ln in text.splitlines() if ln.startswith('#')), None)
-        L += [f"## {head or os.path.relpath(os.path.dirname(p), sr).replace(os.sep, '/')}", '']
-        tb = tables(text)
+        title = f"## {head or os.path.relpath(os.path.dirname(p), sr).replace(os.sep, '/')}"
+        tb = tables(text, headings=True)
+        sec_used, sec_other = [], []
         if tb:
-            for h, rows in tb:
-                keep = [j for j, c in enumerate(h) if not any(k in c.lower() for k in PRIVATE_KEYS)]
-                L.append('| ' + ' | '.join(h[j] for j in keep) + ' |')
-                L.append('|' + '---|' * len(keep))
+            for h, rows, sub in tb:
+                if sub and sub != head:                 # a table under its own heading in the same file
+                    hdr0 = [f"### {sub}", '']
+                else:
+                    hdr0 = []
+                has_column = has_column or any(any(k in c.lower() for k in USED_KEYS) for c in h)
+                keep = [j for j, c in enumerate(h) if not any(k in c.lower() for k in PRIVATE_KEYS + USED_KEYS)]
+                hdr = hdr0 + ['| ' + ' | '.join(h[j] for j in keep) + ' |', '|' + '---|' * len(keep)]
+                u, o = [], []
                 for r in rows:
-                    L.append('| ' + ' | '.join(_public(r[j]) if j < len(r) else '' for j in keep) + ' |')
-                L.append('')
+                    line = '| ' + ' | '.join(_public(r[j]) if j < len(r) else '' for j in keep) + ' |'
+                    is_used = _row_used(h, r, refs, used_names)
+                    (u if is_used or (is_used is None and not decided) else o).append(line)
+                if u:
+                    sec_used += hdr + u + ['']
+                if o:
+                    sec_other += hdr + o + ['']
+                n_used += len(u)
+                n_other += len(o)
         else:
             for ln in text.splitlines():
-                if ln.strip() and not ln.startswith('#'):
-                    L.append(f"- {_public(ln.strip())}")
-            L.append('')
+                if not ln.strip() or ln.startswith('#'):
+                    continue
+                first = re.split(r'[\s|]+', ln.strip())[0].lower()
+                if len(first) >= 6 and first in table_text:
+                    n_dup += 1                      # a plain list repeating a table's row (a SOURCES.txt of ids)
+                    continue
+                is_used = any(n in ln.lower() for n in used_names) or (len(first) >= 6 and any(first in r for r in refs))
+                ((sec_used if is_used or not decided else sec_other)).append(f"- {_public(ln.strip())}")
+                n_used, n_other = n_used + (is_used or not decided), n_other + (decided and not is_used)
+            for sec in (sec_used, sec_other):
+                if sec and sec[-1] != '':
+                    sec.append('')
+        if sec_used:
+            main += [title, ''] + sec_used
+        if sec_other:
+            also += [title.replace('## ', '### '), ''] + sec_other
+    L += main
+    if consulted and also:
+        L += ['## Also consulted', '', 'Measured or listened to while the piece was made; not in the piece.', ''] + also
+    if not decided:
+        warn.append("no part names its sources (track_model) and no table has an 'in the song' column: every row "
+                    "is credited as used")
+    if n_other and not consulted:
+        warn.append(f"credited {n_used} sources the piece uses; {n_other} consulted ones left out (consulted=True "
+                    f"lists them)")
+    if n_dup:
+        warn.append(f"credited each source once: {n_dup} lines of a plain list repeat a table's rows")
     groups, open_ = {}, []
     for name, tr in d.get('tracks', {}).items():
         st, txt = provenance.of_track(tr, d, root)
