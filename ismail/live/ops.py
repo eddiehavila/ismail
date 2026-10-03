@@ -115,7 +115,8 @@ def _other_engines(project):
 
 
 @op()
-def live_start(project: str, bpm: float, beats_per_bar: int = 4, device: str = 'default', workers: int = None) -> str:
+def live_start(project: str, bpm: float, beats_per_bar: int = 4, device: str = 'default', workers: int = None,
+               follow_device: bool = True) -> str:
     """Start the live engine for `project` (any folder; a project.json there lends its sound bank, song voices and
     'track:<name>' instruments). It plays from bar 1 immediately, silent until you queue clips, and keeps playing
     between your calls: clips loop until replaced. Tempo is fixed for the run (live_stop, then start again to change
@@ -154,7 +155,8 @@ def live_start(project: str, bpm: float, beats_per_bar: int = 4, device: str = '
         # a hidden console, not none: the render workers inherit it instead of each opening a window
         flags = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
     subprocess.Popen([sys.executable, '-m', 'ismail.live.engine', '--project', root, '--bpm', str(bpm),
-                      '--bpb', str(beats_per_bar), '--device', str(device), '--workers', str(workers)],
+                      '--bpb', str(beats_per_bar), '--device', str(device), '--workers', str(workers)]
+                     + ([] if follow_device else ['--no-follow']),
                      cwd=pkg_root, env=env, stdout=log, stderr=subprocess.STDOUT, creationflags=flags,
                      start_new_session=os.name != 'nt')
     t0 = time.time()
@@ -286,8 +288,10 @@ def live_load(project: str, deck: str, song: str, bars: list = None, at: str = '
     with live_listen(deck=...), then bring it in with live_transition. The song's mix comes over as rendered:
     its automation (effect params and volume as ramps, instrument params rendered with the notes, the master fade;
     repeated every pass on a looping deck) and its group buses (a reverb on a drum bus keeps the dry drums). Placed
-    audio clips and the master effect chain do not (the reply lists what was left out). Loading replaces what a
-    cued deck held."""
+    audio clips do not (the reply lists what was left out); the song's master chain (its limiter) runs on the deck.
+    Loading replaces what a cued deck held. A cued deck plays from `at` (off air), so a song loaded early with
+    at='next_bar' is already bars into itself when the transition brings it in: load it with at='bar:<the
+    transition's bar>' to start it from its top on air."""
     if not os.path.isabs(song):
         cand = os.path.join(os.path.abspath(project), song)
         song = cand if os.path.exists(cand) else os.path.abspath(song)
@@ -314,7 +318,8 @@ def live_transition(project: str, to: str, from_deck: str = None, at: str = 'nex
     bass at a time, old leaves in the last quarter) | filter (old thins out through a rising high-pass while the
     new opens from a low-pass) | cut (switch on the boundary). The `to` deck must be playing by then (live_load
     or live_queue it first, cued); it goes on air at the start. from_deck defaults to the one deck on air. With
-    stop_from, the old deck's tracks stop when the transition ends. The reply is the timeline of every move."""
+    stop_from, the old deck's tracks stop when the transition ends and it goes off air (cued), ready for the next
+    live_load. The reply is the timeline of every move."""
     return _call(project, 'transition', to=to, from_deck=from_deck, at=at, bars=bars, style=style,
                  stop_from=stop_from)
 
@@ -459,3 +464,13 @@ def live_parity(song: str, bars: list, tracks: list = None) -> str:
         L.append("  a part that DIFFERS sounds different on a deck than in a render: that is an engine gap. Say so "
                  "(the song's HANDOFF.md, for the dev agent) instead of changing the song to hide it.")
     return '\n'.join(L)
+
+
+@op()
+def live_device(project: str, device: str = 'default', follow: bool = None) -> str:
+    """Move a running set to another audio output without stopping it: the timeline, the queue and the audio mixed
+    ahead carry on, with a gap of about a second. device: 'default' (the system's default output now: use it after
+    connecting a Bluetooth speaker), a name or part of one ('JBL'), an index, or 'none'. With device 'default' the
+    engine also follows the system default by itself (checked every few seconds; follow=False stops that), and a
+    device that stops taking audio (a speaker switched off) falls back to the default."""
+    return _call(project, 'device', device=device, follow=follow, timeout=20)

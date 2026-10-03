@@ -1,0 +1,11 @@
+.git
+songs
+ref
+renders
+work
+hf_cache
+assets
+tests
+skills
+**/__pycache__
+*.egg-info

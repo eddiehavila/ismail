@@ -107,3 +107,29 @@ def test_a_deck_performer_hears_what_came_before_its_window(tmp_path):
     assert sorted(n[1] for n in c.context) == [52, 55]             # the 8 beats before the window
     lo, ns, chunk = eng._chunk(c, 0, 0)
     assert lo == -2 and chunk['pre'] == 1.0 and ns[0][1] == 55    # the held G3 from its start; E3 is past 1 s
+
+
+def test_a_looping_performer_never_sees_a_negative_song_time(tmp_path):
+    # M50: the context of a wrapped chunk sits at negative clip beats; a voice that seeds on the song time (the birds
+    # voice keys each note on its time in ms) got a negative seed
+    (tmp_path / 'voices').mkdir()
+    (tmp_path / 'voices' / 'keyed.py').write_text(
+        "import numpy as np\n"
+        "SEEN = []\n"
+        "def perform(notes, total_n, sr, bpm=120.0, lanes=None, beat0=0.0):\n"
+        "    SEEN.extend(beat0 + st * bpm / 60.0 for st, *_ in notes)\n"
+        "    return np.zeros(total_n)\n")
+    inst = _mark_performer({'type': 'code', 'voice': 'keyed', 'tail': 0.5}, str(tmp_path))
+    assert inst.get('performer')
+    eng = Engine(str(tmp_path), bpm=120, bpb=4, workers=0, device='none')
+    eng.cmd_track('k', instrument=inst)
+    eng.cmd_queue([{'track': 'k', 'notes': '0 E3 1; 2 G3 2.5', 'bars': 1, 'loop': 3, 'at': 'bar:2'}])
+    c = next(iter(eng.tl.clips.values()))
+    assert eng._chunk(c, 0, 1)[0] < 0                               # the wrapped context really is before beat 0
+    run_to = eng.sample(4 + 12) + SR
+    while eng.pos < run_to:
+        eng.tick()
+        eng.mix_block()
+    from ismail import voices
+    seen = voices.load('keyed', str(tmp_path)).SEEN
+    assert seen and min(seen) >= 0

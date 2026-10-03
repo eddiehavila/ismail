@@ -69,6 +69,15 @@ A person in a headset cannot see your terminal. Contact is part of the interface
 - **Capture what they point at when they speak.** The view and the selection at the moment a voice note ends belong
   to the note; reading them later shows a different moment.
 - **Let them interrupt**, and keep what they did not hear for later.
+- **Every interaction is a sound too.** A countdown ticks, a shutter fires, a lock clicks, a drop lands. A timed
+  action with no sound left the person guessing when the camera would fire.
+- **Things carry the names the person uses.** Keep a names map (scene item to the words the person and you say),
+  so "the jukebox" means one object to both of you.
+- **Teach the stage the first time.** With no history of the person on the stage, or when the events show a
+  struggle (selects with no action, a grab that moves nothing, "how do I"), offer a spoken tutorial one gesture at
+  a time, each step waiting for the event that proves it worked, each with its sound: talk, point and select, move
+  a thing, move yourself, take a picture, set a camera, record a take, housekeeping. Keep the gesture list in one
+  place the page and you both read, so a new gesture joins the tutorial when it ships.
 - **Show which version is running** (a stamp on the page), and reload with a fresh address after a change.
 - **Address every note.** After a session, check every message against what was done and say what was not.
 - **Measure a gesture from a take before binding it.** A pinch that the system already uses collides with yours;
@@ -85,6 +94,9 @@ Every rule here cost the person work once.
 - **Saves merge.** A save that overwrites the scene file drops what the other side placed. Keep a history copy of
   every save.
 - **The event log is the recovery path.** Log every edit as it happens; a lost save can be rebuilt from it.
+- **A page never saves before its scene has loaded.** Boot into a neutral space while the scene streams in, and
+  refuse saves until it is whole: a half-loaded page that saves writes an empty scene over the real one. A load
+  that stalls retries with a fresh address (a headset's pooled connection can die silently).
 - **Never trust a save the page did not confirm.** Save on idle and when the page hides, and show the person that
   it saved.
 - **A server running old code must say so.** After changing the server, restart it; until then every reply carries

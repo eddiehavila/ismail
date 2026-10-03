@@ -20,6 +20,7 @@ import numpy as np
 from . import analysis as A
 from . import machine
 from . import provenance
+from . import sources as sourcesmod
 from . import fx as fxmod
 from . import rig as rigmod
 from . import instruments as inst_mod
@@ -337,6 +338,7 @@ def project_info(project: str) -> str:
     if d.get('sounds'):
         L.append(f"sounds: {', '.join(d['sounds'])}")
     L += provenance.summary(d, P.root)[0]
+    L += sourcesmod.summary(P.root, d)[0]
     return '\n'.join(L)
 
 
@@ -690,30 +692,73 @@ def instrument_set(project: str, track: str, instrument, merge: bool = True) -> 
 
 
 @op(mutates=True)
-def track_model(project: str, track: str, on: str, by: str = None) -> str:
-    """Record what a track's sound is modeled on, shown by project_info and render. on: the example it was
-    measured from ('ref', 'ref:<stem>', 'sound:<name>', a path, or a note like 'kit comp_2 of the ref drums'),
-    'designed' for a sound made on purpose (most electronic music), or '' to clear. by: how (an op, a song script,
-    'ear exam'). Fits record it themselves (instrument_fit apply_to_track, track_fit apply=True); mimic profiles,
-    measured library voices and imported samples need nothing."""
+def track_model(project: str, track: str, on=None, by: str = None) -> str:
+    """Record what a track's sound is modeled on, shown by project_info and render, and read by `credits` to tell
+    the sources a piece uses from the ones only consulted. on: the example it was measured from ('ref',
+    'ref:<stem>', 'sound:<name>', a path (a file, or a folder of takes such as 'ref/birds/potoo'), or a note like
+    'kit comp_2 of the ref drums'), a list of them when the sound comes from several sources (['ref/a.ogg (quiet
+    stretches)', 'ref/b.ogg']), 'designed' for a sound made on purpose (most electronic music), or '' to clear. A
+    note after a path goes in brackets. by: how (an op, a song script, 'ear exam'). Fits record it themselves
+    (instrument_fit apply_to_track, track_fit apply=True); mimic profiles, measured library voices and imported
+    samples need nothing."""
     P = _load(project)
     tr = P.track(track)
-    on = (on or '').strip()
-    if not on:
+    ons = [str(x).strip() for x in on if str(x).strip()] if isinstance(on, (list, tuple)) else [(on or '').strip()]
+    ons = [x for x in ons if x]
+    if not ons:
         tr.pop('model', None)
         P.save()
         return f"cleared; {track!r} is now {' '.join(provenance.of_track(tr, P.d, P.root))}"
-    if on.startswith('sound:') and on[6:] not in (P.d.get('sounds') or {}):
-        raise OpError(f"no sound {on[6:]!r} in the bank (sound_list); sound_import the example first")
-    if on.startswith('ref') and not P.d.get('reference'):
-        raise OpError("the project has no reference; project_set(reference=<file>) or give the example's path")
-    looks_path = os.sep in on or '/' in on or os.path.splitext(on)[1].lower() in ('.wav', '.mp3', '.flac', '.ogg')
-    if looks_path and not on.startswith(('ref', 'sound:')) and not os.path.exists(os.path.join(P.root, on)) \
-            and not os.path.exists(on):
-        raise OpError(f"{on!r} not found; give an existing file, 'ref', 'ref:<stem>', 'sound:<name>' or 'designed'")
-    tr['model'] = {'on': on, **({'by': by} if by else {})}
+    if 'designed' in ons and len(ons) > 1:
+        raise OpError("on='designed' stands alone: a designed sound has no sources (or list the sources it was "
+                      "measured from, without 'designed')")
+    for o in ons:
+        if o.startswith('sound:') and o[6:] not in (P.d.get('sounds') or {}):
+            raise OpError(f"no sound {o[6:]!r} in the bank (sound_list); sound_import the example first")
+        is_ref = o == 'ref' or o.startswith('ref:')
+        if is_ref and not P.d.get('reference'):
+            raise OpError("the project has no reference; project_set(reference=<file>) or give the example's path")
+        path = o.split(' (')[0].strip()                 # 'ref/birds/x.mp3 (a call profile)': the path, then a note
+        looks_path = os.sep in path or '/' in path or os.path.splitext(path)[1].lower() in sourcesmod.MEDIA
+        if looks_path and not is_ref and not o.startswith('sound:') and not any(
+                os.path.exists(os.path.join(base, path)) for base in (P.root, sourcesmod.song_root(P.root))) \
+                and not os.path.exists(path):
+            raise OpError(f"{path!r} not found (looked in the project and the song folder); give an existing file "
+                          f"or folder, 'ref', 'ref:<stem>', 'sound:<name>' or 'designed'")
+    tr['model'] = {'on': ons[0] if len(ons) == 1 else ons, **({'by': by} if by else {})}
     P.save()
     return f"{track!r}: {' '.join(provenance.of_track(tr, P.d, P.root))}"
+
+
+@op()
+def credits(project: str, out: str = None, overwrite: bool = False, consulted: bool = False) -> str:
+    """Write the piece's credits (CREDITS.md at the song root) from its SOURCES files (the recording, who made
+    or played it, the licence, the link; columns about approval, local paths, dates and notes are left out), each
+    track's model (measured from what, or designed) and its lineage (derived_from). Only the sources the piece uses
+    are credited: a row is used when a track's model names its file, its folder or its id (track_model), a mimic
+    profile or a sample came from it, or its table has an 'in the song' column saying yes. consulted=True adds the
+    rest under 'Also consulted'. A plain list that repeats a table's rows (a SOURCES.txt of video ids) is left out.
+    It says whether the piece holds any recorded audio (imported samples, audio clips) or only measurements rebuilt
+    by synthesis. Files in ref/ with no SOURCES row are not credited: the reply lists them. Review the file before
+    it goes public. out: another path; overwrite: replace an existing file (it may have been edited by hand)."""
+    P = _load(project)
+    path = os.path.abspath(out) if out else os.path.join(sourcesmod.song_root(P.root), 'CREDITS.md')
+    if os.path.exists(path) and not overwrite:
+        raise OpError(f"{path} exists (it may have been edited by hand): pass overwrite=True to replace it, or "
+                      f"out=<another path> to compare")
+    text, warn = sourcesmod.credits_md(P.root, P.d, consulted=consulted)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'w', encoding='utf8', newline='\n') as f:
+        f.write(text)
+    s = sourcesmod.scan(P.root, P.d)
+    L = [f"wrote {path}: {len(s['sources'])} SOURCES files, {len(s['files'])} files in ref/, "
+         f"{len(P.d.get('tracks', {}))} parts" + (f", lineage {len(P.d.get('lineage', []))}" if P.d.get('lineage') else '')]
+    audio = sourcesmod.plays_source_audio(P.d)
+    L.append("  recorded audio in the piece: " + ('; '.join(f"{t} ({w})" for t, w in audio) if audio else
+                                                 "none (it says the piece holds only measurements)"))
+    L += [f"  {'NOT CREDITED' if not w.startswith('credited') else 'note'}: {w}" for w in warn]
+    L.append("  review it before it goes public: credits name people and licences (CC BY and BY-SA require them)")
+    return '\n'.join(L)
 
 
 @op()
@@ -1269,6 +1314,9 @@ def render(project: str, bars: list = None, tracks: list = None, stems: bool = F
     elif not any(t == 'master' and gr < -0.5 for (t, _), gr in R.gain_reduction.items()):
         L.append("  master limiter: idle (gain reduction under 0.5 dB)")
     short = provenance.summary(P.d, P.root, tracks)[1]
+    if short:
+        L.append(short)
+    short = sourcesmod.summary(P.root, P.d)[1]
     if short:
         L.append(short)
     return '\n'.join(L)

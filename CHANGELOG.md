@@ -1,17 +1,42 @@
 # Changelog
 
-## Unreleased
+## 0.3.0
 
-### Roadmap, and the stage in the skill
+### Install and distribution
+
+- On PyPI: `pip install ismail`, or `uvx ismail mcp` to run the MCP server without installing. New console
+  commands `ismail` (the CLI, same as `python -m ismail`) and `ismail-mcp`; `ismail mcp` starts the server.
+- Claude Code plugin: `/plugin marketplace add newsbubbles/ismail`, then `/plugin install ismail@ismail` loads the
+  server and the composing skill together (`.claude-plugin/`).
+- Listed in the official MCP Registry as `io.github.newsbubbles/ismail` (`server.json`); a tag push publishes to
+  PyPI and the registry (`.github/workflows/publish.yml`).
+- `Dockerfile` (stdio server) and `glama.json` for directories that build and inspect servers; `CITATION.cff`.
+- The README, the plugin and the client configs install from GitHub (`uvx --from git+https://github.com/newsbubbles/ismail ismail mcp`),
+  which works whether or not a release is on PyPI. README: an "If you are an AI agent" section.
+
+### Roadmap
 
 - ROADMAP.md: where ismail is going (worlds, visiting each other's, hands and 4D editing, agents in the room,
   sound, pictures, the person, a hub for shared work) with a status on each; a "Where it is going" section in the
   README.
+- SKILL.md: share what would help others (a fork and a pull request, after the inclusion review); development.md:
+  sharing back from any user's project; user-experience.md: pictures have a vernacular too.
+
+### Live output follows the device
+
+- The live output follows the system default (`device='default'`): a Bluetooth speaker that connects mid-set takes
+  over within a few seconds, and a device that stops taking audio falls back to the default. `live_device` moves a
+  running set to another output by hand. The timeline, queue and audio mixed ahead carry on (about a second's gap);
+  `live_start(follow_device=False)` keeps the old behaviour.
+- The handoff scanner skips `history_src/` backups.
+
+### The stage in the skill
+
 - `references/stage.md`: building a scene with a person inside it, from the Crossroads build: which surface for
-  which decision, eye exams for pictures, bodies and contact, contact with a person in a headset, shared-editing
-  rules that never lose their work, agents first.
-- user-experience.md: pictures have a vernacular too; when the person is inside the work. SKILL.md: share what
-  would help others. development.md: sharing back from any user's project.
+  which decision, eye exams for pictures, bodies and contact, contact with a person in a headset (every interaction
+  a sound, the person's names for things, a first-time tutorial one gesture at a time), shared-editing rules that
+  never lose their work (no save before the scene has loaded), agents first.
+- user-experience.md: when the person is inside the work. SKILL.md points to stage.md.
 
 ### Placement offsets
 
@@ -50,6 +75,67 @@
 - Library voices state their provenance in INFO (`measured` or `designed`).
 - `guide` opens with MEASURE FIRST.
 
+### The machine: a line, and priority from the user
+
+- `python -m ismail.machine run --wait 30m` (and `slot(..., wait=)`) stands in line for a heavy-job slot instead
+  of being refused, and a job that does not wait yields to every waiter ahead of it. The board lists the line.
+- `python -m ismail.machine priority <session> --for 3h --by "the user"` puts that session first in line until it
+  expires (`--clear` ends it); it needs `--by`, since only the user gives it. Priority orders the line only: the
+  heat limit, the busy CPU and the memory reserve hold for everyone (`--force` skips the heat limit and was the
+  only way to go first; the voice session asked for this to finish its blind exams).
+
+### What to reach for when
+
+- SKILL.md: "What to reach for when", one table from the situation to the op, reference or rule (the start of a
+  task and every compaction, measuring, real instruments, eye and blind exams, the person's words, sources and
+  credits, versions, the shared machine, live sets, sharing back). The tools say back what is missing; the table
+  says what to reach for.
+- README, "If you are an AI agent": measure first, then ask the person's senses with exams (an eye exam for a
+  direction, a blind exam to know when you are done, from one note up to the full mix).
+- blind-tests.md: why exams (the person's senses as data, their words into the lexicon) and climbing from the
+  smallest unit, since a test pitched too hard gives no direction.
+### Credits name what the piece uses
+
+- `credits` credits only the sources the piece uses: a row is used when a part's model names its file, its folder
+  of takes or its id (a video id naming a stems folder), a mimic profile or a sample came from it, or its table's
+  'in the song' column says so (prose like "**in the song**: the drum kit" or "not yet" reads as yes or no).
+  `consulted=True` adds the rest under "Also consulted". A plain list that repeats a table's rows (a SOURCES.txt of
+  video ids) is left out, and a table under its own heading keeps it.
+- `track_model(on=[...])` takes several sources for one part (a forest bed from two recordings, a voice
+  cross-synthesized from bird takes and a player's stem), and a folder of takes (`on='ref/birds/potoo'`).
+### Live: the set says when it runs out
+
+- `live_status` adds `RUNWAY ENDED N bars ago` when a set that has played has had nothing new queued for 8 bars
+  (what loops on unchanged, or that it rings out), and `THIN for N s` when one track is left where the set has had
+  several, or the mix sits 20 dB under its usual level, for 30 s. A set ran 10 minutes on one hat loop after its
+  outro forgot to stop it, and `SILENT ON AIR` never fired.
+
+### Sources and credits in the tools
+
+- `project_info` lists a song's sources: the recordings, videos and scores in its `ref/` folders, which of them
+  have a row in a SOURCES file, and rows without a licence or an author. `render` names files with no row. Stems,
+  separations and analysis projects are skipped; a video's id in a SOURCES row covers its download and the wav
+  made from it.
+- `credits` (new op, 98 tools) writes `CREDITS.md` at the song root from the SOURCES tables (approval, local path,
+  date and note columns left out), each part's model grouped by source, and the lineage. It says whether the piece
+  plays recorded audio (imported samples, audio clips) or holds only measurements, and lists what it could not
+  credit.
+- `track_model(on='ref/birds/x.mp3')` takes a file in the song's `ref/` folder: any `on` starting with "ref" was
+  read as the project reference and refused, and paths were looked for only under `proj/`.
+
+### Skill: provenance, the deliverable, the machine-aware performer
+
+- SKILL.md: provenance is kept from the first download to the public page. Every source a song uses, measuring-only
+  ones included, gets a `ref/SOURCES.md` row (who made or played it, licence, what was measured); every track says
+  what it is modeled on; performers and communities measured from recordings are credited; public pages take their
+  credits from `SOURCES.md`. instruments.md and music-video.md log sources and assets the same way.
+- SKILL.md: long work stays on its deliverable. `PROGRESS.md` at the song root, read at every start and after every
+  compaction; reread the story before designing for it; a tool is a side track unless it unblocks the next step.
+  music-video.md: the cast comes from the story, never from the track list, and effort follows the cast's order.
+- live.md, "Watch the machine as well as the room": lessons of a 16-hour set (guards keyed on audio trouble,
+  tracked watchdogs, shrinking the rig under load, one deck on a busy machine, the set on the person's clock, pause
+  and resume as a move, borrowed voices checked before they go on air).
+
 ### Fixes from song handoffs
 
 - Render memory: a track's whole output stays in memory only while an effect reads it (a sidechain or vocoder
@@ -59,6 +145,20 @@
 - `mimic_measure` measures a short note (a 0.3 s panpipe): its attack calibration read the note's level over a
   window that started after the note ended and produced a non-finite buffer.
 - `analyze_timbre` (and every analysis reading a source in stereo) works on a mono file: both channels read the same.
+- Live decks run the song's master chain (its limiter, compressor, any master effect), as its studio render does:
+  `live_load` dropped it, so a deck played about 4 dB quieter and unlimited. `live_status` shows it on the deck line.
+- A looping performer clip no longer hands its voice a negative song time: the context carried over the loop point
+  sat at negative clip beats, and a voice that seeds on the song time (the birds call voice) failed on it.
+- `live_transition` takes the old deck off air when it ends, so the next song loads onto it (it was refused, and a
+  helper that crashed on the refusal left a set silent for 9 minutes). `live_status` says `SILENT ON AIR` when a set
+  that has played sounds nothing for 10 s. `live_deck(cue=False)` describes the deck as it will be. `live_load`'s
+  doc says a cued deck plays from `at`.
+- `djkit.gap` brings each target back to a level (`level_db`, a number or per target) instead of 0 dB, and
+  `Set.gap` uses the gains the set has given each track: a set running its tracks at +4 to +8 dB had every drop land
+  under its build.
+- The machine governor: `run --est` takes a unit (`10m`, `600s`, `1.5h`; a bare number is minutes and one above 240
+  is refused, since `--est 600` meant as seconds showed a 10-minute render as 585 min). The board shows a `python -c`
+  job by its first line and how far past its estimate a job runs.
 
 ### Roles and the migration process
 

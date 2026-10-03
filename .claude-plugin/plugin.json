@@ -1,0 +1,18 @@
+{
+  "name": "ismail",
+  "displayName": "ismail",
+  "version": "0.3.0",
+  "description": "A DAW for AI agents: write music as notes, sounds and code, read the audio back as text, and play it live. 98 MCP tools plus the composing skill.",
+  "author": {"name": "Nate Codes", "url": "https://github.com/newsbubbles"},
+  "homepage": "https://newsbubbles.github.io/ismail/",
+  "repository": "https://github.com/newsbubbles/ismail",
+  "license": "MIT",
+  "keywords": ["music", "daw", "audio", "synthesizer", "live", "mcp"],
+  "mcpServers": {
+    "ismail": {
+      "command": "uvx",
+      "args": ["--python", "3.12", "--from", "git+https://github.com/newsbubbles/ismail", "ismail", "mcp"],
+      "env": {"PYTHONWARNINGS": "ignore"}
+    }
+  }
+}
