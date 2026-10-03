@@ -178,3 +178,17 @@ def test_the_mapping_curves():
     assert O.scale(0.5, [100, 10000], 'log') == pytest.approx(1000)
     assert O.scale(0.49, [-120, 0], 'switch') == -120 and O.scale(0.5, [-120, 0], 'switch') == 0
     assert O.scale(440.0, None, 'raw') == 440.0
+
+
+def test_a_quiet_bus_streams_silence_and_live_stream_takes_a_name(eng, tmp_path):
+    # from the Crossroads stage: a dormant bus pushed nothing, so listeners saw gaps and fell out of step;
+    # live_stream(project, name=...) clashed with the dispatcher's own `name`
+    eng.cmd_bus('radio')                             # nothing plays on it: it goes dormant
+    run(eng, 2.0)
+    sub = eng.hub.subscribe('bus:radio')
+    run(eng, 0.5)
+    b = pcm(sub.get(0.1))
+    assert len(b) > 0.4 * SR and np.max(np.abs(b)) == 0.0
+    import inspect
+    from ismail.live import ops
+    assert inspect.signature(ops._call).parameters['name'].kind is inspect.Parameter.POSITIONAL_ONLY

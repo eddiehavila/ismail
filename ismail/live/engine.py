@@ -656,6 +656,8 @@ class Engine:
                     and not path.retiring:
                 b['ms'] *= a
                 self._hold(b, p0)
+                if self.hub.wants('bus:' + bname):     # a listener hears silence, not a gap (streams stay in step)
+                    streamed['bus:' + bname] = np.zeros((2, n), dtype=np.float32)
                 continue
             x = bus_in[bname]
             if path.chain.procs:
@@ -690,6 +692,8 @@ class Engine:
                 dk.air[:, i:j] = 0
                 if j - i < n:
                     dk.air[:, :n - (j - i)] = 0
+                if self.hub.wants('deck:' + dn):
+                    streamed['deck:' + dn] = np.zeros((2, n), dtype=np.float32)
                 continue
             if self.tap is not None:
                 self.tap('deck:' + dn, p0, deck_in[dn], G.LAT_BUDGET)

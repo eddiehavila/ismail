@@ -19,7 +19,7 @@ def _info_path(project):
     return os.path.join(os.path.abspath(project), 'live', 'engine.json')
 
 
-def _call(project, name, timeout=30, **args):
+def _call(project, name, /, timeout=30, **args):     # positional-only: an op argument may be called name
     try:
         with open(_info_path(project), encoding='utf8') as f:
             port = json.load(f)['port']
