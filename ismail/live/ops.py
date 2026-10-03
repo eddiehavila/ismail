@@ -288,8 +288,10 @@ def live_load(project: str, deck: str, song: str, bars: list = None, at: str = '
     with live_listen(deck=...), then bring it in with live_transition. The song's mix comes over as rendered:
     its automation (effect params and volume as ramps, instrument params rendered with the notes, the master fade;
     repeated every pass on a looping deck) and its group buses (a reverb on a drum bus keeps the dry drums). Placed
-    audio clips and the master effect chain do not (the reply lists what was left out). Loading replaces what a
-    cued deck held."""
+    audio clips do not (the reply lists what was left out); the song's master chain (its limiter) runs on the deck.
+    Loading replaces what a cued deck held. A cued deck plays from `at` (off air), so a song loaded early with
+    at='next_bar' is already bars into itself when the transition brings it in: load it with at='bar:<the
+    transition's bar>' to start it from its top on air."""
     if not os.path.isabs(song):
         cand = os.path.join(os.path.abspath(project), song)
         song = cand if os.path.exists(cand) else os.path.abspath(song)
@@ -316,7 +318,8 @@ def live_transition(project: str, to: str, from_deck: str = None, at: str = 'nex
     bass at a time, old leaves in the last quarter) | filter (old thins out through a rising high-pass while the
     new opens from a low-pass) | cut (switch on the boundary). The `to` deck must be playing by then (live_load
     or live_queue it first, cued); it goes on air at the start. from_deck defaults to the one deck on air. With
-    stop_from, the old deck's tracks stop when the transition ends. The reply is the timeline of every move."""
+    stop_from, the old deck's tracks stop when the transition ends and it goes off air (cued), ready for the next
+    live_load. The reply is the timeline of every move."""
     return _call(project, 'transition', to=to, from_deck=from_deck, at=at, bars=bars, style=style,
                  stop_from=stop_from)
 

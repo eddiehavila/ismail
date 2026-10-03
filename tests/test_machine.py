@@ -112,3 +112,22 @@ def test_the_cli_runs_a_command_in_a_slot_and_waits_its_turn(board):
     out = subprocess.run([sys.executable, '-m', 'ismail.machine', 'run', '--cpu', '--force', '--what', 'probe', '--',
                           sys.executable, '-c', code], capture_output=True, text=True, env=env, timeout=60)
     assert out.returncode == 0 and out.stdout.strip() == '1'      # its own job was on the board while it ran
+
+
+def test_an_estimate_takes_a_unit_and_a_bare_number_of_seconds_is_refused():
+    # M54: `--est 600` (meant as seconds) put a 10-minute render on the board as 585 min
+    assert machine.duration_s('10m') == 600 and machine.duration_s('600s') == 600 and machine.duration_s('1.5h') == 5400
+    assert machine.duration_s('12') == 720                                   # a bare number stays minutes
+    with pytest.raises(ValueError, match='600s'):
+        machine.duration_s('600')
+    with pytest.raises(ValueError, match='10m'):
+        machine.duration_s('ten')
+
+
+def test_the_board_shows_a_python_c_job_by_its_first_line_and_how_late_it_runs():
+    # M32: the board printed a `python -c` job's whole code
+    import time
+    job = {'kind': 'cpu', 'what': 'python -c import x\nfor a in b:\n    run(a)', 'who': 'ismail', 'pid': 1,
+           'started': time.time() - 600, 'est_s': 300}
+    d = machine._describe(job)
+    assert "'python -c import x ...'" in d and '\n' not in d and '5 min past its estimate' in d

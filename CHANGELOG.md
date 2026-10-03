@@ -76,6 +76,20 @@
 - `mimic_measure` measures a short note (a 0.3 s panpipe): its attack calibration read the note's level over a
   window that started after the note ended and produced a non-finite buffer.
 - `analyze_timbre` (and every analysis reading a source in stereo) works on a mono file: both channels read the same.
+- Live decks run the song's master chain (its limiter, compressor, any master effect), as its studio render does:
+  `live_load` dropped it, so a deck played about 4 dB quieter and unlimited. `live_status` shows it on the deck line.
+- A looping performer clip no longer hands its voice a negative song time: the context carried over the loop point
+  sat at negative clip beats, and a voice that seeds on the song time (the birds call voice) failed on it.
+- `live_transition` takes the old deck off air when it ends, so the next song loads onto it (it was refused, and a
+  helper that crashed on the refusal left a set silent for 9 minutes). `live_status` says `SILENT ON AIR` when a set
+  that has played sounds nothing for 10 s. `live_deck(cue=False)` describes the deck as it will be. `live_load`'s
+  doc says a cued deck plays from `at`.
+- `djkit.gap` brings each target back to a level (`level_db`, a number or per target) instead of 0 dB, and
+  `Set.gap` uses the gains the set has given each track: a set running its tracks at +4 to +8 dB had every drop land
+  under its build.
+- The machine governor: `run --est` takes a unit (`10m`, `600s`, `1.5h`; a bare number is minutes and one above 240
+  is refused, since `--est 600` meant as seconds showed a 10-minute render as 585 min). The board shows a `python -c`
+  job by its first line and how far past its estimate a job runs.
 
 ### Roles and the migration process
 

@@ -104,12 +104,15 @@ def throw(target, at, fx='delay', param='mix', peak=0.5, back=0.15, hold_beats=2
             move(target, fx, {param: back}, release_beats, a + hold_beats / 4)]
 
 
-def gap(targets, bar, length=1 / 3, depth_db=-60, fx='gain'):
+def gap(targets, bar, length=1 / 3, depth_db=-60, fx='gain', level_db=0.0):
     """Silence before a drop: every target's gain cut for the last `length` of the bar before `bar`, back on the
-    downbeat. Measured: a drop lands when the bar before it is empty (-27 dB, no sub) and the drop is 8 dB up."""
+    downbeat. Measured: a drop lands when the bar before it is empty (-27 dB, no sub) and the drop is 8 dB up.
+    level_db: the gain each target comes back to, a number or {target: dB}. A track run above 0 dB on this gain
+    must come back to that level, or the drop lands under its build (`Set.gap` passes the levels it has set)."""
     out = []
     for t in targets:
-        out += [move(t, fx, {'gain_db': depth_db}, 0, bar - length), move(t, fx, {'gain_db': 0}, 0, bar)]
+        back = level_db.get(t, 0.0) if isinstance(level_db, dict) else level_db
+        out += [move(t, fx, {'gain_db': depth_db}, 0, bar - length), move(t, fx, {'gain_db': back}, 0, bar)]
     return out
 
 
@@ -136,6 +139,7 @@ class Set:
         self.O = ops
         self.log_path = os.path.join(self.P, log)
         self.sections = {}
+        self.gains = {}             # {target: gain_db} last set on its 'gain' effect through this Set (for gap)
 
     def log(self, txt):
         os.makedirs(os.path.dirname(self.log_path), exist_ok=True)
@@ -182,12 +186,21 @@ class Set:
         self.log(f"cancel [{section}]: {r}")
         return r
 
+    def _note_gain(self, target, fx, params):
+        if fx in ('gain', 'gain:0') and isinstance(params, dict) and 'gain_db' in params:
+            self.gains[target] = float(params['gain_db'])
+
     def track(self, name, **kw):
+        for f in kw.get('fx') or []:
+            if isinstance(f, dict) and f.get('type') == 'gain':
+                self.gains[name] = float(f.get('gain_db', 0.0))
+                break
         r = self.O['live_track'](self.P, name, **kw)
         self.log(f"track {name} {({k: v for k, v in kw.items() if k != 'instrument'})}: {r}")
         return r
 
     def fx(self, target, fx, params, beats=0, at='now'):
+        self._note_gain(target, fx, params)
         r = self.O['live_fx'](self.P, target, fx, params, ramp_beats=beats, at=_at(at))
         self.log(f"fx {target}[{fx}] {params} over {beats} at {at}: {r}")
         return r
@@ -197,9 +210,15 @@ class Set:
         flat = []
         for m in moves:
             flat += m if isinstance(m, list) else [m]
+        for m in flat:
+            self._note_gain(m.get('target'), m.get('index'), m.get('params'))
         r = self.O['live_fx'](self.P, moves=flat)
         self.log(f"moves ({len(flat)}): {r.splitlines()[0]}")
         return r
+
+    def gap(self, targets, bar, **kw):
+        """`gap` sent now, each target coming back to the gain this Set last gave it (0 dB if none)."""
+        return self.moves(gap(targets, bar, level_db={t: self.gains.get(t, 0.0) for t in targets}, **kw))
 
     def clear(self, target, fx=None, at='now'):
         r = self.O['live_fx'](self.P, target, fx, clear=True, at=_at(at))
