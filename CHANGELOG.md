@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Live tests: notes go straight to the stage dev, and updates come back (S31)
+
+- stage.md and stage-dev.md: during a live test the studio agent in the room sends the person's stage notes directly
+  to the stage dev (and writes them in the handoff); when a change touches the page's code, the stage dev tells that
+  agent the update is ready, and the person takes it with the update gesture. The scene's content is the studio
+  agent's to change; how the stage works is the stage dev's.
+
 ### Roles: studio agents, the maintainer, the stage dev (S24); the intake lists open pull requests (M77)
 
 - `python -m ismail.handoffs` lists the open pull requests after the handoffs (title, branch, author, checks,

@@ -55,9 +55,19 @@ At the start of every session, after every compaction or summary of your context
 - **Comfort before features.** The person gets sick from lag, and every clip of the work is headset footage.
   Measure frame times after every export and scene change; never assume a scene fits the headset.
 
+## Notes during a live test
+
+While the person is in the stage, the studio agent with them sends you their notes directly instead of through a
+handoff; log each in your progress file so none is lost. Act on them in the person's order. The scene's content
+(models, lights, music, the environment) is the studio agent's to change; yours is how the stage works. When a change touches the page's code, tell that agent the moment the
+update is ready ("update ready, have them take it"): it tells the person in the room, and they take it with the
+update gesture. Before the stage had its own dev, the agent in the room made the updates itself and knew when they
+landed; this message keeps that loop closed. World changes stream in without an update; a server restart waits until
+the person is out (below).
+
 ## Deploying
 
-- **Only while the person is out.** Check that no page has posted state recently and that no voice note or upload
+- **A server restart only while the person is out.** Check that no page has posted state recently and that no voice note or upload
   is in flight; a restart in the middle of one loses it.
 - **Check it from their side after**: the server's health through the headset's own route, the served page carries
   the change, presence shows the listeners back. A restart drops every listener: tell the sessions that were
