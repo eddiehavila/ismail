@@ -23,7 +23,7 @@ def test_a_long_tail_after_the_release_is_silence_and_stays_so(cello):
     assert np.max(np.abs(y[:, int(3.5 * SR):])) < 1e-3
 
 
-def test_mono_gives_two_equal_channels_and_width_0_matches_mono_harmonics(cello):
+def test_mono_gives_two_equal_channels(cello):
     t = np.arange(int(1.5 * SR)) / SR
     y = mimic.render(cello, 130.8, t, 0.7, 1.0, SR, mono=True)
     assert y.shape == (2, len(t)) and np.array_equal(y[0], y[1]) and rms(y) > 1e-3
