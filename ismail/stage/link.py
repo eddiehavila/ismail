@@ -10,7 +10,8 @@ from pathlib import Path
 
 from ..api import OpError
 
-PAGE_FRESH_S = 15          # a page that posted its state within this long is "showing the scene"
+PAGE_FRESH_S = 120         # a page that posted its state within this long is "showing the scene" (a hidden
+                           # tab or a lifted headset posts about once a minute; the command waits in its queue)
 
 
 def registry_dir():
