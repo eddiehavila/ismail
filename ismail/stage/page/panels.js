@@ -21,6 +21,10 @@ const SENDER_COLOURS = ['#38bdf8', '#a78bfa', '#f472b6', '#34d399', '#fbbf24', '
 const hashOf = (s) => [...String(s)].reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) >>> 0, 7);
 export const senderColour = (from) => (!from ? null : from === 'stage' ? '#94a3b8' : SENDER_COLOURS[hashOf(from) % SENDER_COLOURS.length]);
 export const senderSide = (from) => (from && hashOf(from) % 2 ? 'left' : 'right');
+// a body panel stays put while the user looks at it and for BODY_LOOK_HOLD_MS after, moves only when its place has
+// drifted by BODY_SLACK_M (a walk, a body turn), and then eases slowly (the user, 2026-10-04: "they dart out of my
+// vision... if I do turn to them, then they should stay where they are while I'm looking at them")
+const BODY_LOOK_DEG = 32, BODY_LOOK_HOLD_MS = 1500, BODY_SLACK_M = 0.25, BODY_DRIFT_MS = 600, BODY_EASE = 1.4;
 const BODY_WIDTH = 0.42, BODY_DEG = 72, BODY_DIST = 0.6, BODY_DROP = 0.12;   // a 0.42 m panel 72 degrees out sits just
                                                                             // past the Quest 3's view straight ahead
 
@@ -264,20 +268,32 @@ export function initPanels(ed, xrApi, hands, voice, live, body) {
   // ---- a right thumbs up / down held while a panel is in view answers it (if it has buttons, the first and the
   // last stand for yes and no; otherwise the answer is 'thumbs up' / 'thumbs down')
   let verdict = { g: null, since: 0 };
+  const thumbAnswers = (p) => (p.buttons.length ? [p.buttons[0], p.buttons[p.buttons.length - 1]] : ['thumbs up', 'thumbs down']);
   function thumbs(now) {
     const r = hands.state.right, g = r && r.f && (r.g === 'thumbs_up' || r.g === 'thumbs_down') ? r.g : null;
+    const forming = r && r.f && (g || r.cand === 'thumbs_up' || r.cand === 'thumbs_down');
     if (g !== verdict.g) verdict = { g, since: now };
-    if (!g || now - verdict.since < VERDICT_HOLD_MS || !panels.size) return;
-    const gaze = camera.getWorldDirection(new THREE.Vector3()), head = camera.getWorldPosition(new THREE.Vector3());
-    let target = null, bestDot = Math.cos(THREE.MathUtils.degToRad(30));
-    for (const p of panels.values()) {
-      if (p.answer) continue;                                   // answered, fading out
-      const d = p.mesh.getWorldPosition(new THREE.Vector3()).sub(head).normalize().dot(gaze);
-      if (d > bestDot) { bestDot = d; target = p; }
+    let target = null;
+    if (panels.size && forming) {
+      const gaze = camera.getWorldDirection(new THREE.Vector3()), head = camera.getWorldPosition(new THREE.Vector3());
+      let bestDot = Math.cos(THREE.MathUtils.degToRad(30));
+      for (const p of panels.values()) {
+        if (p.answer) continue;                                 // answered, fading out
+        const d = p.mesh.getWorldPosition(new THREE.Vector3()).sub(head).normalize().dot(gaze);
+        if (d > bestDot) { bestDot = d; target = p; }
+      }
     }
-    if (!target || target.answer) return;
+    // what the thumbs will answer, over the right hand while it forms the gesture (voice.js; a spoken ask wins)
+    if (voice.thumbPrompt && voice.prompt.by !== 'ask') {
+      if (target) {
+        const [yes, no] = thumbAnswers(target);
+        voice.thumbPrompt({ by: 'panel', q: target.title || String(target.text).slice(0, 90) || target.id, yes, no, from: target.from });
+        voice.prompt.g = g; voice.prompt.fill = g ? Math.min(1, (now - verdict.since) / VERDICT_HOLD_MS) : 0;
+      } else if (voice.prompt.by === 'panel') voice.thumbPrompt(null);
+    }
+    if (!g || now - verdict.since < VERDICT_HOLD_MS || !target) return;
     verdict.since = Infinity;                                   // one verdict per gesture
-    const a = target.buttons.length ? (g === 'thumbs_up' ? target.buttons[0] : target.buttons[target.buttons.length - 1]) : g.replace('_', ' ');
+    const a = target.buttons.length ? thumbAnswers(target)[g === 'thumbs_up' ? 0 : 1] : g.replace('_', ' ');
     answer(target, a, 'right ' + g.replace('_', ' '));
   }
 
@@ -322,11 +338,34 @@ export function initPanels(ed, xrApi, hands, voice, live, body) {
   }
 
   let lastT = 0;
+  const lookH = new THREE.Vector3(), lookD = new THREE.Vector3(), lookTo = new THREE.Vector3();
+  function lookedAt(p) {
+    camera.getWorldPosition(lookH); camera.getWorldDirection(lookD);
+    lookTo.copy(p.mesh.position).sub(lookH).normalize();
+    return lookTo.dot(lookD) > Math.cos(THREE.MathUtils.degToRad(BODY_LOOK_DEG));
+  }
+  // the body does not turn while the user looks at (or just looked at) a body panel
+  if (body && body.holdWhile) body.holdWhile(() => [...panels.values()].some((p) => p.body && performance.now() < (p.lookUntil || 0)));
+  function followBody(p, now, dt) {
+    if (lookedAt(p)) p.lookUntil = now + BODY_LOOK_HOLD_MS;
+    if (now < (p.lookUntil || 0)) { faceUser(p.mesh); return; }               // being read: it stays where it is
+    const was = p.mesh.position.clone();
+    placeOnBody(p, 1);                                                       // where it belongs now
+    const off = p.mesh.position.distanceTo(was);
+    if (!p.moving && (off < BODY_SLACK_M || now - (p.driftSince ||= now) < BODY_DRIFT_MS)) {   // within slack, or not for long
+      if (off < BODY_SLACK_M) p.driftSince = 0;
+      p.mesh.position.copy(was); faceUser(p.mesh); return;
+    }
+    p.moving = off > 0.02; p.driftSince = 0;                                 // drifted a while: ease there slowly, then rest
+    const want = p.mesh.position.clone();
+    p.mesh.position.copy(was).lerp(want, 1 - Math.exp(-dt * BODY_EASE));
+    faceUser(p.mesh);
+  }
   function update() {
     if (!renderer.xr.isPresenting) return;
-    const now = performance.now(), k = 1 - Math.exp(-Math.min(0.1, (now - (lastT || now)) / 1000) * 6);
+    const now = performance.now(), dt = Math.min(0.1, (now - (lastT || now)) / 1000);
     lastT = now;
-    for (const p of panels.values()) if (p.body && !(drag.left && drag.left.p === p) && !(drag.right && drag.right.p === p)) placeOnBody(p, k);
+    for (const p of panels.values()) if (p.body && !(drag.left && drag.left.p === p) && !(drag.right && drag.right.p === p)) followBody(p, now, dt);
     nearDrag();
     poke();
     thumbs(performance.now());

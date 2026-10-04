@@ -17,6 +17,9 @@ const wrapA = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 export function initBody(ed, hands) {
   const { camera } = ed;
   const st = { yaw: null, offSince: 0, turning: false, last: 0, via: 'head' };
+  // looking at something that rides with the body is the head turning, not the body (the user, 2026-10-04: turning
+  // to a card "they dart out of my vision"); panels.js says when (holds)
+  const holds = [];
   const head = new THREE.Vector3(), fwd = new THREE.Vector3(), mid = new THREE.Vector3();
 
   function headYaw() {
@@ -38,6 +41,8 @@ export function initBody(ed, hands) {
     const hy = headYaw();
     if (st.yaw === null) { st.yaw = hy; return; }
     const diff = wrapA(hy - st.yaw);
+    const held = holds.some((fn) => fn());
+    if (held) { st.offSince = 0; st.turning = false; return; }            // the hands do not pull it either
     if (Math.abs(diff) > THREE.MathUtils.degToRad(TURN_DEG)) {
       if (!st.offSince) st.offSince = now;
       if (now - st.offSince > HOLD_MS) st.turning = true;
@@ -65,5 +70,5 @@ export function initBody(ed, hands) {
     return { deg: THREE.MathUtils.radToDeg(wrapA((st.yaw ?? headYaw()) - yawOf(v))), dist: v.length(), dy: p.y - head.y };
   }
   ed.renderer.xr.addEventListener('sessionstart', () => { st.yaw = null; st.turning = false; st.offSince = 0; });
-  return { update, forward, around, bearing, state: st, get yaw() { return st.yaw; } };
+  return { update, forward, around, bearing, state: st, holdWhile: (fn) => holds.push(fn), get yaw() { return st.yaw; } };
 }

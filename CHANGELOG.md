@@ -51,6 +51,12 @@
   floor, keep-out boxes, the default scene, the build script) lives in `scenes/<name>/world.json` and
   `scenes/stage.json`. Session files (client log, speech cache, bundle, update notes) go to `<scenes>/_stage/`.
 - One server per port: a busy port is refused (Windows let two servers bind one port and split the live link).
+- Body panels hold still to be read: a panel the person looks at (within 32 degrees) stays where it is, and for 1.5 s
+  after; looking at it never counts as the body turning; it moves only when its place has drifted 25 cm for 0.6 s
+  (a walk, a real body turn), then eases there. It used to dart away as they turned to read it.
+- The thumbs prompt rides on the answering hand: while a spoken question waits (`stage_ask`, now with `sender=`),
+  and while the right hand forms a thumb at a panel, a card over the right wrist says who asks, the question, and
+  what up and down will answer, filling as the gesture is held.
 - Every panel and caption says who it is from: `stage_say(sender=)`, `stage_panel_show(sender=)` (a command's `from`)
   draw a chip and border in that name's colour, fixed per name, and a sender's body panels keep to one side. The VR
   card that goes with a spoken line rides with the person now, titled by its sender instead of "Claude". The

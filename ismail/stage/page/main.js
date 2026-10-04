@@ -140,7 +140,7 @@ live.handlers.goto = async (c) => {
 const snapDesk = live.handlers.snapshot;
 live.handlers.snapshot = async (c) => (ed.renderer.xr.isPresenting ? voice.eyeSnapshot() : snapDesk(c));
 live.handlers.eyecam = (c) => voice.eyecam(c.fps || 1, c.seconds || 10);
-live.handlers.ask = (c) => voice.ask(c.text, c.seconds || 60);
+live.handlers.ask = (c) => voice.ask(c.text, c.seconds || 60, c.from);
 live.handlers.voice_rec = (c) => (c.action === 'stop' ? voice.noteStop() : voice.noteStart('claude'));
 xr.setRec(() => { (hands.rec.on ? stopTake() : Promise.resolve(startTake(''))).then(() => xr.redraw()); }, () => hands.rec.on);
 const clock = new THREE.Clock();
@@ -184,7 +184,7 @@ ed.renderer.setAnimationLoop(() => {
 });
 
 window.VR = {
-  ed, desktop, xr, live, THREE, body, panels, hands,
+  ed, desktop, xr, live, THREE, body, panels, hands, voice,
   selftest: () => ed.selftest(),
   save: () => ed.save(),
   undo: () => ed.undo(),
