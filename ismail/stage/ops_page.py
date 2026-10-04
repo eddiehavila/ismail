@@ -86,7 +86,7 @@ def stage_person_goto(scene: str, position: list, target: list, seconds: float =
     below position (a floor found from 30 cm above it), turned so they face target (yaw only), with a whoosh; seconds
     is ignored. Errors: position or target missing. Page replies {arrived} on the desktop, {arrived, xr: true, floor}
     in VR (floor is three Y = Blender Z, null when no floor was found). Emits: mode (desktop, when walk was on)."""
-    return page_cmd(scene, 'goto', {'position': position, 'target': target, 'seconds': seconds}, timeout=((seconds or 60) + 30))
+    return page_cmd(scene, 'goto', {'position': position, 'target': target, 'seconds': seconds}, timeout=((60 if seconds is None else seconds) + 30))
 
 
 @op(mutates=True)
@@ -94,7 +94,7 @@ def stage_camera_goto(scene: str, camera: str, seconds: float = 1.2) -> str:
     """Fly the desktop view to a Blender camera and look through it (page command: goto_camera; the page reads `name`
     or `camera`). Desktop only. Errors: in VR ("not in XR"), no such object, or the object is not a CAMERA. Page
     replies {arrived, camera}. Emits: mode (look-through), and mode first when walk was on."""
-    return page_cmd(scene, 'goto_camera', {'camera': camera, 'seconds': seconds}, timeout=((seconds or 60) + 30))
+    return page_cmd(scene, 'goto_camera', {'camera': camera, 'seconds': seconds}, timeout=((60 if seconds is None else seconds) + 30))
 
 
 @op(mutates=True)
@@ -135,7 +135,7 @@ def stage_view_eyecam(scene: str, fps: float = 1, seconds: float = 10) -> str:
     """Record a timelapse of the left eye in VR, one PNG per frame, up to 600 frames (page command: eyecam). Blocks the
     command queue while it runs. Outside VR it records nothing and replies frames 0 (no error). fps 0 is read as 1.
     Page replies {frames, first, last} (paths). Emits: nothing."""
-    return page_cmd(scene, 'eyecam', {'fps': fps, 'seconds': seconds}, timeout=((seconds or 60) + 30))
+    return page_cmd(scene, 'eyecam', {'fps': fps, 'seconds': seconds}, timeout=((60 if seconds is None else seconds) + 30))
 
 
 @op(mutates=True)
@@ -156,7 +156,7 @@ def stage_ask(scene: str, text: str, seconds: float = 60) -> str:
     gestures). A second ask while one is open does not raise: the page replies {error: 'already asking: ...'} (the op
     should turn that into OpError). Page replies {question, answer: yes | no | 'no answer', seconds}. Emits: answer,
     voice_spoken, voice_error."""
-    return page_cmd(scene, 'ask', {'text': text, 'seconds': seconds}, timeout=((seconds or 60) + 30))
+    return page_cmd(scene, 'ask', {'text': text, 'seconds': seconds}, timeout=((60 if seconds is None else seconds) + 30))
 
 
 @op(mutates=True)
@@ -189,7 +189,7 @@ def stage_panel_show(scene: str, panel_id: str = None, title: str = '', text: st
     by the page's own modules as a three.js vector; from a command it is unclear (a JSON list has no x/y/z) and should
     not be relied on. Page replies {id, answer, via, seconds}, {id, answer: null, why} when closed unanswered, or
     {id, shown: true} with wait=False. Emits: panel_shown, panel_answer, panel_closed."""
-    return page_cmd(scene, 'panel', {'panel_id': panel_id, 'title': title, 'text': text, 'image': image, 'buttons': buttons, 'width': width, 'seconds': seconds, 'quiet': quiet, 'wait': wait, 'near': near}, timeout=((seconds or 60) + 30))
+    return page_cmd(scene, 'panel', {'panel_id': panel_id, 'title': title, 'text': text, 'image': image, 'buttons': buttons, 'width': width, 'seconds': seconds, 'quiet': quiet, 'wait': wait, 'near': near}, timeout=((60 if seconds is None else seconds) + 30))
 
 
 @op(mutates=True)

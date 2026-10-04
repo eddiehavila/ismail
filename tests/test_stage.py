@@ -179,3 +179,15 @@ def test_no_server_says_how_to_start_one(tmp_path, monkeypatch):
     monkeypatch.setenv('ISMAIL_STAGE_REGISTRY', str(tmp_path / 'empty'))
     with pytest.raises(OpError, match=r'no stage server is running; start one with stage_start'):
         OPS['stage_say'](scene='room', text='hello')
+
+
+def test_a_page_seen_just_now_counts(stage, monkeypatch):
+    """age_s 0.0 (Linux and macOS clocks) is a live page, not a missing one (CI caught `age or 1e9`)."""
+    from ismail.stage import link
+    page = FakePage(stage['port'], 'room')
+    real = link.page_state
+    monkeypatch.setattr(link, 'page_state', lambda rec, scene: {**real(rec, scene), 'age_s': 0.0})
+    try:
+        assert OPS['stage_object_deselect'](scene='room').startswith('deselect (')
+    finally:
+        page.stop = True

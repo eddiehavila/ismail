@@ -91,7 +91,8 @@ def page_cmd(scene, ctype, fields, timeout=30):
     """Queue one command for the page showing `scene`; wait for its cmd_done; reply with the page's answer."""
     rec = server_for(scene)
     st = page_state(rec, scene)
-    if st.get('state') is None or (st.get('age_s') or 1e9) > PAGE_FRESH_S:
+    age = st.get('age_s')                                  # 0.0 is a page seen just now: never `age or default`
+    if st.get('state') is None or age is None or age > PAGE_FRESH_S:
         raise OpError(f'no page is showing scene {scene!r} (last seen {st.get("age_s")} s ago); open '
                       f'{rec["url"]}?scene={scene} in the headset or a browser, then try again')
     cmd = {'type': ctype, **{k: v for k, v in fields.items() if v is not None}}
