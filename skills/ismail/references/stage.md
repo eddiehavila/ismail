@@ -34,6 +34,29 @@ person and an agent change the same scene.
   An open page swaps it in under the construct, never while the person is in VR.
 - **Changes they will notice:** `stage_note(scenes, title, level)` feeds the "updates ready" card in the headset.
 
+## Deriving a scene
+
+A remodel, another era, the same place at dawn: a scene made from another is derived, never rebuilt. One build of a
+club "today" was dressed on the first grey blockout of the 1958 bar instead of the bar as built, and the person saw
+crude stools, no bottles, block trees and cylinder people: every lesson already learned in the built room was lost.
+
+- **Start from the built version, and say which base you use.** `stage_scene_new(name, source=, pass_script=)`
+  writes `derives_from` into the new scene's world.json and copies the page's own pieces (trees, names, cues,
+  waypoints; the actor bodies come from the source through `assets`). The person's takes, voice notes and snapshots
+  stay with the source.
+- **The variant is a pass on the built room,** a script run after the source's full build and before the Quest diet
+  (`pass` in world.json, `pass_env` for its switches). It removes, adds and repaints what changed; everything else
+  is the source's. `stage_scene_export` runs the whole line (the source's build, every pass oldest first, the
+  edits of the line merged with the variant's winning, the diet). Room scripts exec `os.environ["VR_BRIDGE"]` at
+  their end so the passes and the diet run. A room with its own Quest merge defines `stage_diet()` and skips that
+  merge in its build when `VR_DIET` is set: a pass that runs after the merge finds one joined mesh, not the stools.
+- **Check it beside its source from the same camera** before the person sees it: the same view of both, side by
+  side, and look for anything that went back to a blockout.
+- **Renders of a scene go in `renders/<scene>/`** (a script reads `STAGE_SCENE`), so a camera both scenes share
+  never overwrites the other's still.
+- **A direction note is a direction, not an open question.** If the person said the place expanded, build it
+  expanded; ask only what the notes leave open.
+
 ## Choose the surface for the decision
 
 Each kind of decision has a place where the person can judge it fastest. Use that one, and say why.
