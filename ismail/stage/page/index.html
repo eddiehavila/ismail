@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>crossroads stage</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@600&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  /* Taste contract: Instrument chrome, one costume detail from Lucy (her red jewel is the live link; section heads
+     are set like her silkscreened control plate). Every value traces to a token here. */
+  :root {
+    --ground: #101418; --ground-2: #161b21; --ground-3: #1d232b; --line: #252c35; --line-2: #343d48;
+    --ink: #e6edf3; --muted: #8b949e; --plate: #e9dfc6;
+    --accent: hsl(154 58% 48%); --accent-dim: hsl(154 40% 22%); --accent-ink: #06130d;
+    --ok: #3fb950; --warn: #d29922; --bad: #f85149; --jewel: #ff2a3d; --claude: #d97757;
+    --u: 4px; --r: 2px; --t: 120ms ease-out;
+    --mono: 'JetBrains Mono', ui-monospace, 'Cascadia Mono', Consolas, monospace;
+    --display: 'Archivo', 'Segoe UI', sans-serif;
+  }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #000; color: var(--ink);
+    font: 12px/1.4 var(--mono); font-variant-numeric: tabular-nums; }
+  canvas { display: block; }
+  button { background: var(--ground-2); color: var(--ink); border: 1px solid var(--line-2); border-radius: var(--r);
+    height: 26px; padding: 0 calc(var(--u) * 2.5); cursor: pointer; font: 500 11px/1 var(--mono);
+    letter-spacing: 0.06em; text-transform: uppercase; transition: background var(--t), border-color var(--t), color var(--t); }
+  button:hover { background: var(--ground-3); border-color: var(--muted); }
+  button.on { background: var(--accent-dim); border-color: var(--accent); color: #fff; }
+  #save { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+  #save:hover { filter: brightness(1.1); }
+  .row { display: flex; gap: var(--u); flex-wrap: wrap; }
+  .muted { color: var(--muted); }
+
+  #toolbar { position: fixed; top: calc(var(--u) * 2.5); right: calc(var(--u) * 2.5); display: flex; gap: var(--u);
+    align-items: center; padding: var(--u); background: var(--ground); border: 1px solid var(--line); border-radius: var(--r); }
+  #toolbar .sep { width: 1px; align-self: stretch; background: var(--line); margin: 0 var(--u); }
+  #toolbar #dirty { font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; min-width: 64px;
+    display: inline-flex; align-items: center; gap: 6px; color: var(--muted); padding-left: var(--u); }
+  #toolbar #dirty::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--line-2); }
+  #toolbar #dirty.on { color: var(--warn); }
+  #toolbar #dirty.on::before { background: var(--warn); box-shadow: 0 0 5px var(--warn); }
+
+  #panel { position: fixed; top: 50px; right: calc(var(--u) * 2.5); width: 300px; max-height: calc(100% - 62px);
+    overflow: auto; background: var(--ground); border: 1px solid var(--line); border-radius: var(--r);
+    padding: 0 calc(var(--u) * 3) calc(var(--u) * 3); scrollbar-width: thin; scrollbar-color: var(--line-2) transparent; }
+  #panel.hidden, #help.hidden { display: none; }
+  #panel details { border-top: 1px solid var(--line); padding: calc(var(--u) * 2) 0 var(--u); }
+  #panel details:first-of-type { border-top: 0; }
+  /* section heads: cream silkscreen caps over a hairline, like the labels under Lucy's knobs */
+  #panel summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 8px;
+    font: 600 10.5px/1 var(--mono); letter-spacing: 0.16em; text-transform: uppercase; color: var(--plate);
+    padding: var(--u) 0 calc(var(--u) * 2); }
+  #panel summary::-webkit-details-marker { display: none; }
+  #panel summary::after { content: ''; flex: 1; height: 1px; background: var(--line-2); }
+  #panel summary::before { content: '+'; color: var(--muted); width: 8px; }
+  #panel details[open] > summary::before { content: '\2212'; }
+  #panel summary .muted { letter-spacing: 0.04em; text-transform: none; font-weight: 400; order: 2; }
+  #panel summary::after { order: 3; }
+  #panel section { padding-top: calc(var(--u) * 2); }
+  #panel label { display: flex; align-items: center; gap: 6px; margin: var(--u) 0; color: var(--muted);
+    font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; }
+  #panel select, #panel input[type=range] { width: 100%; accent-color: var(--accent); }
+  #panel input[type=color] { width: 26px; height: 20px; padding: 0; border: 1px solid var(--line-2); border-radius: var(--r);
+    background: none; }
+  #selname { font: 600 13px/1.3 var(--display); color: var(--ink); margin: var(--u) 0; word-break: break-all; }
+  #selhint { font-size: 11px; margin: 0 0 calc(var(--u) * 1.5); }
+  #status { margin-top: calc(var(--u) * 2); color: var(--muted); min-height: 2.6em; font-size: 11px; }
+
+  #search { width: 100%; box-sizing: border-box; height: 26px; background: var(--ground-2); color: var(--ink);
+    border: 1px solid var(--line-2); border-radius: var(--r); padding: 0 calc(var(--u) * 2); font: 12px var(--mono); }
+  #search:focus { outline: none; border-color: var(--accent); }
+  #outliner { max-height: 38vh; overflow: auto; margin-top: calc(var(--u) * 2); scrollbar-width: thin;
+    scrollbar-color: var(--line-2) transparent; }
+  #outliner .grp { color: var(--muted); font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase;
+    margin: calc(var(--u) * 2) 0 var(--u); }
+  #outliner .it { padding: 3px 6px; border-left: 2px solid transparent; cursor: pointer; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis; transition: background var(--t), border-color var(--t); }
+  #outliner .it:hover { background: var(--ground-2); border-left-color: var(--line-2); }
+  #outliner .it.sel { background: var(--accent-dim); border-left-color: var(--accent); color: #fff; }
+  #outliner .it .n { color: var(--muted); font-size: 10.5px; }
+
+  #pip { position: fixed; border: 1px solid var(--accent); pointer-events: none; }
+  #pip::after { content: attr(data-label); position: absolute; left: 4px; top: 2px; color: var(--accent);
+    font: 11px var(--mono); text-shadow: 0 0 3px #000; }
+  #help { position: fixed; left: calc(var(--u) * 2.5); top: 40px; max-width: 540px; color: var(--ink); font-size: 11.5px;
+    line-height: 1.7; pointer-events: none; background: var(--ground); border: 1px solid var(--line); border-radius: var(--r);
+    padding: calc(var(--u) * 2) calc(var(--u) * 3); }
+  #help b { color: var(--plate); font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; font-size: 10px;
+    display: inline-block; width: 64px; }
+
+  /* the live link to Claude: Lucy's red jewel, dark until the line is open */
+  #live { position: fixed; left: calc(var(--u) * 2.5); top: calc(var(--u) * 2.5); font: 600 10.5px/1 var(--mono);
+    letter-spacing: 0.16em; padding: 6px 10px 6px 24px; border-radius: var(--r); background: var(--ground);
+    color: var(--muted); border: 1px solid var(--line); pointer-events: none; }
+  #live::before { content: ''; position: absolute; left: 9px; top: 50%; width: 9px; height: 9px; margin-top: -4.5px;
+    transform: rotate(45deg); background: #3a1418; border: 1px solid #5a2028; }
+  #live.up { color: var(--ink); border-color: #1f5130; }
+  #live.up::before { background: radial-gradient(circle at 35% 35%, #d1fae5 0 18%, #22c55e 45%, #166534 100%);
+    border-color: #ff6b78; box-shadow: 0 0 8px var(--jewel); }
+
+  #captions { position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%); width: min(720px, calc(100% - 32px));
+    display: flex; flex-direction: column; align-items: center; gap: 8px; pointer-events: none; }
+  .caption { background: var(--ground); border: 1px solid var(--line-2); border-left: 3px solid var(--claude);
+    border-radius: var(--r); padding: 10px 16px; color: var(--ink); font: 16px/1.45 var(--display); max-width: 100%;
+    opacity: 0; transform: translateY(8px); transition: opacity 0.35s ease, transform 0.35s ease; }
+  .caption.show { opacity: 1; transform: none; }
+  .caption b { color: var(--claude); font: 600 10px/1 var(--mono); letter-spacing: 0.14em; display: block;
+    margin-bottom: 4px; text-transform: uppercase; }
+  .mlabel { position: fixed; transform: translate(-50%, -100%); pointer-events: none; background: var(--ground);
+    color: var(--ink); border: 1px solid var(--c, var(--claude)); border-radius: var(--r); padding: 3px 8px;
+    font: 12px var(--mono); white-space: nowrap; margin-top: -6px; }
+  #crosshair { position: fixed; left: 50%; top: 50%; width: 6px; height: 6px; margin: -3px 0 0 -3px; border-radius: 50%;
+    background: #fff; box-shadow: 0 0 0 1px #000; pointer-events: none; }
+  #walkhint { position: fixed; left: 50%; top: 14px; transform: translateX(-50%); background: var(--ground);
+    border: 1px solid var(--line); padding: 5px 12px; border-radius: var(--r); color: var(--ink); font-size: 11px;
+    pointer-events: none; }
+  .toast { position: fixed; left: 50%; top: 52px; transform: translate(-50%, -8px); background: var(--ground);
+    border: 1px solid var(--accent); color: var(--ink); padding: 6px 14px; border-radius: var(--r); font-size: 12px;
+    opacity: 0; transition: opacity 0.3s ease, transform 0.3s ease; pointer-events: none; }
+  .toast.show { opacity: 1; transform: translate(-50%, 0); }
+  #loading { position: fixed; inset: 0; display: grid; place-items: center; pointer-events: none; color: var(--muted); font: 13px var(--mono);
+    letter-spacing: 0.12em; text-transform: uppercase; }
+</style>
+<script>
+// Every console error, warning and boot step goes to the server too (POST /clientlog -> vr/clientlog.jsonl, the
+// server log, and a page_error event on the scene's live bus), so a headset that shows nothing still tells us why.
+(() => {
+  const q = [], page = Math.random().toString(36).slice(2, 8), seen = new Map();
+  const scene = new URLSearchParams(location.search).get('scene') || '';
+  const xrNow = () => { try { return !!(window.VR && window.VR.ed.renderer.xr.isPresenting); } catch (_) { return false; } };
+  const top = (s) => String(s || '').split('\n').slice(0, 4).join(' | ');
+  const text = (a) => a.map((x) => x instanceof Error ? `${x.message} | ${top(x.stack)}`
+    : typeof x === 'object' ? (() => { try { return JSON.stringify(x).slice(0, 300); } catch (_) { return String(x); } })() : String(x)).join(' ');
+  function log(level, msg) {
+    const k = level + msg.slice(0, 160), n = (seen.get(k) || 0) + 1;     // a per-frame error is sent 3 times, then counted
+    seen.set(k, n);
+    if (n > 3 && n % 300) return;
+    q.push({ level, msg: n > 3 ? `(x${n}) ${msg}` : msg, t: Math.round(performance.now()), xr: xrNow() });
+    if (q.length > 400) q.splice(0, q.length - 400);
+    // debounced, but never starved: a steady stream of lines (a new one every < 800 ms) used to reset the timer
+    // forever, so nothing (beats included) reached the server (2026-10-03 22:48 on the Quest)
+    clearTimeout(log.t); log.t = setTimeout(flush, level === 'error' || level === 'xr' ? 50 : 800);
+    if (!log.first) log.first = performance.now();
+    if (performance.now() - log.first > 3000) flush();
+  }
+  function flush() {
+    log.first = 0;
+    if (!q.length) return;
+    const body = JSON.stringify({ page, scene, ua: navigator.userAgent, entries: q.splice(0) });
+    fetch('clientlog', { method: 'POST', body, keepalive: true }).catch(() => {});
+  }
+  for (const level of ['error', 'warn']) {
+    const orig = console[level].bind(console);
+    console[level] = (...a) => { orig(...a); log(level, text(a)); };
+  }
+  const info = console.log.bind(console);
+  console.log = (...a) => { info(...a); if (typeof a[0] === 'string' && /^\[(boot|vr|xr)\]/.test(a[0])) log('info', text(a)); };
+  addEventListener('error', (e) => {
+    if (e.target && e.target !== window && (e.target.src || e.target.href)) return log('error', `failed to load ${e.target.src || e.target.href}`);
+    log('error', `${e.message} at ${(e.filename || '').split('/').pop()}:${e.lineno}:${e.colno}` + (e.error && e.error.stack ? ` | ${top(e.error.stack)}` : ''));
+  }, true);
+  addEventListener('unhandledrejection', (e) => log('error', 'unhandled: ' + text([e.reason])));
+  addEventListener('pagehide', flush);
+  window.VR_log = log;
+  log('info', `[boot] page open: ${location.pathname}${location.search}`);
+})();
+</script>
+<script type="importmap">
+{ "imports": { "three": "./vendor/three/build/three.module.js", "three/addons/": "./vendor/three/examples/jsm/" } }
+</script>
+</head>
+<body>
+<div id="loading">loading scene...</div>
+<div id="live" title="live link to Claude (server /live)">LIVE</div>
+<button id="micbtn" style="position:fixed;left:50%;bottom:84px;transform:translateX(-50%);z-index:20;padding:14px 22px;
+  font:600 16px system-ui,sans-serif;color:#fff;background:#7c2d12;border:2px solid #fff;border-radius:6px;cursor:pointer;
+  opacity:.92">Allow microphone (voice notes)</button>
+<style>#micbtn.on { background: #14532d !important; }</style>
+<div id="help" class="hidden"><b>Move</b> W A S D, Q E down / up, Shift faster; drag orbit, right-drag pan, wheel zoom<br>
+  <b>Select</b> click a group, click again or Alt+click for a part inside; Esc deselects; F focuses; End drops it onto what is below<br>
+  <b>Gizmo</b> 1 move, 2 rotate, 3 scale, L local / world<br>
+  <b>Views</b> V walk, C look through the selected camera, P snapshot<br>
+  <b>Through a camera</b> drag turns it, scroll dollies it forward and back, W/A/S/D move it, Q/E lower and raise it, Shift faster<br>
+  <b>File</b> Ctrl+S save, Ctrl+Z undo &nbsp; <b>Panels</b> H panel, ? this help</div>
+<div id="crosshair" hidden></div>
+<div id="walkhint" hidden>WALK: click to capture the mouse, W A S D move, Q / E down / up, Shift faster, click selects, Esc or V leaves</div>
+<div id="captions"></div>
+<div id="labels"></div>
+<div id="pip" hidden></div>
+<div id="toolbar">
+  <button data-mode="translate" class="on" title="move (1)">Move</button><button data-mode="rotate" title="rotate (2)">Rotate</button><button data-mode="scale" title="scale (3)">Scale</button><button id="space" title="local / world (L)">Local</button>
+  <span class="sep"></span>
+  <button id="walk" title="walk (V)">Walk</button>
+  <span class="sep"></span>
+  <button id="undo" title="undo (Ctrl+Z)">Undo</button><button id="save" title="save (Ctrl+S)">Save</button><span id="dirty" class="muted"></span>
+  <span class="sep"></span>
+  <button id="togglepanel" class="on" title="panel (H)">Panel</button><button id="togglehelp" title="keys (?)">?</button>
+</div>
+<div id="panel">
+  <details open id="d_out"><summary>Scene <span class="muted" id="scenename"></span></summary>
+    <input id="search" type="search" placeholder="find an object" autocomplete="off">
+    <div id="outliner"></div>
+  </details>
+  <details open id="d_sel"><summary>Selection</summary>
+  <div id="selname">nothing selected</div>
+  <div id="selhint" class="muted" hidden>a group: click it again (or Alt+click) to pick a part inside</div>
+  <section id="lightbox" hidden>
+    <label>Intensity <span id="energy" class="muted"></span></label>
+    <input id="intensity" type="range" min="-6" max="6" step="0.01" value="0">
+    <label>Colour <input id="lightcolor" type="color"></label>
+  </section>
+  <section id="matbox" hidden><div class="muted">Material base colour (shared by every object using it)</div></section>
+  <section id="cambox" hidden><button id="through">Look through camera (C)</button></section>
+  </details>
+  <details id="d_view"><summary>View</summary>
+  <section>
+    <label>Exposure <span id="expval" class="muted">0.0 EV</span></label>
+    <input id="exposure" type="range" min="-4" max="4" step="0.1" value="0">
+    <label><input id="shadows" type="checkbox" checked> Shadows</label>
+    <button id="selftest">Selftest</button>
+  </section>
+  </details>
+  <div id="status"></div>
+</div>
+<script type="module">
+// The whole stage in one request (the user's Quest, 2026-10-03: thirty module requests through tailscale, a different
+// one dropped each time, and the page never started). bundle.js is built by server.py from main.js with esbuild; it is
+// fetched with a stall watchdog and retries, then started from memory. Without a bundle the modules load one by one.
+const say = (t) => { const el = document.getElementById('status'); if (el) el.textContent = t; console.log('[boot]', t); };
+async function fetchText(url, tries = 6) {          // aborted and asked again when no byte arrives for 6 s
+  for (let n = 1; n <= tries; n++) {
+    const ac = new AbortController();
+    let to = setTimeout(() => ac.abort(), 6000);
+    try {
+      const r = await fetch(`${url}?t=${Date.now()}`, { cache: 'no-store', signal: ac.signal });
+      if (!r.ok) { const e = new Error(`${url}: ${r.status}`); e.final = r.status === 404; throw e; }
+      const total = +r.headers.get('Content-Length') || 0, rd = r.body.getReader(), parts = [];
+      let got = 0;
+      for (;;) {
+        clearTimeout(to); to = setTimeout(() => ac.abort(), 6000);
+        const { done, value } = await rd.read();
+        if (done) break;
+        parts.push(value); got += value.length;
+        say(`loading the stage: ${(got / 1e6).toFixed(1)}${total ? ' of ' + (total / 1e6).toFixed(1) : ''} MB` + (n > 1 ? ` (try ${n})` : ''));
+      }
+      clearTimeout(to);
+      if (total && got !== total) throw new Error(`${url}: ${got} of ${total} bytes`);
+      return new TextDecoder().decode(await new Blob(parts).arrayBuffer());
+    } catch (e) {
+      clearTimeout(to);
+      if (e.final) throw e;
+      console.warn(`[boot] ${url} try ${n}: ${e.name === 'AbortError' ? 'stalled' : e.message}`);
+      await new Promise((res) => setTimeout(res, 300));
+    }
+  }
+  throw new Error(url + ': no luck after ' + tries + ' tries');
+}
+let src = null;
+try { src = await fetchText('bundle.js'); } catch (e) { console.warn('[boot] no bundle, loading modules one by one:', e.message); }
+if (src) {                                          // an error inside the stage is reported, never a second start
+  say(`starting the stage (${(src.length / 1e6).toFixed(1)} MB)`);
+  await import(URL.createObjectURL(new Blob([src], { type: 'text/javascript' })));
+} else await import('./main.js');
+</script>
+</body>
+</html>

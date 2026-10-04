@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Send footage</title>
+<style>
+  :root { --bg:#141417; --fg:#ececf0; --muted:#9a9aa6; --accent:#3b82f6; --card:#1f1f25; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:18px system-ui, sans-serif; }
+  main { max-width:760px; margin:0 auto; padding:32px 16px; }
+  h1 { font-size:28px; margin:0 0 8px; } p { color:var(--muted); margin:0 0 24px; }
+  label.pick { display:block; padding:28px; border:2px dashed #444; border-radius:16px; text-align:center; cursor:pointer; font-size:22px; }
+  input { display:none; }
+  .row { background:var(--card); border-radius:12px; padding:14px 16px; margin-top:12px; }
+  .bar { height:10px; background:#2c2c34; border-radius:5px; margin-top:10px; overflow:hidden; }
+  .bar i { display:block; height:100%; width:0; background:var(--accent); }
+  .meta { color:var(--muted); font-size:15px; margin-top:6px; }
+</style></head>
+<body><main>
+<h1>Send footage to Claude</h1>
+<p>Pick the Quest recordings (Files, then Videos or Oculus/VideoShots). They go to the crossroads video folder on the PC. Keep this page open until each bar says done.</p>
+<label class="pick">Choose videos<input id="f" type="file" accept="video/*,image/*" multiple></label>
+<div id="list"></div>
+</main>
+<script>
+const list = document.getElementById('list');
+document.getElementById('f').addEventListener('change', async (e) => {
+  for (const file of e.target.files) await send(file);
+  e.target.value = '';
+});
+function send(file) {
+  return new Promise((done) => {
+    const row = document.createElement('div'); row.className = 'row';
+    row.innerHTML = `<div></div><div class="bar"><i></i></div><div class="meta">starting</div>`;
+    row.children[0].textContent = file.name;
+    list.prepend(row);
+    const bar = row.querySelector('i'), meta = row.querySelector('.meta');
+    const x = new XMLHttpRequest();
+    x.open('POST', 'upload/file?name=' + encodeURIComponent(file.name) + '&mtime=' + file.lastModified);
+    const t0 = performance.now();
+    x.upload.onprogress = (ev) => {
+      const k = ev.total ? ev.loaded / ev.total : 0, s = (performance.now() - t0) / 1000;
+      bar.style.width = (k * 100).toFixed(1) + '%';
+      meta.textContent = `${(ev.loaded / 1e6).toFixed(0)} of ${(ev.total / 1e6).toFixed(0)} MB, ${(ev.loaded / 1e6 / Math.max(s, 0.1)).toFixed(1)} MB/s`;
+    };
+    x.onload = () => {
+      let r = {}; try { r = JSON.parse(x.responseText); } catch (_) {}
+      meta.textContent = x.status === 200 ? `done: ${r.saved || ''}` : `failed: ${r.error || x.status}`;
+      if (x.status === 200) bar.style.width = '100%';
+      done();
+    };
+    x.onerror = () => { meta.textContent = 'failed: connection dropped (try again)'; done(); };
+    x.send(file);
+  });
+}
+</script>
+</body></html>
