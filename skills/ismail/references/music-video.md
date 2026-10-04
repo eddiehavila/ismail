@@ -38,7 +38,7 @@ python -m ismail.video edit    -s songs/<slug> [-- --sheet 33 41 16 | -- --range
 ## The loop
 
 1. **Listen to the arrangement as data.** `sync`, then read `build/events.json`: tracks, notes as frames, families. Know the form map (intro, build, dropout, drops, break, the last-bar moment) by bar number before writing a single shot.
-2. **Treatment** in `plan.md`: one-line story, hook words and the picture for each, look, timeline by bars, shot list with frames and start bars. Show it to the user before rendering anything expensive.
+2. **Treatment** in `plan.md`: one-line story, hook words and the picture for each, look, timeline by bars, shot list with frames and start bars, and for each set and person what is missing (`stage.md`, "Ask what is missing, before the person does"): what you found, and the question to the user. Show it to the user before rendering anything expensive.
 3. **Assets.** Models come from the user or from sources they approve. Always ask before downloading, and log each one (where from, author, licence) next to the song's `ref/SOURCES.md` so the video's credits can be written from it. `rip` the .dae files, put .obj folders under `assets/`.
 4. **One shot at a time:** write the script, run `posesheet` until every row says clean (see Animation below), then take stills at 2 or 3 frames at `--pct 25`, read them, fix, and repeat. For a black or empty frame, use `--top` (an ortho plan view with the camera as a red dot and its target as cyan) and `--dbg nofog`. Only a shot whose stills are right goes to `render`.
 5. **Render the queue** in the background (one `render` call with every approved shot). Contact-sheet each result as it lands.
