@@ -315,3 +315,106 @@ def test_a_failed_rebuild_serves_the_last_good_bundle(stage, monkeypatch):
     monkeypatch.setattr(S, 'esbuild_path', lambda: 'esbuild')
     monkeypatch.setattr(subprocess, 'run', lambda *a, **kw: (_ for _ in ()).throw(OSError(28, 'No space left on device')))
     assert S.bundle() == out and out.read_text(encoding='utf-8') == '// the last good bundle'
+
+
+# ---- presence: who is in the headset, who is listening, and no silent notes (presence.py)
+from ismail.stage import presence as PR  # noqa: E402
+
+
+def _voice_in(port, scene='room', file='voice/n1.webm', seconds='3.0'):
+    return _post(port, f'live/event?scene={scene}', {'type': 'voice_in', 'file': file, 'seconds': seconds, 'via': 'test'})['ids'][0]
+
+
+def _cmds(port, scene='room'):
+    return _get(port, f'live/cmd?scene={scene}&since=0')[1]['cmds']
+
+
+def test_a_note_nobody_hears_is_said_out_loud_and_kept(stage, monkeypatch):
+    monkeypatch.setattr(PR, 'HEARD_WAIT_S', 0.3)
+    port = stage['port']
+    # an op waiting for its own answer is not a listener
+    _get(port, 'live/events?scene=room&since=0&who=op')
+    nid = _voice_in(port)
+    time.sleep(0.8)
+    says = [c for c in _cmds(port) if c['type'] == 'say']
+    assert says and says[-1]['text'] == PR.NOBODY
+    p = _get(port, 'live/presence')[1]
+    assert p['unread'] == 1 and p['listening'] == []
+    unread = (stage['scenes'] / '_stage' / 'unread.jsonl').read_text(encoding='utf-8')
+    assert json.loads(unread.splitlines()[-1])['event_id'] == nid
+    heard = [e for e in _get(port, 'live/events?scene=room&limit=50')[1]['events'] if e['type'] == 'voice_heard']
+    assert heard[-1]['state'] == 'unheard'
+
+
+def test_a_listener_is_handed_the_note_and_the_headset_says_so(stage, monkeypatch):
+    monkeypatch.setattr(PR, 'HEARD_WAIT_S', 0.5)
+    port = stage['port']
+    start = _get(port, 'live/inbox?who=film')[1]['last']
+    got = {}
+    t = threading.Thread(target=lambda: got.update(_get(port, f'live/inbox?who=film&since={start}&wait=5')[1]))
+    t.start()
+    time.sleep(0.3)
+    assert _get(port, 'live/version?scene=room')[1]['listening'] == ['film']
+    _voice_in(port, scene='attic')
+    t.join()
+    assert [e['type'] for e in got['events']] == ['voice_in'] and got['events'][0]['scene'] == 'attic'
+    time.sleep(0.8)
+    cmds = _cmds(port, 'attic')
+    assert [(c['type'], c['text']) for c in cmds] == [('say', 'Handed to film.')]
+    assert _get(port, 'live/presence')[1]['unread'] == 0
+
+
+def test_an_answered_note_gets_nothing_more(stage, monkeypatch):
+    monkeypatch.setattr(PR, 'HEARD_WAIT_S', 0.4)
+    port = stage['port']
+    _voice_in(port)
+    _post(port, 'live/cmd?scene=room', {'type': 'say', 'text': 'got it'})
+    time.sleep(0.8)
+    assert [c.get('text') for c in _cmds(port)] == ['got it']
+
+
+def test_following_a_scene_counts_as_listening_there(stage):
+    port = stage['port']
+    _get(port, 'live/events?scene=room&since=0')
+    assert _get(port, 'live/version?scene=room')[1]['listening'] == ['unnamed']
+    assert _get(port, 'live/version?scene=attic')[1]['listening'] == []
+
+
+def test_hooks_run_on_entering_vr_and_presence_tracks_it(stage, tmp_path, monkeypatch):
+    port = stage['port']
+    out = stage['scenes'] / '_stage' / 'hooked.txt'
+    cmd = ['python', '-c', 'import os; open("hooked.txt", "w").write(os.environ["STAGE_EVENT"] + " " + os.environ["STAGE_SCENE"])']
+    home = tmp_path / 'stage_hooks.json'
+    monkeypatch.setenv('ISMAIL_STAGE_HOOKS', str(home))
+    # a hooks.json inside the scenes folder is ignored: the folder travels, so it never runs commands by itself
+    (stage['scenes'] / '_stage' / 'hooks.json').write_text(json.dumps({'left_vr': [cmd]}), encoding='utf-8')
+    home.write_text(json.dumps({'entered_vr': [cmd]}), encoding='utf-8')
+    assert _get(port, 'live/presence')[1]['hooks'] == {'entered_vr': 1}
+    _post(port, 'live/event?scene=attic', {'type': 'headset', 'state': 'entered VR', 'page': 'p1'})
+    for _ in range(50):
+        if out.is_file() and out.read_text():
+            break
+        time.sleep(0.1)
+    assert out.read_text() == 'entered_vr attic'
+    p = _get(port, 'live/presence')[1]
+    assert p['in_vr'] and p['scene'] == 'attic' and p['hooks'] == {'entered_vr': 1}
+    _post(port, 'live/event?scene=attic', {'type': 'headset', 'state': 'off', 'page': 'p1'})
+    assert not _get(port, 'live/presence')[1]['in_vr']
+    assert json.loads((stage['scenes'] / '_stage' / 'presence.json').read_text(encoding='utf-8'))['in_vr'] is False
+    # the home file can trust this song's folder: then its hooks.json counts too
+    home.write_text(json.dumps({'trust': [str(stage['scenes'])], 'entered_vr': [cmd]}), encoding='utf-8')
+    assert _get(port, 'live/presence')[1]['hooks'] == {'entered_vr': 1, 'left_vr': 1}
+
+
+def test_listen_and_presence_ops(stage, monkeypatch):
+    monkeypatch.setattr(PR, 'HEARD_WAIT_S', 0.3)
+    port = stage['port']
+    first = OPS['stage_listen'](who='tester', wait=0)
+    last = int(first.split()[1].rstrip(';'))
+    _voice_in(port)
+    _post(port, 'live/event?scene=room', {'type': 'voice_message', 'file': 'voice/n1.webm', 'text': 'play something over Lucy'})
+    out = OPS['stage_listen'](who='tester', since=last, wait=2)
+    assert '[room]' in out and 'voice_message' in out and 'over Lucy' in out
+    time.sleep(0.6)
+    pr = OPS['stage_presence']()
+    assert 'listening: tester' in pr and 'over Lucy' in pr and 'handed' in pr

@@ -26,6 +26,13 @@
   floor, keep-out boxes, the default scene, the build script) lives in `scenes/<name>/world.json` and
   `scenes/stage.json`. Session files (client log, speech cache, bundle, update notes) go to `<scenes>/_stage/`.
 - One server per port: a busy port is refused (Windows let two servers bind one port and split the live link).
+- Presence: the stage knows who is listening. A listener is anything following the live log (`stage_listen` across
+  every scene through GET /live/inbox, or `stage_events` with since= on one); the headset shows "listening: <who>"
+  or "nobody is listening" on entering VR and whenever it changes. A voice note a listener was handed but did not
+  answer within 6 s is announced ("Handed to <who>"); one nobody was handed is answered out loud ("Nobody is listening right now. I
+  saved your note.") and kept in `_stage/unread.jsonl`. Hooks (`~/.ismail/stage_hooks.json`; a song's
+  `_stage/hooks.json` only when that file trusts its folder) run commands on entered_vr, left_vr, voice_note and voice_unheard. GET /live/presence, `_stage/presence.json`,
+  `stage_presence`. The page also says when the server behind it restarted. (After six notes went unheard.)
 - Desktop movement: the wheel steps forward where you look (along the floor in walk mode), the orbit pivot
   travelling with the camera, so zoom no longer shrinks the orbit until the wheel stalls; walk and key speed scale
   with the scene (3.5 m/s in the Crossroads club, was 1.2), Shift 3x.

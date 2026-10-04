@@ -48,6 +48,8 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+from . import presence
+
 PAGE = Path(__file__).resolve().parent / 'page'
 SCENES = Path('scenes').resolve()                          # set by configure(): the song's scenes folder
 STATE = SCENES / '_stage'                                  # logs, speech cache, bundle, update notes
@@ -69,6 +71,7 @@ def configure(scenes, footage=None, state=None):
     FOOTAGE = Path(footage).resolve() if footage else STATE / 'footage'
     PHRASES = STATE / 'speech'
     STATE.mkdir(parents=True, exist_ok=True)
+    presence.reset()
     try:
         CONFIG.update(json.loads((Path.home() / '.ismail' / 'stage.json').read_text(encoding='utf-8')))
     except (OSError, ValueError):
@@ -220,7 +223,21 @@ def server_event(name, ev):
         L['events'].append(e)
         del L['events'][:-2000]
         COND.notify_all()
+    presence.on_events(name, [e])
     return e
+
+
+def server_cmd(name, cmd):
+    """A command the server itself queues for a scene's page (presence: an ack, or "nobody is listening")."""
+    with COND:
+        L = live(name)
+        L['cmd_id'] += 1
+        c = {'id': L['cmd_id'], 'ts': now_iso(), **cmd}
+        append_lines(live_dir(name) / 'cmds.jsonl', [c])
+        L['cmds'].append(c)
+        del L['cmds'][:-500]
+        COND.notify_all()
+    return c
 
 
 SPEAK = 'http://127.0.0.1:8765'           # speech in and out: an OpenAI-style audio server (here speakwright)
@@ -472,6 +489,10 @@ class Handler(SimpleHTTPRequestHandler):
 
     def _live_get(self, u):
         q = parse_qs(u.query)
+        if u.path == '/live/presence':            # in VR or not, the last note, who is listening (presence.py)
+            return self._json(200, presence.snapshot())
+        if u.path == '/live/inbox':               # every scene's voice notes and headset events: a listener for all
+            return self._live_inbox(q)
         if u.path == '/live':
             with COND:
                 out = [{'scene': k, 'page': (v['state'] or {}).get('page'), 'mode': (v['state'] or {}).get('mode'),
@@ -484,7 +505,8 @@ class Handler(SimpleHTTPRequestHandler):
             st = [f.stat() if f.is_file() else None for f in fs]
             cv = code_version()
             return self._json(200, {'scene': name, 'code': cv, 'code_name': time.strftime('v%m%d.%H%M', time.localtime(cv / 1e9)), **{k: [s.st_mtime_ns, s.st_size] if s else None
-                                                      for k, s in zip(('glb', 'manifest'), st)}})
+                                                      for k, s in zip(('glb', 'manifest'), st)},
+                                    'listening': presence.listening(name), 'server': os.getpid()})
         since = int(q.get('since', ['-1'])[0])
         wait = min(float(q.get('wait', ['0'])[0]), 60.0)
         if wait > 0 and not self.server.longpoll_enter(self.client_address[0]):
@@ -503,12 +525,17 @@ class Handler(SimpleHTTPRequestHandler):
             return self._json(200, {'scene': name, 'state': st, 'age_s': age})
         if u.path == '/live/events':
             limit = int(q.get('limit', ['500'])[0])
+            who = q.get('who', [None])[0]
+            if since >= 0:                         # following the log: a listener (presence.py), unless who=op
+                presence.seen(who, name, delivered=since)
             with COND:
                 L = live(name)
                 if wait > 0 and since >= 0:
                     COND.wait_for(lambda: L['ev_id'] > since, timeout=wait)
                 evs = [e for e in L['events'] if e.get('id', 0) > since] if since >= 0 else L['events'][-limit:]
                 last = L['ev_id']
+            if since >= 0:
+                presence.seen(who, name, delivered=last)
             return self._json(200, {'scene': name, 'last': last, 'events': evs[-limit:]})
         if u.path == '/live/cmd':
             with COND:
@@ -520,6 +547,27 @@ class Handler(SimpleHTTPRequestHandler):
             return self._json(200, {'scene': name, 'last': last, 'cmds': cmds})
         return self._json(404, {'error': 'not found'})
 
+    def _live_inbox(self, q):
+        who = q.get('who', [None])[0]
+        since = int(q.get('since', ['-1'])[0])
+        wait = min(float(q.get('wait', ['0'])[0]), 60.0)
+        limit = int(q.get('limit', ['200'])[0])
+        if since < 0:                              # where the inbox is now (no listening yet)
+            return self._json(200, {'last': presence.SEQ[0], 'events': presence.inbox_after(presence.SEQ[0] - limit, limit)})
+        if wait > 0 and not self.server.longpoll_enter(self.client_address[0]):
+            wait = 0.0
+        presence.seen(who, '*', inbox=since)
+        try:
+            with COND:
+                if wait > 0:
+                    COND.wait_for(lambda: presence.SEQ[0] > since, timeout=wait)
+                evs, last = presence.inbox_after(since, limit), presence.SEQ[0]
+        finally:
+            if wait > 0:
+                self.server.longpoll_leave(self.client_address[0])
+        presence.seen(who, '*', inbox=last)
+        return self._json(200, {'last': last, 'events': evs})
+
     def _live_post(self, u):
         name = self._scene(parse_qs(u.query))
         body = self._body()
@@ -530,6 +578,7 @@ class Handler(SimpleHTTPRequestHandler):
                 L = live(name)
                 L['state'], L['state_t'] = body, time.time()
                 COND.notify_all()
+            presence.page_alive(name)
             write_atomic(live_dir(name) / 'state.json', json.dumps({'received': now_iso(), **body}, indent=1))
             return self._json(200, {'ok': True})
         if u.path == '/live/event':
@@ -546,6 +595,7 @@ class Handler(SimpleHTTPRequestHandler):
                 L['events'].extend(out)
                 del L['events'][:-2000]
                 COND.notify_all()
+            presence.on_events(name, out)
             return self._json(200, {'ok': True, 'ids': [e['id'] for e in out]})
         if u.path == '/live/cmd':
             cmds = body if isinstance(body, list) else [body]
@@ -568,6 +618,7 @@ class Handler(SimpleHTTPRequestHandler):
                 L['cmds'].extend(out)
                 del L['cmds'][:-500]
                 COND.notify_all()
+            presence.on_cmds(name, out)
             return self._json(200, {'ok': True, 'scene': name, 'ids': [c['id'] for c in out]})
         return self._json(404, {'error': 'not found'})
 
@@ -921,6 +972,7 @@ def main(argv=None):
         srv.socket = ctx.wrap_socket(srv.socket, server_side=True)
         scheme = 'https'
     reg = register(port, scheme, host)
+    presence.URL[0] = f'{scheme}://127.0.0.1:{port}'
     print(f'ismail stage on {scheme}://{host}:{port}/  scenes {SCENES}: {scene_names()}', flush=True)
     try:
         srv.serve_forever()

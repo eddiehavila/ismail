@@ -95,21 +95,38 @@ export function initUpdates(ed, live, hands, voice) {
     tag.style.cssText = 'position:fixed;left:12px;bottom:10px;font:11px ui-monospace,monospace;color:#9ca3af;opacity:.8;z-index:40;pointer-events:none';
     document.body.appendChild(tag);
   });
-  const vcv = document.createElement('canvas'); vcv.width = 512; vcv.height = 96;
+  // the card in front of the user on entering VR: the version, and who is listening (or that nobody is). It shows
+  // again for a few seconds whenever that changes while they are in.
+  const vcv = document.createElement('canvas'); vcv.width = 512; vcv.height = 150;
   const vtex = new THREE.CanvasTexture(vcv); vtex.colorSpace = THREE.SRGBColorSpace;
   const vcard = new THREE.Sprite(new THREE.SpriteMaterial({ map: vtex, depthTest: false, transparent: true, toneMapped: false }));
-  vcard.renderOrder = 999; vcard.layers.set(GIZMO); vcard.visible = false; vcard.scale.set(0.2, 0.0375, 1);
+  vcard.renderOrder = 999; vcard.layers.set(GIZMO); vcard.visible = false; vcard.scale.set(0.2, 0.0586, 1);
   scene.add(vcard);
-  let vUntil = 0;
-  renderer.xr.addEventListener('sessionstart', () => {
+  let vUntil = 0, listenLine = '', nobody = false, serverNote = '';
+  const listenText = (ls) => (ls.length ? 'listening: ' + ls.join(', ') : 'nobody is listening');
+  function drawV() {
     const g = vcv.getContext('2d');
-    g.clearRect(0, 0, 512, 96);
-    g.fillStyle = 'rgba(20,24,30,0.85)'; g.beginPath(); g.roundRect(2, 2, 508, 92, 20); g.fill();
+    g.clearRect(0, 0, 512, 150);
+    g.fillStyle = 'rgba(20,24,30,0.85)'; g.beginPath(); g.roundRect(2, 2, 508, 146, 20); g.fill();
     g.fillStyle = '#fff'; g.font = 'bold 40px system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
-    g.fillText('stage ' + (st.version || '?'), 256, 50);
+    g.fillText(serverNote || 'stage ' + (st.version || '?'), 256, 46, 480);
+    g.fillStyle = nobody ? '#fbbf24' : '#86efac'; g.font = '30px system-ui, sans-serif';
+    g.fillText(listenLine || 'checking who is listening', 256, 108, 480);
     vtex.needsUpdate = true;
+  }
+  renderer.xr.addEventListener('sessionstart', () => {
+    drawV();
     vUntil = performance.now() + 5000;
     live.emit('page_version', { version: st.version, in_vr: true });
+  });
+  live.heard.on.push((ch) => {
+    listenLine = listenText(ch.listening); nobody = !ch.listening.length;
+    if (ch.server_changed) serverNote = 'the stage server restarted';
+    const tag = document.getElementById('vertag');
+    if (tag) { tag.textContent = (st.version || '') + ' \u00b7 ' + listenLine; tag.style.color = nobody ? '#fbbf24' : '#9ca3af'; }
+    drawV();
+    if (!ch.first && renderer.xr.isPresenting) vUntil = performance.now() + 4000;
+    if (ch.server_changed) { live.emit('server_changed', { server: live.heard.server }); setTimeout(() => { serverNote = ''; drawV(); }, 6000); }
   });
 
   live.codeV.on.push(async () => {
