@@ -153,14 +153,16 @@ def _event_line(e):
 
 
 @op()
-def stage_events(scene: str, since: int = 0, types: list = None, limit: int = 100, wait: float = 0) -> str:
+def stage_events(scene: str, since: int = 0, types: list = None, limit: int = 100, wait: float = 0,
+                 who: str = None) -> str:
     """What happened on the stage page for a scene, oldest first, one line each: id, time, type, details. since= an
     event id (only newer events; 0 = the most recent `limit`), types= only those types (e.g. ["voice_message",
     "gesture"]), wait= seconds to wait for a newer event (long poll, up to 60). The first line gives the newest id
     to pass as since= next time. Voice notes arrive as voice_in (audio landed) then voice_message (its text);
-    commands answer with cmd_done."""
+    commands answer with cmd_done. Following a scene with since= counts as listening to the person there: who= is the
+    name the headset shows for you (e.g. "crossroads film"); without it they see "an unnamed agent"."""
     rec = link.server_for(scene)
-    path = (f'live/events?{link.q(scene=scene, since=since, wait=min(float(wait or 0), 60), limit=1000)}' if since
+    path = (f'live/events?{link.q(scene=scene, since=since, wait=min(float(wait or 0), 60), limit=1000, who=who)}' if since
             else f'live/events?{link.q(scene=scene, limit=1000)}')
     got = link.http(rec, path, timeout=(wait or 0) + 15)
     evs = got['events']

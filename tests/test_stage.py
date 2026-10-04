@@ -449,3 +449,8 @@ def test_an_ask_says_who_asks(stage):
         assert (c['type'], c['text'], c['from']) == ('ask', 'Chrome riser?', 'crossroads film')
     finally:
         page.stop = True
+
+
+def test_an_agent_following_a_scene_can_name_itself(stage):
+    OPS['stage_events'](scene='room', since=1, who='vr dev')
+    assert _get(stage['port'], 'live/presence')[1]['listening'] == ['vr dev']

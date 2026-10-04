@@ -103,7 +103,8 @@ export function initUpdates(ed, live, hands, voice) {
   vcard.renderOrder = 999; vcard.layers.set(GIZMO); vcard.visible = false; vcard.scale.set(0.2, 0.0586, 1);
   scene.add(vcard);
   let vUntil = 0, listenLine = '', nobody = false, serverNote = '', wasNobody = null;
-  const listenText = (ls) => (ls.length ? 'listening: ' + ls.join(', ') : 'nobody is listening');
+  // a listener that gave no name reads as someone, not as a glitch (the user, 2026-10-04: "unnamed" looked suspicious)
+  const listenText = (ls) => (ls.length ? 'listening: ' + ls.map((w) => (w === 'unnamed' ? 'an unnamed agent' : w)).join(', ') : 'nobody is listening');
   function drawV() {
     const g = vcv.getContext('2d');
     g.clearRect(0, 0, 512, 150);
