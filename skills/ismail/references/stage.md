@@ -190,8 +190,11 @@ A person in a headset cannot see your terminal. Contact is part of the interface
   gestures are personal, so calibrate them per person, and keep their recordings local without consent.
 - **Keep tooling in service of the work.** An editor feature is worth building when the scene waits on it; when the
   scene is waiting for layout, build the scene.
-- **Findings go to the handoff.** A gap in the engine goes in the project's HANDOFF.md, not into a message to another
-  session.
+- **Findings go to the handoff; during a live test, straight to the stage dev.** A gap in the engine goes in the
+  project's HANDOFF.md. While the person is in the stage testing with you, send what they ask of the stage directly
+  as a message to the stage dev's session, conversation or agent (and write it in the handoff too, so it is not
+  lost). When the change touches the page's code, the stage dev messages you back that an update is ready; tell
+  the person in the room, and they take it with the update gesture (a left-hand thumbs up on the updates card).
 
 ## Shared editing: never lose what the person did
 
