@@ -102,7 +102,7 @@ export function initUpdates(ed, live, hands, voice) {
   const vcard = new THREE.Sprite(new THREE.SpriteMaterial({ map: vtex, depthTest: false, transparent: true, toneMapped: false }));
   vcard.renderOrder = 999; vcard.layers.set(GIZMO); vcard.visible = false; vcard.scale.set(0.2, 0.0586, 1);
   scene.add(vcard);
-  let vUntil = 0, listenLine = '', nobody = false, serverNote = '';
+  let vUntil = 0, listenLine = '', nobody = false, serverNote = '', wasNobody = null;
   const listenText = (ls) => (ls.length ? 'listening: ' + ls.join(', ') : 'nobody is listening');
   function drawV() {
     const g = vcv.getContext('2d');
@@ -125,7 +125,11 @@ export function initUpdates(ed, live, hands, voice) {
     const tag = document.getElementById('vertag');
     if (tag) { tag.textContent = (st.version || '') + ' \u00b7 ' + listenLine; tag.style.color = nobody ? '#fbbf24' : '#9ca3af'; }
     drawV();
-    if (!ch.first && renderer.xr.isPresenting) vUntil = performance.now() + 4000;
+    // in front of them again only when it matters: nobody listening now, or somebody again, or the server restarted;
+    // a listener coming and going while others stay was showing it every half minute (the user, 2026-10-04, #4164)
+    const flipped = wasNobody !== null && wasNobody !== nobody;
+    wasNobody = nobody;
+    if (!ch.first && renderer.xr.isPresenting && (flipped || ch.server_changed)) vUntil = performance.now() + 4000;
     if (ch.server_changed) { live.emit('server_changed', { server: live.heard.server }); setTimeout(() => { serverNote = ''; drawV(); }, 6000); }
   });
 

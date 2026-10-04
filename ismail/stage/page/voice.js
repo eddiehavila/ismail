@@ -311,12 +311,13 @@ export function initVoice(ed, hands, live) {
   // (the left thumbs up stays the reload card's). Resolves with the answer, or 'no answer' after the timeout.
   const ASK_HOLD_MS = 400;
   const asking = { q: null, since: 0, g: null, resolve: null, timer: null };
-  async function ask(text, seconds = 60) {
+  async function ask(text, seconds = 60, from = null) {
     if (asking.q) return { error: 'already asking: ' + asking.q };
     speak(text);
     while (speaking || sayQ.length) await new Promise((res) => setTimeout(res, 150));
     EAR.incoming();
     asking.q = text; asking.since = 0; asking.g = null;
+    thumbPrompt({ by: 'ask', q: text, yes: 'Yes', no: 'No', from });
     const t0 = performance.now();
     const answer = await new Promise((resolve) => {
       asking.resolve = resolve;
@@ -324,6 +325,7 @@ export function initVoice(ed, hands, live) {
     });
     clearTimeout(asking.timer);
     asking.q = null; asking.resolve = null;
+    if (prompt.by === 'ask') thumbPrompt(null);
     if (answer === 'yes') EAR.sent(); else if (answer === 'no') EAR.recStop();
     const r = { question: text, answer, seconds: +((performance.now() - t0) / 1000).toFixed(1) };
     live.emit('answer', r);
@@ -334,6 +336,7 @@ export function initVoice(ed, hands, live) {
     const g = hands.state.right && hands.state.right.f ? hands.state.right.g : null;
     const v = g === 'thumbs_up' ? 'yes' : g === 'thumbs_down' ? 'no' : null;
     if (v !== asking.g) { asking.g = v; asking.since = now; }
+    if (prompt.by === 'ask') { prompt.g = v; prompt.fill = v ? Math.min(1, (now - asking.since) / ASK_HOLD_MS) : 0; }
     if (v && now - asking.since >= ASK_HOLD_MS && asking.resolve) asking.resolve(v);
   }
 
@@ -358,6 +361,50 @@ export function initVoice(ed, hands, live) {
     g.fillText(text, cv.width / 2, cv.height / 2 + 2);
     t.needsUpdate = true;
   }
+  // ---- the thumbs prompt: over the RIGHT hand, the hand that answers, what a thumbs up and a thumbs down will say
+  // and who asks (the user, 2026-10-04: show it "above the hand that answers ... so I see what I'm agreeing to where
+  // I'm looking when I give the gesture"). A spoken question (ask) shows it the whole time; a panel answered by thumbs
+  // shows it while the right hand forms the gesture (panels.js). It fills as the gesture is held.
+  const prompt = { by: null, q: '', yes: 'Yes', no: 'No', from: null, g: null, fill: 0 };
+  const qcard = sprite(560, 210);
+  qcard.scale.set(0.17, 0.064, 1);
+  function thumbPrompt(p) {
+    if (!p) { prompt.by = null; qcard.visible = false; return; }
+    Object.assign(prompt, { g: null, fill: 0, from: null, ...p });
+  }
+  function wrapTo(g, text, maxW, maxLines) {
+    const out = []; let line = '';
+    for (const w of String(text).split(/\s+/)) {
+      const t = line ? line + ' ' + w : w;
+      if (g.measureText(t).width > maxW && line) { out.push(line); line = w; } else line = t;
+    }
+    if (line) out.push(line);
+    if (out.length > maxLines) { out.length = maxLines; out[maxLines - 1] = out[maxLines - 1].replace(/.{0,3}$/, '...'); }
+    return out;
+  }
+  function drawPrompt() {
+    const key = JSON.stringify([prompt.q, prompt.yes, prompt.no, prompt.from, prompt.g, Math.round(prompt.fill * 20)]);
+    if (qcard.userData.text === key) return;
+    qcard.userData.text = key;
+    const { cv, t } = qcard.userData, g = cv.getContext('2d'), W = cv.width, H = cv.height;
+    g.clearRect(0, 0, W, H);
+    g.fillStyle = 'rgba(16,18,22,0.94)'; g.beginPath(); g.roundRect(2, 2, W - 4, H - 4, 20); g.fill();
+    g.textBaseline = 'middle'; g.textAlign = 'left';
+    let y = 26;
+    if (prompt.from) { g.fillStyle = '#9ca3af'; g.font = 'bold 22px system-ui, sans-serif'; g.fillText(String(prompt.from).toUpperCase() + ' ASKS', 20, y); y += 30; }
+    g.fillStyle = '#f5f5f4'; g.font = 'bold 28px system-ui, sans-serif';
+    for (const ln of wrapTo(g, prompt.q, W - 40, prompt.from ? 2 : 3)) { g.fillText(ln, 20, y); y += 34; }
+    // the two answers, the held one filling
+    const bw = (W - 52) / 2, by = H - 62;
+    [['up', '\u{1F44D} ' + prompt.yes, 'thumbs_up'], ['down', '\u{1F44E} ' + prompt.no, 'thumbs_down']].forEach(([k, label, gname], i) => {
+      const x = 20 + i * (bw + 12), on = prompt.g === (k === 'up' ? 'yes' : 'no') || prompt.g === gname;
+      g.fillStyle = 'rgba(255,255,255,0.12)'; g.beginPath(); g.roundRect(x, by, bw, 46, 12); g.fill();
+      if (on && prompt.fill > 0) { g.fillStyle = k === 'up' ? 'rgba(34,197,94,0.85)' : 'rgba(234,88,12,0.85)'; g.beginPath(); g.roundRect(x, by, bw * prompt.fill, 46, 12); g.fill(); }
+      g.fillStyle = '#fff'; g.font = 'bold 24px system-ui, sans-serif'; g.textAlign = 'center';
+      g.fillText(label, x + bw / 2, by + 24, bw - 16); g.textAlign = 'left';
+    });
+    t.needsUpdate = true;
+  }
   const tags = { left: sprite(), right: sprite() }, badge = sprite(640, 72);
   tags.left.scale.set(0.09, 0.0225, 1); tags.right.scale.set(0.09, 0.0225, 1); badge.scale.set(0.32, 0.036, 1);    // wide canvas: 'REC locked: phone to send' was clipped
   const tmp = new THREE.Vector3(), fwd = new THREE.Vector3();
@@ -371,6 +418,9 @@ export function initVoice(ed, hands, live) {
       else if (h.g === 'phone' && note.rec) draw(sp, note.lockProgress > 0.05 ? 'hold to lock' : 'phone', 'rgba(185,28,28,0.85)', '#fff', note.lockProgress);
       else draw(sp, h.g === 'none' ? '·' : h.g.replace('_', ' '), h.g === 'phone' ? 'rgba(185,28,28,0.85)' : 'rgba(20,24,30,0.7)');
     }
+    const rh = hands.state.right;
+    qcard.visible = !!(prompt.by && rh && rh.f && !rh.resting);
+    if (qcard.visible) { qcard.position.copy(rh.f.wrist).y += 0.22; drawPrompt(); }
     const rec = !!note.rec, takeOn = !!take.rec, warn = micState.s !== 'on';
     badge.visible = rec || takeOn || !!asking.q || (warn && hands.state.left.f !== null);
     if (!badge.visible) return;
@@ -519,6 +569,6 @@ export function initVoice(ed, hands, live) {
   }
 
   const abortSpeech = () => { sayQ.length = 0; if (speechAbort) speechAbort.abort(); };
-  return { update, speak, talking, noteStart, noteStop, takeAudioStart, takeAudioStop, eyeSnapshot, eyecam, EAR, mic, note, micState, head, ask,
+  return { update, speak, talking, thumbPrompt, prompt, qcard, noteStart, noteStop, takeAudioStart, takeAudioStop, eyeSnapshot, eyecam, EAR, mic, note, micState, head, ask,
     shotHooks, abortSpeech };
 }

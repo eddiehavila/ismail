@@ -153,13 +153,14 @@ def stage_say(scene: str, text: str, seconds: float = 8, voice: bool = False, vo
 
 
 @op(mutates=True)
-def stage_ask(scene: str, text: str, seconds: float = 60) -> str:
+def stage_ask(scene: str, text: str, seconds: float = 60, sender: str = None) -> str:
     """Ask a yes/no question out loud and wait for a RIGHT thumbs up (yes) or down (no) held 400 ms (page command:
     ask). Blocks the command queue until answered or `seconds` pass. Only answerable in VR (the thumbs are hand
     gestures). A second ask while one is open does not raise: the page replies {error: 'already asking: ...'} (the op
     should turn that into OpError). Page replies {question, answer: yes | no | 'no answer', seconds}. Emits: answer,
-    voice_spoken, voice_error."""
-    return page_cmd(scene, 'ask', {'text': text, 'seconds': seconds}, timeout=((60 if seconds is None else seconds) + 30))
+    voice_spoken, voice_error. While it waits, the question shows over the person's right hand (the hand that
+    answers) with what up and down mean, under sender= (your name as they know it)."""
+    return page_cmd(scene, 'ask', {'text': text, 'seconds': seconds, 'from': sender}, timeout=((60 if seconds is None else seconds) + 30))
 
 
 @op(mutates=True)

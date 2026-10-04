@@ -439,3 +439,13 @@ def test_a_panel_can_ride_with_the_person(stage):
             OPS['stage_panel_show'](scene='room', title='x', anchor='hip')
     finally:
         page.stop = True
+
+
+def test_an_ask_says_who_asks(stage):
+    page = FakePage(stage['port'], 'room')
+    try:
+        OPS['stage_ask'](scene='room', text='Chrome riser?', seconds=5, sender='crossroads film')
+        c = page.seen[-1]
+        assert (c['type'], c['text'], c['from']) == ('ask', 'Chrome riser?', 'crossroads film')
+    finally:
+        page.stop = True
