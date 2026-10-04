@@ -41,6 +41,7 @@ export function initBody(ed, hands) {
     const hy = headYaw();
     if (st.yaw === null) { st.yaw = hy; return; }
     const diff = wrapA(hy - st.yaw);
+    st.headRel = THREE.MathUtils.radToDeg(-diff);                     // degrees the head looks right of the body
     const held = holds.some((fn) => fn());
     if (held) { st.offSince = 0; st.turning = false; return; }            // the hands do not pull it either
     if (Math.abs(diff) > THREE.MathUtils.degToRad(TURN_DEG)) {

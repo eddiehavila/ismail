@@ -345,7 +345,22 @@ export function initPanels(ed, xrApi, hands, voice, live, body) {
     return lookTo.dot(lookD) > Math.cos(THREE.MathUtils.degToRad(BODY_LOOK_DEG));
   }
   // the body does not turn while the user looks at (or just looked at) a body panel
-  if (body && body.holdWhile) body.holdWhile(() => [...panels.values()].some((p) => p.body && performance.now() < (p.lookUntil || 0)));
+  // nor while the head is turned toward a body panel's side, short of it or just past it (a fast swing that ends near
+  // the card, the user, 2026-10-04: "a fast turn that ends facing the panel should find it still there"), for up to
+  // SIDE_HOLD_MS: held longer than that, it is the body turning after all
+  const SIDE_HOLD_MS = 4000;
+  let sideSince = 0;
+  function towardPanelSide() {
+    const rel = body.state.headRel;
+    if (rel == null) return false;
+    const toward = [...panels.values()].some((p) => p.body && Math.sign(p.body.deg) === Math.sign(rel) && Math.abs(rel) > 10
+      && Math.abs(rel) <= Math.abs(p.body.deg) + 25);
+    const now = performance.now();
+    if (!toward) { sideSince = 0; return false; }
+    if (!sideSince) sideSince = now;
+    return now - sideSince < SIDE_HOLD_MS;
+  }
+  if (body && body.holdWhile) body.holdWhile(() => [...panels.values()].some((p) => p.body && performance.now() < (p.lookUntil || 0)) || towardPanelSide());
   function followBody(p, now, dt) {
     if (lookedAt(p)) p.lookUntil = now + BODY_LOOK_HOLD_MS;
     if (now < (p.lookUntil || 0)) { faceUser(p.mesh); return; }               // being read: it stays where it is
