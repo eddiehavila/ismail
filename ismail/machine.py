@@ -445,12 +445,39 @@ class _Meter:
     def stop(self):
         self._sample()
         self.stop_.set()
+        for pid, secs in (self.job.get('exited_cpu') or {}).items():   # a child that ended between two samples
+            self.cpu = {k: v for k, v in self.cpu.items() if k[0] != pid}
+            self.cpu[(pid, 'exited')] = secs
         cpu = sum(v for (pid, _), v in self.cpu.items() if pid != self.base[0])
         cpu += max(0.0, max((v for (pid, _), v in self.cpu.items() if pid == self.base[0]), default=0.0) - self.base[1])
         out = {'cpu_s': round(cpu, 1), 'rss_peak_gb': round(self.rss_peak / 2 ** 30, 2)}
         if self.gpu is not None:
             out.update(self.gpu.stop())
         return out
+
+
+def _child_cpu_s(p, before=None):
+    """CPU seconds a finished child used, read from the system after it exited (a child shorter than one meter
+    sample is never seen alive). Windows: the process handle Popen still holds; elsewhere: the children's rusage
+    since `before`."""
+    if sys.platform == 'win32':
+        FT = ctypes.c_ulonglong
+        c, e, k, u = FT(), FT(), FT(), FT()
+        if ctypes.windll.kernel32.GetProcessTimes(int(p._handle), ctypes.byref(c), ctypes.byref(e), ctypes.byref(k),
+                                                  ctypes.byref(u)):
+            return (k.value + u.value) / 1e7
+        return None
+    import resource
+    r = resource.getrusage(resource.RUSAGE_CHILDREN)
+    return r.ru_utime + r.ru_stime - (before or 0.0)
+
+
+def _children_cpu_now():
+    if sys.platform == 'win32':
+        return None
+    import resource
+    r = resource.getrusage(resource.RUSAGE_CHILDREN)
+    return r.ru_utime + r.ru_stime
 
 
 def _song_of(cwd):
@@ -731,12 +758,19 @@ def main(argv=None):
     try:
         with slot(kind, a.what or ' '.join(cmd)[:80], est_s=est_s, mem_gb=a.mem,
                   force=a.force, threads=None, wait=wait_s) as job:
+            before = _children_cpu_now()
             p = subprocess.Popen(cmd)
             try:
                 psutil.Process(p.pid).nice(psutil.BELOW_NORMAL_PRIORITY_CLASS if sys.platform == 'win32' else 10)
             except (psutil.Error, AttributeError):
                 pass
             job['exit'] = p.wait()
+            try:
+                secs = _child_cpu_s(p, before)
+                if secs is not None:
+                    job['exited_cpu'] = {p.pid: secs}
+            except (OSError, AttributeError, ValueError):
+                pass
             return job['exit']
     except MachineBusy as e:
         print(e, file=sys.stderr)

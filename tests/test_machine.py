@@ -269,7 +269,7 @@ def test_every_finished_job_leaves_one_line_of_history_and_history_sums_it_by_so
 
 def test_the_cli_records_the_commands_exit_and_its_cpu(board):
     env = dict(os.environ, ISMAIL_MACHINE_DIR=str(board))
-    code = "import sys; sum(i * i for i in range(2000000)); sys.exit(3)"
+    code = "import sys; sum(i * i for i in range(2000000)); sys.exit(3)"   # shorter than one meter sample on CI
     out = subprocess.run([sys.executable, '-m', 'ismail.machine', 'run', '--cpu', '--force', '--what', 'busy probe', '--',
                           sys.executable, '-c', code], capture_output=True, text=True, env=env, timeout=120)
     assert out.returncode == 3
