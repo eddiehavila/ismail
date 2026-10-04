@@ -58,6 +58,7 @@ export function initWaypoints(ed, live, panels, hands, voice) {
     c.clearRect(0, 0, W, H);
     c.fillStyle = 'rgba(14,14,18,0.86)'; c.beginPath(); c.roundRect(4, 4, W - 8, H - 8, 22); c.fill();
     c.fillStyle = COLOR[w.kind] || COLOR.note; c.fillRect(4, 4, 12, H - 8);
+    if (p.hot) { c.strokeStyle = COLOR[w.kind] || COLOR.note; c.lineWidth = 8; c.beginPath(); c.roundRect(6, 6, W - 12, H - 12, 20); c.stroke(); }
     c.textBaseline = 'top';
     let y = 22;
     c.fillStyle = '#fff'; c.font = 'bold 42px system-ui, sans-serif';
@@ -87,15 +88,23 @@ export function initWaypoints(ed, live, panels, hands, voice) {
     g.position.copy(b2tPos(w.position));
     g.name = '_waypoint_' + w.id;
     ed.scene.add(g);
-    const p = { w, g, head, stem, foot, card: cd.m, cv: cd.cv, tex: cd.tex, drawn: '' };
+    const p = { w, g, head, stem, foot, card: cd.m, cv: cd.cv, tex: cd.tex, drawn: '', hot: false };
     pins.set(w.id, p);
     drawCard(p, false);
+    // the pointer ray stops on the card (and the diamond), lights it, and a pinch opens it, so a pin can be worked
+    // from a few steps away (the user, 2026-10-04, #4240: the ray went through the card onto the bottles behind)
+    if (panels && panels.addRayTarget) {
+      p.ray = { press: (uv, via) => { live.emit('pin_touch', { id: w.id, on: 'ray', via }); openNote(w.id); return true; },
+        hover: (uv) => { const on = !!uv; if (p.hot !== on) { p.hot = on; drawCard(p, p.drawn === 'note'); } }, isControl: () => true };
+      panels.addRayTarget(cd.m, p.ray); panels.addRayTarget(head, p.ray);
+    }
     return p;
   }
   function remove(id, quiet) {
     const p = pins.get(id);
     if (!p) return false;
     ed.scene.remove(p.g);
+    if (p.ray && panels.removeRayTarget) { panels.removeRayTarget(p.card); panels.removeRayTarget(p.head); }
     p.g.traverse((o) => { if (o.geometry) o.geometry.dispose(); if (o.material) { if (o.material.map) o.material.map.dispose(); o.material.dispose(); } });
     pins.delete(id);
     if (!quiet) save();

@@ -397,5 +397,8 @@ export function initPanels(ed, xrApi, hands, voice, live, body) {
     const d = uiDistance(tip);
     return d < UI_NEAR ? { why: 'a panel or button is within 10 cm', cm: Math.round(d * 100) } : null;
   });
-  return { show, close, update, registerPokeable, panels, uiDistance };
+  // a surface the pointer ray stops on, highlights and pinches, like a panel (waypoints.js: the pins' cards)
+  function addRayTarget(mesh, api) { mesh.userData.panelApi = api; xrApi.addTarget(mesh); }
+  function removeRayTarget(mesh) { xrApi.removeTarget(mesh); delete mesh.userData.panelApi; }
+  return { show, close, update, registerPokeable, panels, uiDistance, addRayTarget, removeRayTarget };
 }

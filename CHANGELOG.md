@@ -51,6 +51,8 @@
   floor, keep-out boxes, the default scene, the build script) lives in `scenes/<name>/world.json` and
   `scenes/stage.json`. Session files (client log, speech cache, bundle, update notes) go to `<scenes>/_stage/`.
 - One server per port: a busy port is refused (Windows let two servers bind one port and split the live link).
+- Pins take the pointer ray: a to-do pin's card (and its diamond) stops the ray, lights its border, and a pinch opens
+  its note, so pins can be worked from a few steps away (the ray went through the card onto what was behind).
 - The version card in front of the person shows on entering VR, when the server restarts, and when listening flips
   between somebody and nobody; no longer each time one listener of several comes or goes (an agent polling every
   half minute kept bringing it back).
