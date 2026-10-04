@@ -1,6 +1,7 @@
 """The stage without a headset: the server on a scratch scenes folder, a fake page that answers commands the way
 live.js does, and the stage_* ops against both."""
 import json
+from pathlib import Path
 import threading
 import time
 import urllib.request
@@ -143,8 +144,9 @@ def test_world_roundtrip_and_checks(stage):
     assert 'bf_pete' in out and _get(stage['port'], 'world?scene=room')[1]['floor'] == 0.09
     with pytest.raises(OpError, match='keep_out'):
         OPS['stage_world'](scene='room', scenes=sc, world={'keep_out': [[1, 0, 0, 1, 0, 1]]})
-    script, cwd, env = W.build_of(stage['scenes'], 'room')
-    assert script == (stage['scenes'] / 'room' / '../../../..' / 'video' / 'rooms' / 'room.py').resolve()
+    b = W.build_of(stage['scenes'], 'room')
+    assert b['script'] == (stage['scenes'] / 'room' / '../../../..' / 'video' / 'rooms' / 'room.py').resolve()
+    assert b['line'] == ['room'] and b['passes'] == []
 
 
 def test_update_notes_reach_the_page(stage):
@@ -191,3 +193,65 @@ def test_a_page_seen_just_now_counts(stage, monkeypatch):
         assert OPS['stage_object_deselect'](scene='room').startswith('deselect (')
     finally:
         page.stop = True
+
+
+def _scene(d, name, world=None, edits=None):
+    (d / name).mkdir(parents=True, exist_ok=True)
+    (d / name / 'scene.glb').write_bytes(b'glTF')
+    if world is not None:
+        (d / name / 'world.json').write_text(json.dumps(world), encoding='utf-8')
+    if edits is not None:
+        (d / name / 'edits.json').write_text(json.dumps(edits), encoding='utf-8')
+
+
+def test_a_derived_scene_builds_from_its_parents_full_build(tmp_path):
+    from ismail.stage.ops import export_plan
+    song = tmp_path / 'song'
+    d = song / 'video' / 'vr' / 'scenes'
+    (song / 'video' / 'rooms').mkdir(parents=True)
+    for f in ('club.py', 'remodel.py', 'dawn.py'):
+        (song / 'video' / 'rooms' / f).write_text('# room', encoding='utf-8')
+    _scene(d, 'club', {'build': {'script': 'video/rooms/club.py', 'env': {'VR_DETAIL': '1'}}, 'floor': 0.09},
+           {'objects': {'stool': {'location': [1, 2, 0]}, 'door': {'location': [0, 0, 0]}}})
+    _scene(d, 'now', {'derives_from': 'club', 'pass': 'video/rooms/remodel.py', 'pass_env': {'CROSSFADE': '1'}},
+           {'objects': {'stool': {'location': [5, 5, 0]}}})
+    _scene(d, 'dawn', {'derives_from': 'now', 'pass': 'video/rooms/dawn.py'})
+    b, env = export_plan(d, 'dawn')
+    assert b['line'] == ['dawn', 'now', 'club'] and b['script'].name == 'club.py'
+    assert [p.name for p in b['passes']] == ['remodel.py', 'dawn.py']             # oldest first
+    assert env['VR_DETAIL'] == '1' and env['CROSSFADE'] == '1' and env['VR_DIET'] == '1' and env['STAGE_SCENE'] == 'dawn'
+    assert env['VR_EXPORT'].endswith('dawn') and env['VR_BRIDGE'].endswith('blender_bridge.py')
+    merged = json.loads(Path(env['VR_EDITS']).read_text(encoding='utf-8'))
+    assert merged['objects']['stool']['location'] == [5, 5, 0] and 'door' in merged['objects']   # the variant's win
+    b0, env0 = export_plan(d, 'club')
+    assert 'VR_PASS' not in env0 and 'VR_DIET' not in env0                        # a root scene builds as it always did
+
+
+def test_lineage_refuses_loops_and_a_build_of_its_own(tmp_path):
+    d = tmp_path / 'scenes'
+    _scene(d, 'a', {'derives_from': 'b'})
+    _scene(d, 'b', {'derives_from': 'a'})
+    with pytest.raises(ValueError, match='loop'):
+        W.lineage(d, 'a')
+    assert any('no build of its own' in p for p in W.check_world({**W.DEFAULTS, 'derives_from': 'a', 'build': {'script': 'x.py'}}))
+
+
+def test_scene_new_copies_the_page_pieces_and_writes_the_lineage(tmp_path):
+    song = tmp_path / 'song'
+    d = song / 'video' / 'vr' / 'scenes'
+    (song / 'video' / 'rooms').mkdir(parents=True)
+    (song / 'video' / 'rooms' / 'club.py').write_text('# room', encoding='utf-8')
+    (song / 'video' / 'rooms' / 'remodel.py').write_text('# pass', encoding='utf-8')
+    _scene(d, 'club', {'build': {'script': 'video/rooms/club.py'}, 'actors': {'p': 'bf_pete'}, 'floor': 0.09, 'sky': 'night'})
+    (d / 'club' / 'trees').mkdir()
+    (d / 'club' / 'trees' / 'tree_1.json').write_text('{}', encoding='utf-8')
+    (d / 'club' / 'names.json').write_text('{"stool": "a stool"}', encoding='utf-8')
+    (d / 'club' / 'takes').mkdir()                                                 # the person's: stays with its scene
+    out = OPS['stage_scene_new'](name='now', source='club', scenes=str(d), pass_script='video/rooms/remodel.py')
+    assert 'derives from club' in out and 'stage_scene_export' in out
+    w = W.load_world(d, 'now')
+    assert w['derives_from'] == 'club' and w['assets'] == 'club' and w['actors'] == {'p': 'bf_pete'} and w['sky'] == 'night'
+    assert (d / 'now' / 'trees' / 'tree_1.json').is_file() and (d / 'now' / 'names.json').is_file()
+    assert not (d / 'now' / 'takes').exists()
+    with pytest.raises(OpError, match='exists already'):
+        OPS['stage_scene_new'](name='now', source='club', scenes=str(d))

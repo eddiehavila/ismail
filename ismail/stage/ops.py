@@ -189,35 +189,111 @@ def stage_world(scene: str, scenes: str = None, world: dict = None) -> str:
     return f'wrote {f}: ' + json.dumps(worldmod.load_world(d, scene), separators=(', ', ': '))
 
 
+BRIDGE = Path(__file__).resolve().parent / 'bridge' / 'blender_bridge.py'
+
+
+def export_plan(d, scene):
+    """The command, cwd and env stage_scene_export runs for a scene (its lineage resolved), without running it."""
+    try:
+        b = worldmod.build_of(d, scene)
+    except ValueError as e:
+        raise OpError(str(e))
+    if not b:
+        raise OpError(f'scene {scene!r} has no build in its world.json, and derives from no scene that has one (add '
+                      f'"build": {{"script": "video/rooms/<room>.py"}}, or "derives_from": "<scene>", with stage_world)')
+    if not b['script'].is_file():
+        raise OpError(f'the build script {b["script"]} does not exist (world.json build.script / build.root of '
+                      f'{b["line"][-1]})')
+    for p in b['passes']:
+        if not p.is_file():
+            raise OpError(f'the pass {p} does not exist (world.json "pass", relative to the build root)')
+    env = {**b['env'], 'VR_EXPORT': str(d / scene), 'VR_BRIDGE': str(BRIDGE), 'STAGE_SCENE': scene,
+           'STAGE_SCENES': str(d)}
+    if len(b['line']) > 1:                         # a derived scene: passes, merged edits, the diet in the bridge
+        merged = d / '_stage' / f'edits_{scene}_merged.json'
+        merged.parent.mkdir(exist_ok=True)
+        merged.write_text(json.dumps(worldmod.merged_edits(b['edits']), indent=1), encoding='utf-8')
+        env.update({'VR_PASS': os.pathsep.join(str(p) for p in b['passes']), 'VR_EDITS': str(merged), 'VR_DIET': '1'})
+    return b, env
+
+
 @op(mutates=True)
 def stage_scene_export(scene: str, scenes: str = None, args: list = None, wait_min: float = 30) -> str:
-    """Rebuild a scene from its Blender build script (world.json "build": script, root, env) with VR_EXPORT set to
-    the scene folder, in one of the machine's heavy-job slots (stands in line up to wait_min minutes). An open page
-    swaps the new room in under the construct (not while the person is in VR: it waits until they leave). Replies
-    with the export's object count and the log path."""
+    """Rebuild a scene in Blender, in one of the machine's heavy-job slots (stands in line up to wait_min minutes):
+    its world.json "build" script (script, root, env) with VR_EXPORT set to the scene folder. A derived scene
+    (world.json "derives_from") is built from its ancestor's full build, then its line's passes ("pass", oldest
+    first), then the edits of its line merged (its own win), then the Quest diet. Room scripts should exec
+    os.environ["VR_BRIDGE"] (the engine's bridge, which runs the passes and the diet). Scripts can scope their
+    outputs by STAGE_SCENE (renders/<scene>/...). An open page swaps the new room in under the construct (never while
+    the person is in VR). Replies with the export's object count and the log path."""
     d = _scenes_dir(scenes) if scenes else Path(link.server_for(scene)['scenes'])
-    b = worldmod.build_of(d, scene)
-    if not b:
-        raise OpError(f'scene {scene!r} has no build in its world.json (add "build": {{"script": "video/rooms/<room>.py"}} '
-                      f'with stage_world)')
-    script, cwd, env = b
-    if not script.is_file():
-        raise OpError(f'the build script {script} does not exist (world.json build.script / build.root)')
+    b, env = export_plan(d, scene)
     from ..video import blender_exe
     exe = blender_exe()
     log = d / '_stage' / f'export_{scene}.log'
     log.parent.mkdir(exist_ok=True)
-    cmd = [exe, '-b', '--factory-startup', '-P', str(script)] + (['--'] + [str(a) for a in args] if args else [])
+    cmd = [exe, '-b', '--factory-startup', '-P', str(b['script'])] + (['--'] + [str(a) for a in args] if args else [])
     t0 = time.time()
     with machine.slot('cpu', f'stage_scene_export {scene}', est_s=600, wait=wait_min * 60):
         with open(log, 'w', encoding='utf-8') as fh:
-            r = subprocess.run(cmd, cwd=cwd, stdout=fh, stderr=subprocess.STDOUT,
-                               env={**os.environ, **env, 'VR_EXPORT': str(d / scene)})
+            r = subprocess.run(cmd, cwd=b['cwd'], stdout=fh, stderr=subprocess.STDOUT, env={**os.environ, **env})
     text = log.read_text(encoding='utf-8', errors='replace')
     done = [ln for ln in text.splitlines() if ln.startswith('VR EXPORT')]
     if r.returncode != 0 or not done:
         raise OpError(f'the export failed (exit {r.returncode}); the end of {log}: ' + text[-800:].strip())
-    return f'{done[-1]} in {time.time() - t0:.0f} s; log {log}'
+    passes = [ln for ln in text.splitlines() if ln.startswith('VR PASS')]
+    line = ' <- '.join(b['line'])
+    if len(b['line']) > 1 and len(passes) < len(b['passes']):
+        raise OpError(f'exported, but {len(passes)} of {len(b["passes"])} passes ran: the build script {b["script"]} '
+                      f'does not exec the engine bridge (os.environ["VR_BRIDGE"]); {log}')
+    return f'{done[-1]} in {time.time() - t0:.0f} s (lineage {line}, {len(passes)} passes); log {log}'
+
+
+@op(mutates=True)
+def stage_scene_new(name: str, source: str, scenes: str = None, pass_script: str = None, export: bool = False) -> str:
+    """A new scene derived from an existing one (a remodel, another era, the same place at dawn): world.json says
+    derives_from=source (so its room is built from the source's full build, never from a blockout), with
+    pass=pass_script (the variant's changes on the built room, relative to the build root), assets=source (the
+    actors' bodies), and the source's people, facings, partners, floor, keep-out boxes and sky. The page's own pieces
+    are copied: trees, names, cues, waypoints. The person's takes, voice notes and snapshots stay with the source.
+    export=True runs stage_scene_export right away (a heavy job); without it the scene appears after its first
+    export. Before showing it to the person, look at the variant beside its source from the same camera."""
+    import shutil
+    d = _scenes_dir(scenes) if scenes else Path(link.server_for(source)['scenes'])
+    if not worldmod.NAME_OK(name):
+        raise OpError('a scene name is letters, digits, _ and - only')
+    if not (d / source).is_dir():
+        raise OpError(f'no scene {source!r} in {d}')
+    if (d / name).exists():
+        raise OpError(f'{d / name} exists already; pick another name or edit its world.json with stage_world')
+    src = worldmod.load_world(d, source)
+    w = {k: src[k] for k in ('actors', 'facings', 'partners', 'floor', 'keep_out', 'spawn', 'credits', 'sky') if src.get(k)}
+    w.update({'derives_from': source, 'assets': src.get('assets') or source})
+    if pass_script:
+        w['pass'] = pass_script
+    (d / name).mkdir()
+    copied = []
+    for piece in worldmod.COPY_FROM_PARENT:
+        f = d / source / piece
+        if f.is_dir():
+            shutil.copytree(f, d / name / piece)
+            copied.append(piece + '/')
+        elif f.is_file():
+            shutil.copy2(f, d / name / piece)
+            copied.append(piece)
+    try:
+        worldmod.save_world(d, name, w)
+        worldmod.lineage(d, name)
+        export_plan(d, name)
+    except (ValueError, OpError) as e:
+        raise OpError(f'made {d / name} but its world.json is not ready: {e}')
+    out = (f'scene {name} derives from {source} (pass {pass_script or "none yet"}); copied {", ".join(copied) or "nothing"}; '
+           f'world.json: {json.dumps(w, separators=(", ", ": "))}')
+    if export:
+        out += '\n' + stage_scene_export(scene=name, scenes=str(d))
+    else:
+        out += f'\nnext: stage_scene_export(scene="{name}", scenes="{d}") builds it'
+    return out
 
 
 @op(mutates=True)

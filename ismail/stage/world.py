@@ -8,8 +8,18 @@
       "keep_out": [[6.4, 19.6, 6.6, 14.4, -1, 3.05]],       boxes grown trees never draw inside (x0 x1 y0 y1 z0 z1)
       "spawn":    {"position": [x, y, z], "target": [x, y, z]},   where a first visit starts (optional)
       "credits":  ["SOURCES.md#lucy"],                      asset credits for what the scene shows
-      "build":    {"script": "video/rooms/blue_front_block.py", "root": "../../../..", "env": {"VR_DETAIL": "1"}}
+      "build":    {"script": "video/rooms/blue_front_block.py", "root": "../../../..", "env": {"VR_DETAIL": "1"}},
+      "derives_from": "bluefront",                          a derived scene: built from that scene's full build
+      "pass":     "video/rooms/crossfade_dress.py",         ... plus this pass on the built scene (relative to root;
+      "pass_env": {"CROSSFADE": "1"},                       pass_env is added to the build's env)
+      "assets":   "bluefront",                              actor bodies come from that scene's actors/
+      "sky":      "night"
     }
+
+A derived scene (derives_from) has no build of its own: stage_scene_export runs its root ancestor's build script
+with that build's env, the passes of every scene in the line (oldest first) in the bridge (VR_PASS), the edits of
+every scene in the line merged (the variant's win), then the Quest diet (VR_DIET), and exports to the variant's
+folder. So a variant can never start from a blockout by accident.
 
 `build.script` is relative to `build.root`, which is relative to the scene folder (default "../../../..": the song
 folder, for scenes in <song>/video/vr/scenes/<name>); scene_export runs the script in Blender with VR_EXPORT set to
@@ -20,7 +30,12 @@ import json
 from pathlib import Path
 
 DEFAULTS = {'actors': {}, 'facings': {}, 'partners': {}, 'floor': 0.0, 'keep_out': [], 'spawn': None, 'credits': [],
-            'build': None}
+            'build': None, 'derives_from': None, 'pass': None, 'assets': None, 'sky': None}
+
+
+def NAME_OK(name):
+    import re
+    return bool(re.fullmatch(r'[A-Za-z0-9_\-]{1,64}', name or '')) and not name.startswith('_')
 
 
 def world_path(scenes, name):
@@ -59,6 +74,11 @@ def check_world(w):
     b = w.get('build')
     if b is not None and not (isinstance(b, dict) and isinstance(b.get('script'), str)):
         out.append('build must be {"script": "<path>", ...}')
+    for k in ('derives_from', 'pass', 'assets', 'sky'):
+        if w.get(k) is not None and not isinstance(w[k], str):
+            out.append(f'{k} must be a string')
+    if w.get('derives_from') and b:
+        out.append('a derived scene has no build of its own (it is built from derives_from); drop "build"')
     return out
 
 
@@ -90,12 +110,57 @@ def default_scene(scenes):
     return names[0] if names else ''
 
 
+def lineage(scenes, name):
+    """The scene and its ancestors, the scene first: [name, parent, grandparent, ...]. Raises on a loop or a parent
+    that does not exist."""
+    line = [name]
+    while True:
+        parent = load_world(scenes, line[-1]).get('derives_from')
+        if not parent:
+            return line
+        if parent in line:
+            raise ValueError(f'world.json derives_from makes a loop: {" -> ".join(line + [parent])}')
+        if not (Path(scenes) / parent).is_dir():
+            raise ValueError(f'{line[-1]} derives from {parent!r}, which is not a scene in {scenes}')
+        line.append(parent)
+
+
 def build_of(scenes, name):
-    """(script path, cwd, env) for scene_export, or None when the scene has no build."""
-    w = load_world(scenes, name)
-    b = w.get('build')
+    """How to export a scene: {script, cwd, env, passes, edits}, or None when nothing in its line has a build. A
+    derived scene uses its root ancestor's build and env, its line's passes (oldest first; relative to that
+    build's root) and every edits.json in the line (the variant's last, so they win)."""
+    line = lineage(scenes, name)
+    top = line[-1]
+    w0 = load_world(scenes, top)
+    b = w0.get('build')
     if not b:
         return None
-    root = (Path(scenes) / name / b.get('root', '../../../..')).resolve()
+    root = (Path(scenes) / top / b.get('root', '../../../..')).resolve()
     script = (root / b['script']).resolve()
-    return script, script.parent, {str(k): str(v) for k, v in (b.get('env') or {}).items()}
+    env = {str(k): str(v) for k, v in (b.get('env') or {}).items()}
+    passes = []
+    for s in reversed(line[:-1]):
+        w = load_world(scenes, s)
+        env.update({str(k): str(v) for k, v in ((w.get('pass_env') or {}).items())})
+        if w.get('pass'):
+            passes.append((root / w['pass']).resolve())
+    edits = [Path(scenes) / s / 'edits.json' for s in reversed(line) if (Path(scenes) / s / 'edits.json').is_file()]
+    return {'script': script, 'cwd': script.parent, 'env': env, 'passes': passes, 'edits': edits, 'line': line}
+
+
+def merged_edits(files):
+    """edits.json files merged in order (later files win per object, light and material)."""
+    out = {'objects': {}, 'lights': {}, 'materials': {}}
+    for f in files:
+        try:
+            e = json.loads(Path(f).read_text(encoding='utf-8'))
+        except (OSError, ValueError):
+            continue
+        for k in out:
+            out[k].update(e.get(k) or {})
+    return out
+
+
+# the pieces a new scene takes from the one it derives from: the page's own files (the room itself comes from the
+# export); takes, voice notes, snapshots and history are the person's and stay with their scene
+COPY_FROM_PARENT = ('trees', 'names.json', 'cues.json', 'waypoints.json')

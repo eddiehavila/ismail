@@ -17,6 +17,12 @@
   floor, keep-out boxes, the default scene, the build script) lives in `scenes/<name>/world.json` and
   `scenes/stage.json`. Session files (client log, speech cache, bundle, update notes) go to `<scenes>/_stage/`.
 - One server per port: a busy port is refused (Windows let two servers bind one port and split the live link).
+- Scene lineage (M75): a scene's world.json may say `derives_from` (and `pass`, `pass_env`, `assets`).
+  `stage_scene_export` builds a derived scene from its ancestor's full build, then its line's passes in the bridge
+  (`VR_PASS`), the line's edits merged (the variant's win) and the Quest diet in the bridge (`VR_DIET`), so a remodel
+  or another era never starts from a blockout. `stage_scene_new(name, source=)` makes one: the lineage in
+  world.json, the page's pieces copied (trees, names, cues, waypoints), actor bodies from the source. Exports set
+  `STAGE_SCENE` so renders go in `renders/<scene>/`. stage.md: "Deriving a scene".
 - The Blender bridge and the Quest diet (`ismail/stage/bridge`: merged groups, triangle and texture budgets,
   MakeHuman skin and mask-map fixes) ship with it. three.js r180 is vendored (MIT).
 

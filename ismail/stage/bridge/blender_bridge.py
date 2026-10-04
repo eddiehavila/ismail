@@ -4,6 +4,10 @@ it renders):
 VR_EXPORT=<dir>   writes <dir>/scene.glb (Y-up glTF, modifiers applied, curves as meshes, volumes left out) and
                   <dir>/manifest.json (every object's Blender name, type, world location and quaternion, light energy
                   and colour, material base colours), then quits without rendering.
+VR_PASS=<f>[;<f>] a derived scene's passes (world.json derives_from + pass), run in order on the built parent
+                  scene before the edits (each file is exec'd with S = the scene); paths joined by os.pathsep
+VR_DIET=1         the Quest diet (quest.py next to this file, found through VR_BRIDGE) after the passes and
+                  edits, before the export: merged groups, triangle and texture budgets, MakeHuman skin
 VR_EDITS=<file>   applies an edits.json written by the editor (Blender world space, Z-up):
                   {"objects": {name: {"location": [x,y,z], "quaternion": [w,x,y,z], "scale": [x,y,z]}},
                    "lights": {name: {"energy": W, "color": [r,g,b]}},
@@ -150,8 +154,18 @@ def vr_apply(path):
     print('VR EDITS applied from', path)
 
 
+for _pass in [p for p in os.environ.get('VR_PASS', '').split(os.pathsep) if p]:
+    print('VR PASS', _pass)
+    exec(compile(open(_pass, encoding='utf-8').read(), _pass, 'exec'),
+         {'__name__': '__vr_pass__', '__file__': _pass, 'bpy': bpy, 'S': bpy.context.scene, 'os': os})
+    bpy.context.view_layer.update()
 if os.environ.get('VR_EDITS'):
     vr_apply(os.environ['VR_EDITS'])
+if os.environ.get('VR_DIET') and os.environ.get('VR_EXPORT'):
+    import sys as _sys
+    _sys.path.insert(0, os.path.dirname(os.environ.get('VR_BRIDGE') or os.path.abspath('.')))
+    import quest as _quest                                          # noqa: E402
+    _quest.quest_diet()
 if os.environ.get('VR_EXPORT'):
     vr_export(os.environ['VR_EXPORT'])
     import sys

@@ -263,7 +263,7 @@ export function initActors(ed, live) {
   async function play(c) {
     const person = c.person, who = c.actor || world().actors[person];
     if (!who) throw new Error('no actor for ' + person + ' (world.json actors, or pass actor)');
-    const base = `scenes/${encodeURIComponent(c.assets || scn())}/`;
+    const base = `scenes/${encodeURIComponent(c.assets || world().assets || scn())}/`;   // a derived scene's bodies: its source's
     const tbase = `scenes/${encodeURIComponent(c.takes || scn())}/takes/${encodeURIComponent(c.take)}/`;
     const [rig0, meta, txt] = await Promise.all([load(who, base), fetch(tbase + 'meta.json', { cache: 'no-store' }).then((r) => r.json()),
       fetch(tbase + 'frames.jsonl', { cache: 'no-store' }).then((r) => { if (!r.ok) throw new Error('no take ' + c.take); return r.text(); })]);
@@ -314,7 +314,7 @@ export function initActors(ed, live) {
     const person = c.person, who = c.actor || world().actors[person];
     if (!who) throw new Error('no actor for ' + person + ' (world.json actors, or pass actor)');
     if (!source) throw new Error('no live body source');
-    const rig0 = await load(who, `scenes/${encodeURIComponent(c.assets || scn())}/`);
+    const rig0 = await load(who, `scenes/${encodeURIComponent(c.assets || world().assets || scn())}/`);
     stop({ person });
     const rig = [...playing.values()].some((p) => p.rig.who === who) ? await cloneRig(rig0) : rig0;
     const f0 = source(), floor = world().floor || 0;
