@@ -11,6 +11,7 @@ import { initTouch } from './touch.js';
 import { initUpdates } from './updates.js';
 import { initExit } from './exit.js';
 import { initPanels } from './panels.js';
+import { initBody } from './body.js';
 import { initActions } from './actions.js';
 import { initTakes4D } from './takes4d.js';
 import { initActors } from './actors.js';
@@ -55,7 +56,8 @@ const voice = initVoice(ed, hands, live);
 const touch = initTouch(ed, xr, hands, live.emit);
 const updates = initUpdates(ed, live, hands, voice);
 const exitVR = initExit(ed, hands, live);
-const panels = initPanels(ed, xr, hands, voice, live);
+const body = initBody(ed, hands);                  // which way the user's body faces (body-anchored panels)
+const panels = initPanels(ed, xr, hands, voice, live, body);
 const gallery = initGallery(ed, hands, voice, panels, live);
 voice.shotHooks.gallery = gallery;
 live.handlers.gallery_add = (c) => {               // open: true also opens the gallery on it (the user: "make the gallery go to that render")
@@ -110,8 +112,10 @@ live.handlers.say = async (c) => {
   if (ed.renderer.xr.isPresenting && age < 60000) {
     const words = String(c.text).split(/\s+/).length;
     // long enough to read and to still be there when the speech arrives (the user: "I didn't catch that last card")
-    panels.show({ panel_id: 'caption_' + Date.now(), title: 'Claude', text: String(c.text), seconds: Math.min(120, 25 + words * 0.8),
-      width: 0.46, quiet: true, wait: false });
+    // a message, so it rides with the user on its sender's side (the user, 2026-10-04: "it kind of needs to stick to
+    // me"), and says who it is from
+    panels.show({ panel_id: 'caption_' + Date.now(), title: c.from ? '' : 'Claude', from: c.from, text: String(c.text),
+      seconds: Math.min(120, 25 + words * 0.8), quiet: true, wait: false, anchor: 'body', side: c.side });
   }
   return age >= 20000 ? { ...r, spoken: false, stale_s: Math.round(age / 1000) } : r;
 };
@@ -162,6 +166,7 @@ ed.renderer.setAnimationLoop(() => {
   guard('xr', () => xr.update(dt));
   if (ed.renderer.xr.isPresenting) {
     guard('hands', () => hands.update()); guard('touch', () => touch.update()); guard('voice', () => voice.update());
+    guard('body', () => body.update());
     if (!guard('exitVR', () => exitVR.update())) { guard('updates', () => updates.update()); guard('panels', () => panels.update()); }
     guard('gallery', () => gallery.update()); guard('actions', () => actions.update());
   }
@@ -179,7 +184,7 @@ ed.renderer.setAnimationLoop(() => {
 });
 
 window.VR = {
-  ed, desktop, xr, live, THREE,
+  ed, desktop, xr, live, THREE, body, panels, hands,
   selftest: () => ed.selftest(),
   save: () => ed.save(),
   undo: () => ed.undo(),

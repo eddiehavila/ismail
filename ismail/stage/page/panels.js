@@ -3,6 +3,10 @@
 // the user, fixed in the world; the user answers by poking a button with a fingertip, pointing and pinching, or a
 // RIGHT thumbs up / down held while the panel is in view. Events: panel_shown, panel_answer {id, answer, via},
 // panel_closed {id, why}. The poke also works on any other registered surface (the colour panel in xr.js).
+// anchor 'body' (the user, 2026-10-04: a message "needs to stick to me, just like my utility belt"): the panel rides
+// with the user, just out of view to the right (side 'right', the default) or left of where their BODY faces
+// (body.js), so turning the head finds it; seconds or the X closes it; dragging it moves its place around them.
+// A panel that tells about a place stays in the world (the default). No panel opens while the user is talking.
 import * as THREE from 'three';
 import { GIZMO } from './editor.js';
 
@@ -10,15 +14,24 @@ const CW = 1024;                         // canvas width; the height follows the
 const WIDTH = 0.56;                      // metres
 const POKE_IN = 0.012, POKE_OUT = 0.03, HOVER = 0.08;   // fingertip to the surface, metres
 const VERDICT_HOLD_MS = 450;
+// who a panel is from (the user, 2026-10-04: "tell me who this information came from"): a command's `from` (the
+// agent's name, e.g. "crossroads film", "stage") shows as a coloured chip and border, the colour fixed per name, and a
+// sender's messages keep to one side of the body (senderSide), so the user knows at a glance who is talking
+const SENDER_COLOURS = ['#38bdf8', '#a78bfa', '#f472b6', '#34d399', '#fbbf24', '#fb923c'];   // never red: red is recording
+const hashOf = (s) => [...String(s)].reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) >>> 0, 7);
+export const senderColour = (from) => (!from ? null : from === 'stage' ? '#94a3b8' : SENDER_COLOURS[hashOf(from) % SENDER_COLOURS.length]);
+export const senderSide = (from) => (from && hashOf(from) % 2 ? 'left' : 'right');
+const BODY_WIDTH = 0.42, BODY_DEG = 72, BODY_DIST = 0.6, BODY_DROP = 0.12;   // a 0.42 m panel 72 degrees out sits just
+                                                                            // past the Quest 3's view straight ahead
 
-export function initPanels(ed, xrApi, hands, voice, live) {
+export function initPanels(ed, xrApi, hands, voice, live, body) {
   const { scene, camera, renderer } = ed;
   const panels = new Map();              // id -> panel
   const pokeables = [];                  // { mesh, w, h, press(uv, via), hover(uv|null) }
 
   // ---- drawing
   function layoutOf(p) {
-    const pad = 28, titleH = p.title ? 64 : 0, imgH = p.img ? Math.round((CW - 2 * pad) * p.img.height / p.img.width) : 0;
+    const pad = 28, titleH = (p.title ? 64 : 0) + (p.from ? 52 : 0), imgH = p.img ? Math.round((CW - 2 * pad) * p.img.height / p.img.width) : 0;
     const textLines = p.text ? wrap(p.text, 52) : [], textH = textLines.length * 38 + (textLines.length ? 14 : 0);
     // up to four buttons in a row; more wrap into rows of three (the user, 2026-10-03: a person's menu had eight
     // buttons in one row and they were "getting scrunched")
@@ -42,15 +55,24 @@ export function initPanels(ed, xrApi, hands, voice, live) {
   }
   function draw(p) {
     const L = layoutOf(p), cv = p.cv;
-    if (cv.height !== L.H) { cv.height = L.H; p.mesh.geometry.dispose(); p.mesh.geometry = new THREE.PlaneGeometry(WIDTH, WIDTH * L.H / CW); }
+    if (cv.height !== L.H) { cv.height = L.H; p.mesh.geometry.dispose(); p.mesh.geometry = new THREE.PlaneGeometry(p.width, p.width * L.H / CW); }
     const g = cv.getContext('2d');
     g.clearRect(0, 0, CW, L.H);
     g.fillStyle = 'rgba(16,18,22,0.94)'; g.beginPath(); g.roundRect(0, 0, CW, L.H, 26); g.fill();
     let y = L.pad;
+    if (p.from) {                                              // the sender: a chip in its colour, and the border
+      const col = senderColour(p.from);
+      g.strokeStyle = col; g.lineWidth = 6; g.beginPath(); g.roundRect(3, 3, CW - 6, L.H - 6, 24); g.stroke();
+      g.font = 'bold 28px system-ui, sans-serif'; g.textBaseline = 'middle';
+      const label = String(p.from).toUpperCase(), lw = Math.min(CW - 2 * L.pad - 80, g.measureText(label).width + 32);
+      g.fillStyle = col; g.beginPath(); g.roundRect(L.pad, y, lw, 40, 20); g.fill();
+      g.fillStyle = '#0b0d10'; g.fillText(label, L.pad + 16, y + 21, lw - 32);
+      y += 52;
+    }
     if (p.title) {
       g.fillStyle = '#f5f5f4'; g.font = 'bold 40px system-ui, sans-serif'; g.textBaseline = 'middle';
       g.fillText(p.title, L.pad, y + 28, CW - 2 * L.pad - 70);
-      y += L.titleH;
+      y += 64;
     }
     const x = p.rects.find((r) => r.id === '__close');
     g.fillStyle = p.hover === '__close' ? '#b91c1c' : 'rgba(255,255,255,0.12)'; g.beginPath(); g.roundRect(x.x, x.y, x.w, x.h, 10); g.fill();
@@ -84,14 +106,22 @@ export function initPanels(ed, xrApi, hands, voice, live) {
   }
   async function show(c) {
     const id = String(c.panel_id || 'panel_' + Date.now());   // (c.id is the server's command id)
+    // never while the user is talking (the user, 2026-10-04: "your message interrupted me" and the thought was lost)
+    if (renderer.xr.isPresenting && voice.talking()) {
+      live.emit('panel_held', { id, why: 'the user is talking' });
+      while (renderer.xr.isPresenting && voice.talking()) await new Promise((res) => setTimeout(res, 300));
+    }
     if (panels.has(id)) close(id, 'replaced');
+    const onBody = c.anchor === 'body' && !c.near;
+    const width = c.width || (onBody ? BODY_WIDTH : WIDTH);
     const cv = document.createElement('canvas'); cv.width = CW; cv.height = 256;
     const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace;
-    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(c.width || WIDTH, (c.width || WIDTH) / 4),
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(width, width / 4),
       new THREE.MeshBasicMaterial({ map: tex, transparent: true, toneMapped: false, side: THREE.DoubleSide, depthTest: false, depthWrite: false }));   // drawn over the world, like Quest system panels (the user, 2026-10-03: a panel cut through a seated man)
     mesh.layers.set(GIZMO); mesh.renderOrder = 990;
     const p = { id, title: c.title || '', text: c.text || '', buttons: (c.buttons || []).map(String), img: null, cv, tex, mesh,
-      hover: null, answer: null, resolve: null, timer: null, t0: performance.now() };
+      width, from: c.from ? String(c.from) : null, hover: null, answer: null, resolve: null, timer: null, t0: performance.now(),
+      body: onBody ? { deg: ((c.side || senderSide(c.from)) === 'left' ? -1 : 1) * (c.angle ?? BODY_DEG), dist: c.distance ?? BODY_DIST, dy: -BODY_DROP } : null };
     if (c.image) {
       p.img = await new Promise((res) => { const im = new Image(); im.onload = () => res(im); im.onerror = () => res(null); im.src = c.image; });
       if (!p.img) p.text = (p.text ? p.text + '\n' : '') + '(could not load ' + c.image + ')';
@@ -101,7 +131,8 @@ export function initPanels(ed, xrApi, hands, voice, live) {
       mesh.position.copy(c.near);
       const head = camera.getWorldPosition(new THREE.Vector3());
       mesh.lookAt(head.x, mesh.position.y, head.z);
-    } else placeInFront(mesh, panels.size);
+    } else if (p.body) placeOnBody(p, 1);
+    else placeInFront(mesh, panels.size);
     scene.add(mesh);
     panels.set(id, p);
     p.poke = { mesh, press: (uv, via) => pressAt(p, uv, via), hover: (uv) => { const r = uv && rectAt(p, uv); setHover(p, r ? r.id : null); },
@@ -110,7 +141,8 @@ export function initPanels(ed, xrApi, hands, voice, live) {
     mesh.userData.panelApi = p.poke;
     xrApi.addTarget(mesh);
     if (!c.quiet) voice.EAR.incoming();
-    live.emit('panel_shown', { id, title: p.title, image: c.image || null, buttons: p.buttons });
+    live.emit('panel_shown', { id, title: p.title, from: p.from, image: c.image || null, buttons: p.buttons, anchor: p.body ? 'body' : 'world',
+      ...(p.body ? { side: p.body.deg < 0 ? 'left' : 'right' } : {}) });
     const done = new Promise((resolve) => {
       p.resolve = resolve;
       if (c.seconds) p.timer = setTimeout(() => close(id, 'timeout'), c.seconds * 1000);
@@ -132,6 +164,24 @@ export function initPanels(ed, xrApi, hands, voice, live) {
     mesh.lookAt(head.x, mesh.position.y, head.z);
   }
   function dragTo(p, pos) { p.mesh.position.copy(pos); faceUser(p.mesh); }
+  // ---- riding with the user: each body panel has a place around the body (degrees right of its forward, metres out,
+  // height from the eyes); panels on one side stack downward. k 1 jumps there, smaller eases (the body turns smoothly).
+  const want = new THREE.Vector3();
+  function placeOnBody(p, k) {
+    let below = 0;
+    for (const q of panels.values()) {
+      if (q === p) break;
+      if (q.body && Math.sign(q.body.deg) === Math.sign(p.body.deg)) below += q.mesh.geometry.parameters.height + 0.03;
+    }
+    body.around(p.body.deg, p.body.dist, want);
+    want.y += p.body.dy - below;
+    if (k >= 1) p.mesh.position.copy(want); else p.mesh.position.lerp(want, k);
+    faceUser(p.mesh);
+  }
+  function rebase(p) {                                          // dropped where the user wanted it: that is its place now
+    const b = body.bearing(p.mesh.getWorldPosition(new THREE.Vector3()));
+    p.body = { deg: b.deg, dist: Math.max(0.3, b.dist), dy: b.dy };
+  }
   function answer(p, a, via) {
     p.answer = a; draw(p);
     voice.EAR.sent();
@@ -152,6 +202,24 @@ export function initPanels(ed, xrApi, hands, voice, live) {
     if (p.resolve) { p.resolve({ id, answer: null, why }); p.resolve = null; }
     return { closed: true };
   }
+
+  // ---- how far a point is from the nearest shown surface (a panel, a menu, the colour panel), in metres
+  const nearP = new THREE.Vector3();
+  function uiDistance(pt) {
+    let best = Infinity;
+    for (const pk of pokeables) {
+      let shown = !!pk.mesh.parent;
+      for (let o = pk.mesh; o && shown; o = o.parent) shown = o.visible;
+      if (!shown) continue;
+      pk.mesh.updateMatrixWorld();
+      nearP.copy(pt); pk.mesh.worldToLocal(nearP);
+      const pg = pk.mesh.geometry.parameters, s = pk.mesh.getWorldScale(new THREE.Vector3());
+      const dx = Math.max(0, Math.abs(nearP.x) - pg.width / 2) * s.x, dy = Math.max(0, Math.abs(nearP.y) - pg.height / 2) * s.y;
+      best = Math.min(best, Math.hypot(dx, dy, nearP.z * s.z));
+    }
+    return best;
+  }
+  const pokedAt = { left: 0, right: 0 };
 
   // ---- finger poke on any registered surface: hover inside HOVER, press on crossing POKE_IN from the front
   const tipState = { left: { inside: null }, right: { inside: null } };
@@ -187,6 +255,7 @@ export function initPanels(ed, xrApi, hands, voice, live) {
       if (best.z < POKE_IN && st.inside !== best.pk) {          // crossed the surface: one press per touch
         st.inside = best.pk;
         const settled = !best.pk.panel || now - (best.pk.panel.droppedAt || 0) > 800;   // not just let go of
+        pokedAt[side] = now;
         if (settled && inView(best.pk)) best.pk.press(best.uv, 'poke ' + side);
       } else if (best.z > POKE_OUT && st.inside === best.pk) st.inside = null;
     }
@@ -230,7 +299,11 @@ export function initPanels(ed, xrApi, hands, voice, live) {
       const pt = f.p['thumb-tip'].clone().add(f.indexTip).multiplyScalar(0.5);
       const pinched = f.pinch < (drag[side] ? 0.035 : 0.02);
       if (drag[side]) {
-        if (!pinched || !panels.has(drag[side].p.id)) { drag[side].p.droppedAt = performance.now(); drag[side] = null; continue; }
+        if (!pinched || !panels.has(drag[side].p.id)) {
+          drag[side].p.droppedAt = performance.now();
+          if (drag[side].p.body) rebase(drag[side].p);
+          drag[side] = null; continue;
+        }
         dragTo(drag[side].p, pt.add(drag[side].off));
       } else if (pinched && !drag[side + 'Was']) {
         const n = nearPanelAt(pt);
@@ -248,8 +321,12 @@ export function initPanels(ed, xrApi, hands, voice, live) {
     return !!n;
   }
 
+  let lastT = 0;
   function update() {
     if (!renderer.xr.isPresenting) return;
+    const now = performance.now(), k = 1 - Math.exp(-Math.min(0.1, (now - (lastT || now)) / 1000) * 6);
+    lastT = now;
+    for (const p of panels.values()) if (p.body && !(drag.left && drag.left.p === p) && !(drag.right && drag.right.p === p)) placeOnBody(p, k);
     nearDrag();
     poke();
     thumbs(performance.now());
@@ -258,5 +335,13 @@ export function initPanels(ed, xrApi, hands, voice, live) {
 
   function registerPokeable(mesh, press, hover) { const pk = { mesh, press, hover }; pokeables.push(pk); return pk; }
   xrApi.addNearCheck(handAtPanel);
-  return { show, close, update, registerPokeable, panels };
+  // travel waits while a hand is at the UI: within UI_NEAR of a surface, or UI_AFTER_MS after a poke (hands.js)
+  const UI_NEAR = 0.10, UI_AFTER_MS = 800;
+  hands.addUIGuard((side, tip) => {
+    if (!renderer.xr.isPresenting) return null;
+    if (performance.now() - pokedAt[side] < UI_AFTER_MS) return { why: 'just poked a panel' };
+    const d = uiDistance(tip);
+    return d < UI_NEAR ? { why: 'a panel or button is within 10 cm', cm: Math.round(d * 100) } : null;
+  });
+  return { show, close, update, registerPokeable, panels, uiDistance };
 }

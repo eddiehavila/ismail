@@ -58,6 +58,21 @@
   floor, keep-out boxes, the default scene, the build script) lives in `scenes/<name>/world.json` and
   `scenes/stage.json`. Session files (client log, speech cache, bundle, update notes) go to `<scenes>/_stage/`.
 - One server per port: a busy port is refused (Windows let two servers bind one port and split the live link).
+- Every panel and caption says who it is from: `stage_say(sender=)`, `stage_panel_show(sender=)` (a command's `from`)
+  draw a chip and border in that name's colour, fixed per name, and a sender's body panels keep to one side. The VR
+  card that goes with a spoken line rides with the person now, titled by its sender instead of "Claude". The
+  server's own lines are from "stage".
+- Pin touches land: a to-do pin's card takes a fingertip as well as its diamond, a pin re-arms after 1.2 s even
+  if the hand stayed close (it needed the tip to leave by 18 cm), the gaze window is 60 degrees, and a tip at a pin
+  that does not open it says why (`pin_touch_missed`). A finger gun at a pin does not travel.
+- A poke at UI wins over travel: while a hand's fingertip is within 10 cm of a panel, menu or button, or for 0.8 s
+  after it pokes one, the finger gun shows no travel arc and its thumb click does nothing (`travel_held` says so).
+  Poking menu buttons with the same finger gun that aims travel had teleported the person twice.
+- Panels that ride with the person: `stage_panel_show(anchor="body", side="right"|"left", seconds=)` keeps a message just
+  out of view beside where their body faces (a new body heading from the head and hands: a held head turn or the
+  hands held out turn it, a glance does not), following them as they move; dragging it moves its place around them.
+  World panels stay for notes about a place. Speech and new panels wait while the person is talking (a note
+  recording, the phone gesture, 3 s after a note): a reply arriving mid-thought had lost them their sentence.
 - Presence: the stage knows who is listening. A listener is anything following the live log (`stage_listen` across
   every scene through GET /live/inbox, or `stage_events` with since= on one); the headset shows "listening: <who>"
   or "nobody is listening" on entering VR and whenever it changes. A voice note a listener was handed but did not

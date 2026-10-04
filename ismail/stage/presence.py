@@ -169,10 +169,10 @@ def _check(scene, file):
     elif took:
         state = 'handed'
         names = [w for w in took if w != 'unnamed'] or ['an agent']
-        S.server_cmd(scene, {'type': 'say', 'text': 'Handed to ' + ' and '.join(names) + '.', 'by': 'server: handed'})
+        S.server_cmd(scene, {'type': 'say', 'text': 'Handed to ' + ' and '.join(names) + '.', 'by': 'server: handed', 'from': 'stage'})
     else:
         state = 'unheard'
-        S.server_cmd(scene, {'type': 'say', 'text': NOBODY, 'by': 'server: no listener'})
+        S.server_cmd(scene, {'type': 'say', 'text': NOBODY, 'by': 'server: no listener', 'from': 'stage'})
         S.append_lines(S.STATE / 'unread.jsonl', [{'ts': S.now_iso(), 'scene': scene, 'event_id': n['id'], 'file': file}])
     with LOCK:
         n['state'] = state
