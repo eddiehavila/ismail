@@ -58,6 +58,9 @@
   floor, keep-out boxes, the default scene, the build script) lives in `scenes/<name>/world.json` and
   `scenes/stage.json`. Session files (client log, speech cache, bundle, update notes) go to `<scenes>/_stage/`.
 - One server per port: a busy port is refused (Windows let two servers bind one port and split the live link).
+- Every Follow is recorded, in memory: the newest 180 s of the last Follow wait in the page, and after "■ Stop" a card
+  offers "💾 Keep as take" (then the usual review: play on them, trim, redo) or "🗑 Discard"; `stage_take_keep_last`
+  keeps it for the person afterwards. A liked 61 s follow of the bartender was lost because a plain Follow kept nothing.
 - `stage_events(who=)` names an agent that follows a scene; a listener with no name reads "an unnamed agent" in the
   headset, not "unnamed".
 - Pins take the pointer ray: a to-do pin's card (and its diamond) stops the ray, lights its border, and a pinch opens

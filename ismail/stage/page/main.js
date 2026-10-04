@@ -97,7 +97,14 @@ const startTake = (name) => { const r = hands.startTake(name); if (r && !r.alrea
 const stopTake = async () => { const r = await hands.stopTake(); if (r && r.id) voice.takeAudioStop(); return r; };
 live.handlers.take_start = (c) => startTake(c.name || '');
 xr.setHandState(hands.state);
+// every Follow is buffered in memory (hands.js); after it stops the user (actions.js) or an agent can keep it as a take
+live.onEmit((type, d) => {
+  if (type === 'actor_follow' && d) hands.shadowStart(d.person);
+  else if (type === 'actor_stop' && d && d.live) hands.shadowStop();
+});
+live.handlers.take_keep_last = (c) => hands.keepLast(c.name || null);
 const actions = initActions(ed, hands, panels, live, { start: (n) => startTake(n), stop: () => stopTake(), recording: () => hands.rec.on,
+  keepLast: (n) => hands.keepLast(n), discardLast: () => hands.discardLast(), lastFollow: () => hands.lastFollowInfo(),
   get actors() { return actors; }, get view() { return takes4d; }, get ear() { return voice.EAR; }, get clock() { return stageClock; } });   // defined below; used on a menu press
 live.handlers.take_stop = () => stopTake();
 const sayText = live.handlers.say;                 // in VR there is no caption to read: speak it (or with --voice)

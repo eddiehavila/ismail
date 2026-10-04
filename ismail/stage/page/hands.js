@@ -178,8 +178,8 @@ export function initHands(ed, xrApi, emit) {
   // ---- takes
   const rec = { on: false, id: null, t0: 0, last: 0, buf: [], frames: 0, name: '', sending: false };
   const scene_ = () => ed.sceneName || '';
-  async function post(path, body) {
-    const r = await fetch(`${path}?scene=${encodeURIComponent(scene_())}&take=${encodeURIComponent(rec.id)}`,
+  async function post(path, body, id = rec.id) {
+    const r = await fetch(`${path}?scene=${encodeURIComponent(scene_())}&take=${encodeURIComponent(id)}`,
       { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     if (!r.ok) throw new Error('take upload ' + r.status);
     return r.json();
@@ -191,15 +191,15 @@ export function initHands(ed, xrApi, emit) {
     try { await post('take/frames', batch); } catch (e) { rec.buf.unshift(...batch); }
     rec.sending = false;
   }
+  const pad = (x) => String(x).padStart(2, '0');
+  const takeId = (d, name) => `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}` +
+    (name ? '_' + name.replace(/[^A-Za-z0-9_-]+/g, '_').slice(0, 40) : '');
   function startTake(name = '') {
     if (rec.on) return { id: rec.id, already: true };
-    const d = new Date(), pad = (x) => String(x).padStart(2, '0');
-    rec.id = `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}` +
-      (name ? '_' + name.replace(/[^A-Za-z0-9_-]+/g, '_').slice(0, 40) : '');
+    const d = new Date();
+    rec.id = takeId(d, name);
     Object.assign(rec, { on: true, t0: performance.now(), last: 0, buf: [], frames: 0, name });
-    post('take/meta', { id: rec.id, name, scene: scene_(), started: d.toISOString(), hz: REC_HZ, joints: JOINTS,
-      space: 'three.js world, Y up, metres (Blender: x, -z, y)', presenting: xr.isPresenting,
-      frame: 'frames.jsonl: one line per sample {t, head:[px,py,pz,qx,qy,qz,qw], left/right:{g, palm, j:[[px,py,pz,qx,qy,qz,qw,r] x 25]} or null, ctl}' })
+    post('take/meta', { id: rec.id, name, scene: scene_(), started: d.toISOString(), ...TAKE_FORMAT, presenting: xr.isPresenting })
       .catch(() => {});
     emit('take_start', { take: rec.id, name });
     return { id: rec.id };
@@ -213,6 +213,47 @@ export function initHands(ed, xrApi, emit) {
     emit('take_stop', { take: id, frames, seconds: +secs.toFixed(2) });
     return { id, frames, seconds: +secs.toFixed(2) };
   }
+  const TAKE_FORMAT = { hz: REC_HZ, joints: JOINTS, space: 'three.js world, Y up, metres (Blender: x, -z, y)',
+    frame: 'frames.jsonl: one line per sample {t, head:[px,py,pz,qx,qy,qz,qw], left/right:{g, palm, j:[[px,py,pz,qx,qy,qz,qw,r] x 25]} or null, ctl}' };
+
+  // ---- every Follow is recorded too, in memory: a good performance happens when the user is not "recording" (the
+  // user, 2026-10-04: a 61 s follow of the bartender he liked was gone, because a plain Follow kept nothing). The last
+  // one (up to SHADOW_MAX_S, the newest part) waits until the next Follow or a reload; keepLast saves it as a take.
+  const SHADOW_MAX_S = 180;
+  const shadow = { on: false, t0: 0, last: 0, frames: [], person: null, started: null };
+  let lastFollow = null;
+  function shadowStart(person) {
+    if (rec.on) return;
+    Object.assign(shadow, { on: true, t0: performance.now(), last: 0, frames: [], person, started: new Date() });
+  }
+  function shadowStop() {
+    if (!shadow.on) return null;
+    shadow.on = false;
+    const fr = shadow.frames;
+    shadow.frames = [];
+    if (fr.length < REC_HZ) return null;                        // under a second: nothing worth keeping
+    const t0 = fr[0].t;                                         // the buffer may have dropped its oldest part
+    lastFollow = { person: shadow.person, frames: t0 ? fr.map((f) => ({ ...f, t: r4(f.t - t0) })) : fr,
+      started: new Date(shadow.started.getTime() + t0 * 1000), seconds: r4(fr[fr.length - 1].t - t0) };
+    emit('follow_buffered', { person: lastFollow.person, frames: fr.length, seconds: lastFollow.seconds });
+    return lastFollowInfo();
+  }
+  const lastFollowInfo = () => (lastFollow ? { person: lastFollow.person, frames: lastFollow.frames.length, seconds: lastFollow.seconds,
+    started: lastFollow.started.toISOString() } : null);
+  async function keepLast(name) {
+    if (!lastFollow) throw new Error('no follow to keep: the last Follow is kept in memory until the next one or a reload');
+    const lf = lastFollow, label = name || lf.person || 'follow', id = takeId(lf.started, label);
+    await post('take/meta', { id, name: label, scene: scene_(), started: lf.started.toISOString(), ...TAKE_FORMAT, presenting: true,
+      from: 'follow' }, id);
+    for (let i = 0; i < lf.frames.length; i += 300) await post('take/frames', lf.frames.slice(i, i + 300), id);
+    await post('take/meta', { ended: new Date(lf.started.getTime() + lf.seconds * 1000).toISOString(), frames: lf.frames.length,
+      seconds: lf.seconds }, id);
+    lastFollow = null;
+    const r = { id, take: id, person: lf.person, frames: lf.frames.length, seconds: lf.seconds };
+    emit('follow_kept', r);
+    return r;
+  }
+  function discardLast() { const had = !!lastFollow; lastFollow = null; return { discarded: had }; }
   const r4 = (x) => Math.round(x * 1e4) / 1e4;
   const pose = (o) => {
     const p = new THREE.Vector3(), q = new THREE.Quaternion();
@@ -344,12 +385,19 @@ export function initHands(ed, xrApi, emit) {
       showAim('stick', o, d);
     } else if (aim.by && aim.by !== 'stick') hideAim();
     if (rec.on && now - rec.last >= 1000 / REC_HZ - 1) { rec.last = now; sample(now); }
+    if (shadow.on && rec.on) { shadow.on = false; shadow.frames = []; }   // a real take started: it has the frames
+    else if (shadow.on && now - shadow.last >= 1000 / REC_HZ - 1) {
+      shadow.last = now;
+      shadow.frames.push(makeFrame(now, shadow.t0));
+      if (shadow.frames.length > SHADOW_MAX_S * REC_HZ) shadow.frames.shift();
+    }
   }
   xr.addEventListener('sessionend', () => { hideAim(); if (rec.on) stopTake(); });
 
   // actors.js follow: the frame a take would record right now (a person moves with the user, live)
   const frameNow = () => makeFrame(performance.now(), 0);
   const api = { update, startTake, stopTake, rec, state: H, aim, frameNow, stickAiming: () => aim.by === 'stick', framing: false,
+    shadowStart, shadowStop, keepLast, discardLast, lastFollowInfo,
     addUIGuard: (fn) => uiGuards.push(fn) };
   return api;
 }
