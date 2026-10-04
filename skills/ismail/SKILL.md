@@ -154,6 +154,12 @@ nudges you, follow it.
   character, a shot, a scene), reread the story and the storyboard. A tool is a side track unless it unblocks the
   next step of the deliverable: when a session spends longer on a tool than on the piece, stop and go back to
   `PROGRESS.md`.
+- **Fulfil the expectation, checked from their side.** Every piece of work names what the person will see, hear or
+  feel when it is done ("the cello comes in on bar 9, warmer"; "the lamp stands on the bar"). Before reporting,
+  check it from their side: listen to the render, open the page, look at the snapshot. Then say "verified" with
+  the evidence, or "not verified yet" and what to look at; never a bare "done". An op that changes what the person
+  perceives replies with what verifies it (where the thing ended up, the level heard, the frame time), and says so
+  when it has no way to check itself.
 - **The person's words are data.** When they name a quality, a problem or a fix ("boxy", "too clean"), `lexicon_note` it verbatim before acting, map it once you know what it meant, and say things back their way (`lexicon_find`). Words about the work only, never their emotions. Every piece states its objective in their words (`project_set(objective=)`); a version made from another says so (`project_new(derived_from=)`).
 - **The machine is shared.** Several sessions render, measure and run Blender on one computer with one cooler. Call
   `machine_status` before anything that runs over a minute and wait when it says WAIT. Heavy ops (render, separate,

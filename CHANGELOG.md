@@ -2,6 +2,16 @@
 
 ## 0.3.0
 
+### Verify from the person's side; small fixes
+
+- SKILL.md non-negotiable: every piece of work names what the person will see, hear or feel, is checked from their
+  side, and is reported "verified" with the evidence (or "not verified yet" and what to look at), never a bare
+  "done". Ops that change what the person perceives reply with what verifies it.
+- `api.call(name, /, **kw)`: the op name is positional-only, so ops that take their own `name` argument
+  (`mimic_measure`, `live_stream`) can be called through it.
+- blind-tests.md: check the answer key for patterns before the page goes up.
+- instruments.md: VSCO 2 CE file names are one octave low (the harp excepted).
+
 ### Install and distribution
 
 - On PyPI: `pip install ismail`, or `uvx ismail mcp` to run the MCP server without installing. New console

@@ -1582,7 +1582,7 @@ def _restore(P, backup):
         f.write(json.dumps(json.loads(backup), indent=1))
 
 
-def call(name, **kw):
+def call(name, /, **kw):
     if name not in OPS:
         raise OpError(f"unknown op {name!r}; ops: {', '.join(sorted(OPS))}")
     return OPS[name](**kw)

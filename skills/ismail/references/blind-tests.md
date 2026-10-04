@@ -38,6 +38,9 @@ fix. A round the person always gets, or never gets, gives no direction: make the
 - **Fair backing.** The backing under A and B is the recording minus only the real note: its harmonic comb along the pitch curve, its attack, and its top band while it sounds. Subtracting whole stems also removes other parts that share the stem, and that absence gives the fake away.
 - **One listening level for the whole page.** Normalise every clip to one loudness. When one clip was nearly inaudible, the user could not answer.
 - **Drop trials the sensors cannot follow.** If the pitch tracker cannot follow the real note (pitch error above about 40 cents), lens A copies garbage. Drop the trial automatically and say how many were dropped.
+- **Check the answer key before the page goes up.** The key must not alternate, follow a run, or be predictable
+  from another factor (the engine, the word, the trial's length). Confirm each key entry against the source
+  waveform. A key with a pattern measures the pattern, not the ear.
 - **Check alignment.** The onsets of A and B must come from the same detector as R's, run on the full signal. A mask edge once made every A lag 12 ms.
 
 **Page mechanics.** Keep the page in the song (`songs/<slug>/exam/<round>/`), never on a public host when it contains clips of the recording.
