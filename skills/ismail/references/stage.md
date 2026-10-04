@@ -36,15 +36,16 @@ person and an agent change the same scene.
 
 ## Listening while the person is in
 
-The person once spent nine minutes in the headset, sent six voice notes and asked "Is there a reason you're not
-using voice to talk to me?": no agent was polling, so nobody heard. The live link is pull only, so listening is
+The person once spent nine minutes in the headset, sent six voice notes and finally asked why nobody was talking
+back: no agent was polling, so nobody heard. The live link is pull only, so listening is
 something you do.
 
 - **Listen before you tell them to go in.** `stage_listen(who="<your name>")` in a loop (pass `since=` the `last`
   it returned; it waits up to `wait=` seconds), or `stage_events(scene=, since=)` on one scene. While you call it at
   least every 40 s the headset shows "listening: <your name>" on entering VR and whenever that changes; with nobody
   it shows "nobody is listening" in amber. `stage_presence()` says whether they are in, where, the last note and
-  who is listening.
+  who is listening. Read every event since the last one you handled, and reconnect on your own: a server restart
+  drops every listener.
 - **No silent notes.** A note you were handed but did not answer (`stage_say`, `stage_voice_ack`) within 6 s is
   announced as "Handed to <your name>", so they hear it landed and was not yet answered; a note nobody was handed gets "Nobody is listening right now. I saved your
   note." out loud and goes to `_stage/unread.jsonl`. Read the unread notes when you start listening.
@@ -156,8 +157,14 @@ A person in a headset cannot see your terminal. Contact is part of the interface
 - **Capture what they point at when they speak.** The view and the selection at the moment a voice note ends belong
   to the note; reading them later shows a different moment.
 - **Let them interrupt**, and keep what they did not hear for later.
+- **Queue your lines; keep a caption up until its line has been spoken.** Generated speech can take a minute on a
+  busy machine: lines that pile up play on top of each other, a card that vanishes first is never read, and talking
+  over a recording ruins the take.
 - **Every interaction is a sound too.** A countdown ticks, a shutter fires, a lock clicks, a drop lands. A timed
   action with no sound left the person guessing when the camera would fire.
+- **One sound, one meaning, and a sound always comes with something to see.** One chime that meant two things left
+  the person hearing beeps with nothing in front of them. Never start music or a stream in the room without saying
+  so first.
 - **Things carry the names the person uses.** Keep a names map (scene item to the words the person and you say),
   so "the jukebox" means one object to both of you.
 - **Teach the stage the first time.** With no history of the person on the stage, or when the events show a
@@ -165,9 +172,21 @@ A person in a headset cannot see your terminal. Contact is part of the interface
   a time, each step waiting for the event that proves it worked, each with its sound: talk, point and select, move
   a thing, move yourself, take a picture, set a camera, record a take, housekeeping. Keep the gesture list in one
   place the page and you both read, so a new gesture joins the tutorial when it ships.
-- **Show which version is running** (a stamp on the page), and reload with a fresh address after a change.
+- **Show which version is running** (a stamp on the page). After a change, reload to the plain scene address: on
+  one headset an address with a fresh cache stamp hung while the plain one loaded.
+- **Nothing reloads, re-exports or hitches while they are in, unless they ask.** Lag makes a person in a headset
+  sick. Changes to the world stream in; code waits for their update, and its note says what they will notice.
+  Measure comfort, never assume it: read the frame times after every export and scene change.
+- **Give every run a purpose.** When they go in, what to check is already waiting as pins or a card.
+- **A card that only informs never blocks commands**, and a hand reading taken near a panel is not a placement.
+- **Panels appear where they belong and stay there**; opening, closing or stepping through one never puts the
+  person inside a wall or a performer.
+- **Anything shown in the room can be touched by hand**, not only reached by the agent, and no gesture opens
+  anything by accident.
+- **When two sessions can hear the person, settle who answers**, so a note is answered once.
 - **Address every note.** After a session, check every message against what was done and say what was not.
-- **Measure a gesture from a take before binding it.** A pinch that the system already uses collides with yours;
+- **Measure a gesture from a take before binding it.** A pinch that the system already uses collides with yours
+  (one pinch once had six jobs and opened a palette while the person's hands were busy);
   gestures are personal, so calibrate them per person, and keep their recordings local without consent.
 - **Keep tooling in service of the work.** An editor feature is worth building when the scene waits on it; when the
   scene is waiting for layout, build the scene.
