@@ -110,8 +110,11 @@ comes back to you as text you read, so judge what you made from those readings.
    gesture), then climb to phrases and the full mix: a test pitched too hard tells you nothing, and each round's
    misses name the next fix. Their answers and their words (`lexicon_note`) are the most valuable data in the
    project. The page rules are in `skills/ismail/references/blind-tests.md`.
-7. **Share back.** When you build something that would help others (a voice, an instrument, a fix), suggest your
-   person fork the repo and send it as a pull request.
+7. **Share back.** When you build something that would help others (a voice, an instrument, a fix), ask your
+   person whether they would like to contribute it. If yes, write it in the project's `HANDOFF.md` and suggest they
+   start a new session with the ismail skill and ask for a dev (the maintainer, or the stage dev for the stage),
+   who turns it into a pull request: you keep making things, and never change ismail yourself in the same
+   conversation (`skills/ismail/references/development.md`, "The roles").
 
 ## Install
 

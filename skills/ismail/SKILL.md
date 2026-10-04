@@ -18,15 +18,24 @@ ismail is a DAW you drive with text: notes, patches, effects and automation go i
 
 ## Your role, and where things live
 
-**Two roles; making music is the default.** Whenever the task is music (a song, a sound, a set, a video) you are a
-song agent, and your writable area is `songs/<slug>/` and nothing else. You do not edit `ismail/`, `skills/`,
+**Two kinds of agent: in the studio, or on the engine; the studio is the default.** Whenever the task is making
+something with ismail (a song, a sound, a live or DJ set, a film, a scene on the stage) you are a studio agent, and
+your writable area is `songs/<slug>/` and nothing else. You do not edit `ismail/`, `skills/`,
 `tests/`, the README or another song, and you do not run git in the ismail repository. When ismail lacks something,
 build it inside the song (a voice in `voices/`, with its data files named `<voice>_*` beside it so the render cache
 sees them; a song-local engine as `voices/<name>_engine.py`; scripts in `work/`), prove it on the song, and list it
-in the song's `HANDOFF.md`: one heading per finding, evidence beside it. A dev agent reads every handoff every
-couple of hours, asks the user what to build, and messages your session when something you handed off is in the
-engine; then mark it migrated in your `HANDOFF.md`. Changing ismail itself is the other role, only when the user
-asks for it explicitly: read `references/development.md` first (it holds the migration loop the dev role runs).
+in the song's `HANDOFF.md`: one heading per finding, evidence beside it.
+
+When something you made could help everyone (a voice, a fix, an op, a lesson), run the inclusion review
+(`references/development.md`) and ask the person whether they would like to contribute it to the public project.
+If yes, write it in `HANDOFF.md`, and if no dev session is running, suggest they start one: a new session (a new
+conversation or chat) with the ismail skill, asking it to be the maintainer (the engine), or the stage dev for the
+stage. That session reads every handoff on its routine, asks the person what to build, and sends your session,
+conversation or agent a message when something you handed off is in the engine (or tells the person, where
+sessions cannot message each other); then mark it migrated in your `HANDOFF.md`. Never turn into a dev in the same
+conversation. Changing ismail itself is the other kind of work, only when the person asks for it: read
+`references/development.md` first (the roles, the start-up routine, the migration loop), then your role's own
+reference (`maintainer.md` or `stage-dev.md`).
 
 ```
 ismail/                  the engine ("the engine" always means ismail/ on main)
@@ -132,6 +141,8 @@ nudges you, follow it.
 - `references/live.md`: playing live with the live engine: the Set Sheet and arc, queueing a whole arc in one batch, sweeps with ramps, listening and recording while it plays, decks (load a song, prepare it cued, transition), running a long set as a DJ loop (read the audience, small edits, a runway before every question, energy builds and drops, metric modulation for style changes), phrase voices for performers, runway before slow jobs, reading the audience (contrast over time, dynamics from effects, derived melodies), your latency, the pre-flight, the DJ kit (`ismail.live.djkit`), a set's folder layout, playing for a screen recording, what is not live yet. Read before any `live_*` call.
 - `references/stage.md`: building a scene with a person inside it (a browser or VR stage beside Blender): running the stage (`stage_*` tools), which surface for which decision, eye exams for pictures and what they taught, bodies and contact, contact with a person in a headset, shared-editing rules that never lose their work, agents first. Read before building any scene, look or editor a person works inside.
 - `references/music-video.md`: music videos with `ismail.video`: the per-song `video/` folder, the CLI, the shot kit (units, floors, posing, mirrors, GPU budget), the cut list and note-driven glitches, contact-sheet review and the creative rules. Read before planning any video.
+- `references/maintainer.md`, `references/stage-dev.md`: the dev roles' routines and lessons, for a session the
+  person asked to be the maintainer or the stage dev.
 - `references/development.md`: only for changing ismail itself, when the user asks: worktrees, the collaboration must-haves (what is not yours is not touched, nothing unmerged is deleted, the user merges), the roles as a multi-agent system (the user, song agents, the dev agent, subagents: who owns and writes what), the migration loop (intake with `python -m ismail.handoffs`, the ledger in `songs/_migration/`, the user decides, build, announce to the sessions, close), the inclusion review (general? may it be public? anything measured from the user needs their yes first), preparing a voice or an engine for ismail, API changes a song asks for, the handoff format.
 - `references/LOCAL.md`, if it exists: an index of the user's private references kept on this machine only (never committed). Read it at the start of a task; it says which private file covers which kind of song.
 

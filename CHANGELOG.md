@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+### Roles: studio agents, the maintainer, the stage dev (S24); the intake lists open pull requests (M77)
+
+- `python -m ismail.handoffs` lists the open pull requests after the handoffs (title, branch, author, checks,
+  whether it merges cleanly), marked new or updated since the last `--mark`, so a pull request is never seen only
+  because its author sent word. It uses the GitHub command line when it is there and says so when it is not;
+  `--no-prs` skips it.
+- The skill names two kinds of agent: studio agents work within ismail (a song, a sound, a live or DJ set, a film,
+  a scene on the stage), dev roles work on it. A studio agent that finds something general asks the person whether
+  to contribute it and suggests starting a dev session; it never turns into a dev mid-conversation.
+- New references for the dev roles, from the sessions that held them: `maintainer.md` and `stage-dev.md` (VR is
+  one way into the stage, so its developer is the stage dev). development.md gains the area dev role, the start-up
+  routine (progress file, machine, intake, report; every 4 hours by default, the person sets it), and why proactive
+  and reactive work cost differently.
+- stage.md gains the headset lessons it lacked: queue spoken lines and keep captions up until spoken, one sound one
+  meaning, nothing that hitches while the person is in, a purpose for every run, panels that stay put, everything
+  touchable by hand, who answers when two sessions listen, listeners reconnect after a restart; the reload advice is
+  corrected (the plain scene address).
+- Skill text describes actions in plain words with synonyms (send a message to a session, conversation or agent;
+  a browser pane, preview or web view) instead of one harness's tool names.
+
 ### Faster mimic renders (M76); placement exams (S23)
 
 - `mimic.render` computes each partial only while it sounds, so a long tail after the release costs next to
