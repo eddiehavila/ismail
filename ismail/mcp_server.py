@@ -3,7 +3,8 @@
 Run:  python -m ismail.mcp_server   (or `ismail mcp`, or `uvx ismail mcp` without installing)
 Claude Code config (.mcp.json):
   {"mcpServers": {"ismail": {"command": "python", "args": ["-m", "ismail.mcp_server"]}}}   (after pip install -e .)
-All tools take `project` (a project directory) first; see the `guide` tool for the workflow.
+All tools take `project` (a project directory) first, except the stage_* tools, which take `scene` (or `scenes`, a
+song's scenes folder); see the `guide` tool for the workflow.
 """
 import inspect
 import os

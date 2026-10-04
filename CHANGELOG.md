@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+### The VR stage (M46)
+
+- `ismail.stage`: the VR stage that grew in the Crossroads video (songs/crossroads/video/vr) is now part of the
+  engine. A three.js WebXR page for a desktop browser or a headset (Quest 3), a server that serves a song's scenes
+  (`python -m ismail.stage.server --scenes <song>/video/vr/scenes`), and the live link between the page and agents.
+- 63 `stage_*` tools: `stage_start` / `stage_stop` / `stage_status`, `stage_events` (what the person did and said:
+  voice notes, gestures, edits), `stage_world` (a scene's world.json), `stage_scene_export` (a scene rebuilt from
+  its Blender build script in a heavy-job slot), `stage_note` (the "updates ready" card), `stage_cmd` for a command
+  with no op yet, and 55 typed page commands (`stage_object_set`, `stage_say`, `stage_panel_show`,
+  `stage_waypoint_set`, `stage_actor_play`, `stage_stream`, ...). Each one waits for the page's answer and raises
+  with the next step when no page shows the scene or the page refuses.
+- Scenes are data: everything the runtime used to hard-code for one song (who plays whom, facings, partners, the
+  floor, keep-out boxes, the default scene, the build script) lives in `scenes/<name>/world.json` and
+  `scenes/stage.json`. Session files (client log, speech cache, bundle, update notes) go to `<scenes>/_stage/`.
+- One server per port: a busy port is refused (Windows let two servers bind one port and split the live link).
+- The Blender bridge and the Quest diet (`ismail/stage/bridge`: merged groups, triangle and texture budgets,
+  MakeHuman skin and mask-map fixes) ship with it. three.js r180 is vendored (MIT).
+
 ## 0.3.0
 
 ### Verify from the person's side; small fixes

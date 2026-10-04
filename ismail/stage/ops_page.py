@@ -1,0 +1,500 @@
+"""The page's commands as ismail ops, one per command the stage page runs (generated from the Crossroads stubs,
+songs/crossroads/video/vr/ops_draft.py, 2026-10-04; the docstrings are theirs, checked against the page code).
+
+Each op queues the command on the stage server's live link for `scene`, waits for the page's cmd_done, and replies
+with what the page answered (positions in Blender metres, z up). A page that is not showing the scene, or a command
+the page refuses, raises OpError with the next step. Coordinates on the wire are Blender world space.
+"""
+from ..api import op
+from .link import page_cmd
+
+
+@op(mutates=True)
+def stage_object_set(scene: str, object: str, location: list = None, offset: list = None, quaternion: list = None,
+               scale: list = None) -> str:
+    """Move, turn or scale one object as one undoable edit (page command: set). location is the new Blender world
+    position; offset is added to location (or to where the object is now when location is not given); quaternion is
+    [w, x, y, z]; scale is ignored for aimed objects (cameras and lights that track a target). At least one of
+    location, offset, quaternion, scale is required. Errors: no object of that name (matched by exact name, then case
+    insensitive). Page replies {object, location, quaternion, scale} (the transform after the edit). Emits:
+    transform_end (via claude)."""
+    return page_cmd(scene, 'set', {'object': object, 'location': location, 'offset': offset, 'quaternion': quaternion, 'scale': scale}, timeout=30)
+
+
+@op(mutates=True)
+def stage_object_select(scene: str, object: str = None) -> str:
+    """Select an object, or clear the selection when object is None (page command: select). In VR, selecting a movable
+    thing opens its action menu beside the person (Move, Take, Key, Pin, Drop, and so on: actions.js), which is a panel.
+    Page replies the object's description {object, object_type, group, is_group, children, path}, or {selected: null}.
+    Emits: select (or deselect), and in VR panel_shown for the menu."""
+    return page_cmd(scene, 'select', {'object': object}, timeout=30)
+
+
+@op(mutates=True)
+def stage_object_deselect(scene: str) -> str:
+    """Clear the selection (page command: deselect). In VR this also closes the open action menu and locks again a
+    thing unlocked with Move. Page replies {selected: null}. Emits: deselect (only when something was selected),
+    panel_closed (in VR, when its menu was open)."""
+    return page_cmd(scene, 'deselect', {}, timeout=30)
+
+
+@op(mutates=True)
+def stage_object_highlight(scene: str, objects: list, color: str = '#38bdf8', seconds: float = 6) -> str:
+    """Put a pulsing box outline, drawn over everything, around each named object or group (page command: highlight;
+    the page also takes a single `object`). seconds 0 keeps it until markers_clear. A highlight already on an object is
+    replaced. Errors: any name not found. Page replies {objects, seconds} (seconds null when it stays). Emits:
+    nothing."""
+    return page_cmd(scene, 'highlight', {'objects': objects, 'color': color, 'seconds': seconds}, timeout=30)
+
+
+@op(mutates=True)
+def stage_object_drop(scene: str, object: str) -> str:
+    """Stand the object back up (its tilt as Blender had it, heading kept) and let it fall under gravity onto the
+    highest surface under its footprint, as one undoable edit (page command: drop). The reply comes before the fall
+    animation ends. Lights, aimed objects and big building parts do not drop, and nothing under it means no drop: in
+    both cases onto_y_up is null and no error is raised. Page replies {object, onto_y_up} (the landing height, three Y
+    = Blender Z, metres). Emits: transform_end once it lands (via claude)."""
+    return page_cmd(scene, 'drop', {'object': object}, timeout=30)
+
+
+@op(mutates=True)
+def stage_marker_set(scene: str, marker_id: str, position: list, label: str = '', color: str = '#d97757') -> str:
+    """Put a pin (ball and stem, drawn on top) with an HTML label at a Blender position (page command: marker; the
+    server renames the command's `id` field to marker_id). The same marker_id replaces the old pin. The label is only
+    drawn on the desktop: it is hidden in look-through and in VR. Page replies {id}. Emits: nothing."""
+    return page_cmd(scene, 'marker', {'marker_id': marker_id, 'position': position, 'label': label, 'color': color}, timeout=30)
+
+
+@op(mutates=True)
+def stage_markers_clear(scene: str, ids: list = None) -> str:
+    """Remove markers (page command: clear_markers). With ids, only those markers; without, every marker AND every
+    highlight. Page replies {cleared} (the number of markers removed). Emits: nothing."""
+    return page_cmd(scene, 'clear_markers', {'ids': ids}, timeout=30)
+
+
+@op(mutates=True)
+def stage_edit_undo(scene: str) -> str:
+    """Undo the last edit on the page (move, light, material), whoever made it (page command: undo). Page replies
+    {undone, undo_depth}. Emits: undo {objects, lights, materials, depth} when there was something to undo."""
+    return page_cmd(scene, 'undo', {}, timeout=30)
+
+
+@op(mutates=True)
+def stage_person_goto(scene: str, position: list, target: list, seconds: float = 1.2) -> str:
+    """Put the person at position facing target, both Blender xyz (page command: goto). Desktop: the view camera
+    flies there in `seconds` (walk mode is turned off first). VR: the person is placed at once, standing on the floor
+    below position (a floor found from 30 cm above it), turned so they face target (yaw only), with a whoosh; seconds
+    is ignored. Errors: position or target missing. Page replies {arrived} on the desktop, {arrived, xr: true, floor}
+    in VR (floor is three Y = Blender Z, null when no floor was found). Emits: mode (desktop, when walk was on)."""
+    return page_cmd(scene, 'goto', {'position': position, 'target': target, 'seconds': seconds}, timeout=((60 if seconds is None else seconds) + 30))
+
+
+@op(mutates=True)
+def stage_camera_goto(scene: str, camera: str, seconds: float = 1.2) -> str:
+    """Fly the desktop view to a Blender camera and look through it (page command: goto_camera; the page reads `name`
+    or `camera`). Desktop only. Errors: in VR ("not in XR"), no such object, or the object is not a CAMERA. Page
+    replies {arrived, camera}. Emits: mode (look-through), and mode first when walk was on."""
+    return page_cmd(scene, 'goto_camera', {'camera': camera, 'seconds': seconds}, timeout=((60 if seconds is None else seconds) + 30))
+
+
+@op(mutates=True)
+def stage_view_focus(scene: str, object: str, seconds: float = 1.0) -> str:
+    """Frame an object on the desktop: fly to fit its bounds, keeping the viewing direction, never from below the floor
+    (page command: focus). Desktop only. Errors: in VR, no such object. Page replies {arrived, object, object_type,
+    group, is_group, children, path}. Emits: focus."""
+    return page_cmd(scene, 'focus', {'object': object, 'seconds': seconds}, timeout=30)
+
+
+@op(mutates=True)
+def stage_view_walk(scene: str, on: bool) -> str:
+    """Turn desktop walk mode (eye height over the floor, WASD, mouse look) on or off (page command: walk). Desktop
+    only. Errors: in VR. Page replies {mode} (orbit, walk or look-through). Emits: mode."""
+    return page_cmd(scene, 'walk', {'on': on}, timeout=30)
+
+
+@op(mutates=True)
+def stage_view_look_through(scene: str, camera: str = None) -> str:
+    """Look through a Blender camera on the desktop, or back to the editor view when camera is None (page command:
+    look_through; the page reads `name`). A name that is not a camera silently goes back to the editor view. Errors: no
+    object of that name. Page replies {mode, camera}. Emits: mode."""
+    return page_cmd(scene, 'look_through', {'camera': camera}, timeout=30)
+
+
+@op(mutates=False)
+def stage_view_snapshot(scene: str) -> str:
+    """Save a PNG of what the person sees to scenes/<scene>/snapshots/ (page command: snapshot). Desktop: the screen
+    (the 16:9 frame when looking through a camera), tag = camera name or 'editor'. VR: what the left eye sees, 1024 px
+    square, tag 'eye'. Errors: desktop view with no size (hidden or minimised tab). Page replies {path} on the desktop
+    (the server's reply) and {path, eye, frame, canvas, pose} in VR (canvas is a browser object and does not survive
+    JSON; pose is unset for an eye shot). Emits: nothing."""
+    return page_cmd(scene, 'snapshot', {}, timeout=30)
+
+
+@op(mutates=False)
+def stage_view_eyecam(scene: str, fps: float = 1, seconds: float = 10) -> str:
+    """Record a timelapse of the left eye in VR, one PNG per frame, up to 600 frames (page command: eyecam). Blocks the
+    command queue while it runs. Outside VR it records nothing and replies frames 0 (no error). fps 0 is read as 1.
+    Page replies {frames, first, last} (paths). Emits: nothing."""
+    return page_cmd(scene, 'eyecam', {'fps': fps, 'seconds': seconds}, timeout=((60 if seconds is None else seconds) + 30))
+
+
+@op(mutates=True)
+def stage_say(scene: str, text: str, seconds: float = 8, voice: bool = False, voice_name: str = None) -> str:
+    """Tell the person something (page command: say). Desktop: a caption, one at a time, queued, shown only while the
+    tab is visible. VR (or voice=True on the desktop): also spoken by Kokoro (voice_name picks the voice; the server
+    default is af_heart), and in VR shown for min(120, 25 + 0.8 x words) seconds as a caption panel. A line that waited
+    20 s or more in the queue is captioned, not spoken; 60 s or more, no VR panel either. Page replies
+    {captions_ahead}, plus {spoken: false, stale_s} for a stale line. Emits: voice_spoken, voice_hushed (the person
+    started a voice note mid-line), voice_dropped, voice_error, and in VR panel_shown and panel_closed."""
+    return page_cmd(scene, 'say', {'text': text, 'seconds': seconds, 'voice': voice, 'voice_name': voice_name}, timeout=30)
+
+
+@op(mutates=True)
+def stage_ask(scene: str, text: str, seconds: float = 60) -> str:
+    """Ask a yes/no question out loud and wait for a RIGHT thumbs up (yes) or down (no) held 400 ms (page command:
+    ask). Blocks the command queue until answered or `seconds` pass. Only answerable in VR (the thumbs are hand
+    gestures). A second ask while one is open does not raise: the page replies {error: 'already asking: ...'} (the op
+    should turn that into OpError). Page replies {question, answer: yes | no | 'no answer', seconds}. Emits: answer,
+    voice_spoken, voice_error."""
+    return page_cmd(scene, 'ask', {'text': text, 'seconds': seconds}, timeout=((60 if seconds is None else seconds) + 30))
+
+
+@op(mutates=True)
+def stage_voice_ack(scene: str) -> str:
+    """Play a recorded "got it" in the headset at once, so the person knows a voice note arrived (page command: ack).
+    Plays only if the command is under 10 s old (by its server `ts`), and not over a line already playing. Page replies
+    {played}. Emits: nothing."""
+    return page_cmd(scene, 'ack', {}, timeout=30)
+
+
+@op(mutates=True)
+def stage_voice_note(scene: str, action: str = 'start') -> str:
+    """Open or close the headset mic for a voice note, as the phone gesture does (page command: voice_rec). action:
+    start | stop (anything but 'stop' starts). A note records up to 90 s; on stop it is uploaded and transcribed on the
+    laptop. With no mic permission start does not raise: it replies {error: 'no mic'} (the op should raise). Page replies
+    {recording: true} | {already: true} on start, {sent, seconds} | {dropped: true} | {recording: false} on stop.
+    Emits: voice_note_start, voice_note_dropped, voice_error; the server then emits voice_in and voice_message (the
+    transcript)."""
+    return page_cmd(scene, 'voice_rec', {'action': action}, timeout=30)
+
+
+@op(mutates=True)
+def stage_panel_show(scene: str, panel_id: str = None, title: str = '', text: str = '', image: str = None,
+               buttons: list = None, width: float = 0.56, seconds: float = None, quiet: bool = False,
+               wait: bool = True, near: list = None) -> str:
+    """Open a panel in VR, fixed in the world 0.7 m in front of the person, with a title, text, an image (URL) and
+    buttons (page command: panel). The person answers by poking a button, pointing and pinching, or a right thumbs
+    up / down held 450 ms (first / last button). seconds closes it by itself. quiet skips the chime. wait=True BLOCKS the
+    command queue until the answer; wait=False replies at once. The same panel_id replaces an open panel. near is used
+    by the page's own modules as a three.js vector; from a command it is unclear (a JSON list has no x/y/z) and should
+    not be relied on. Page replies {id, answer, via, seconds}, {id, answer: null, why} when closed unanswered, or
+    {id, shown: true} with wait=False. Emits: panel_shown, panel_answer, panel_closed."""
+    return page_cmd(scene, 'panel', {'panel_id': panel_id, 'title': title, 'text': text, 'image': image, 'buttons': buttons, 'width': width, 'seconds': seconds, 'quiet': quiet, 'wait': wait, 'near': near}, timeout=((60 if seconds is None else seconds) + 30))
+
+
+@op(mutates=True)
+def stage_panel_close(scene: str, panel_id: str) -> str:
+    """Close an open panel (page command: panel_close). A waiting panel_show then resolves with answer null. Page
+    replies {closed}. Emits: panel_closed (why 'closed by Claude')."""
+    return page_cmd(scene, 'panel_close', {'panel_id': panel_id}, timeout=30)
+
+
+@op(mutates=True)
+def stage_gallery_add(scene: str, url: str, open: bool = False) -> str:
+    """Add a picture (a URL the page can load, e.g. scenes/<scene>/snapshots/render_<time>_<what>.png) to the
+    person's in-VR gallery and set it as the wrist thumbnail (page command: gallery_add). open=True also opens the
+    gallery panel on it after 600 ms. Page replies {n} (the number of pictures). Emits: panel_shown when opened."""
+    return page_cmd(scene, 'gallery_add', {'url': url, 'open': open}, timeout=30)
+
+
+@op(mutates=True)
+def stage_cue_set(scene: str, on: str, title: str = None, cue: str = None, text: str = '', buttons: list = None,
+            match: dict = None, near: dict = None, then: dict = None, once: bool = True, ttl_s: float = None,
+            width: float = 0.4) -> str:
+    """Attach a menu ahead of time to something the person will do (page command: cue). on is a page event type
+    (touch, menu, drop, teleport, waypoint_done, gesture, ...) or 'near'; match {field: value} must hold on that event
+    (strings match by substring); a 'near' cue needs near {position (Blender xyz), radius (default 1.5)}. When it fires
+    the panel opens beside the thing the event names, or at its point, else in front of the person; buttons default to
+    ['OK']. then {button: command} runs that page command on the page directly (no cmd_done for it). once=False keeps
+    the cue after it fires; ttl_s expires it. Kept per scene in cues.json. The id is `cue` (the page also reads `name`),
+    else a new one. One cue fires at a time. Page replies {id, waiting}. Emits (later, when it fires): cue_fired,
+    panel_shown, panel_answer, panel_closed, cue_answer, voice_error."""
+    return page_cmd(scene, 'cue', {'on': on, 'title': title, 'cue': cue, 'text': text, 'buttons': buttons, 'match': match, 'near': near, 'then': then, 'once': once, 'ttl_s': ttl_s, 'width': width}, timeout=30)
+
+
+@op(mutates=True)
+def stage_cue_remove(scene: str, cue: str) -> str:
+    """Remove a waiting cue by id (page command: cue_remove; the page also reads `name`). Page replies {removed} (a
+    count, 0 when there was no such cue: no error). Emits: nothing."""
+    return page_cmd(scene, 'cue_remove', {'cue': cue}, timeout=30)
+
+
+@op(mutates=True)
+def stage_cues_clear(scene: str) -> str:
+    """Remove every waiting cue of the scene (page command: cues_clear). Page replies {cleared}. Emits: nothing."""
+    return page_cmd(scene, 'cues_clear', {}, timeout=30)
+
+
+@op(mutates=False)
+def stage_cues_list(scene: str) -> str:
+    """List the waiting cues (page command: cues_list). Page replies [{id, on, title, match}]. Emits: nothing."""
+    return page_cmd(scene, 'cues_list', {}, timeout=30)
+
+
+@op(mutates=True)
+def stage_waypoint_set(scene: str, position: list, wp: str = None, label: str = None, note: str = None,
+                 kind: str = 'note', target: list = None, stand: list = None) -> str:
+    """Pin a note at a place in the scene (Blender xyz, metres) (page command: waypoint). kind: note | todo | done |
+    look (the pin's colour). target: what the person faces when sent there (waypoint_go); stand: where they stand then
+    (else 1.6 m from the pin on their side). wp is the pin's id: an existing id updates that pin (fields merge), none
+    makes a new one (wp_<time>). Extra fields are kept on the pin (the page itself writes by, at, object, was). Kept
+    per scene in waypoints.json. Page replies {id, kind}. Emits: waypoint_set."""
+    return page_cmd(scene, 'waypoint', {'position': position, 'wp': wp, 'label': label, 'note': note, 'kind': kind, 'target': target, 'stand': stand}, timeout=30)
+
+
+@op(mutates=True)
+def stage_waypoint_remove(scene: str, wp: str) -> str:
+    """Remove one pin (page command: waypoint_remove). Page replies {removed} (false when there was no such pin: no
+    error). Emits: nothing."""
+    return page_cmd(scene, 'waypoint_remove', {'wp': wp}, timeout=30)
+
+
+@op(mutates=True)
+def stage_waypoints_clear(scene: str, kind: str = None) -> str:
+    """Remove every pin, or only those of one kind (note | todo | done | look) (page command: waypoints_clear). Page
+    replies {cleared}. Emits: nothing."""
+    return page_cmd(scene, 'waypoints_clear', {'kind': kind}, timeout=30)
+
+
+@op(mutates=False)
+def stage_waypoints_list(scene: str) -> str:
+    """List the scene's pins (page command: waypoints_list). Page replies the full pin records [{id, position, label,
+    note, kind, target, stand, by, at, ...}]. Emits: nothing."""
+    return page_cmd(scene, 'waypoints_list', {}, timeout=30)
+
+
+@op(mutates=True)
+def stage_waypoint_go(scene: str, wp: str = None, next: bool = False, distance: float = 1.6) -> str:
+    """Send the person to a pin: stand at its `stand`, else `distance` metres from it on the side they are on, facing
+    its target (else the pin) (page command: waypoint_go). next=True with no wp picks the first todo, else the first
+    note. Runs person_goto, so it flies on the desktop and places at once in VR. Errors: no such pin, no open pin. Page
+    replies what goto replies ({arrived} or {arrived, xr, floor}). Emits: waypoint_go."""
+    return page_cmd(scene, 'waypoint_go', {'wp': wp, 'next': next, 'distance': distance}, timeout=600)
+
+
+@op(mutates=True)
+def stage_take_start(scene: str, name: str = '') -> str:
+    """Start recording a take: head and both hands (25 joints each, three.js space) and the WebXR body when granted,
+    at 30 Hz, plus the mic, to scenes/<scene>/takes/<id>/ (page command: take_start). The id is the start time plus the
+    name. Frames are only sampled while the page is in VR. Page replies {id}, or {id, already: true} when one is
+    running. Emits: take_start, body_tracking (first body frame), voice_error (no mic: the take has no audio)."""
+    return page_cmd(scene, 'take_start', {'name': name}, timeout=30)
+
+
+@op(mutates=True)
+def stage_take_stop(scene: str) -> str:
+    """Stop the take being recorded and flush its frames (page command: take_stop). Page replies {id, frames,
+    seconds}, or {stopped: false} when none was running. Emits: take_stop; the server then emits take_audio."""
+    return page_cmd(scene, 'take_stop', {}, timeout=600)
+
+
+@op(mutates=True)
+def stage_take_view(scene: str, take: str, n: int = 8, layout: str = 'strip') -> str:
+    """Show a take in 4D: the paths of the head and both wrists and n ghost poses (2..24) coloured blue to orange
+    (page command: take_view). layout: strip (a filmstrip in front of the person, 40 cm apart) | place (where it
+    happened). BUG today: the page reads the take id from the command's `id`, but server.py drops a sent `id` and
+    puts its own command number there (only `marker` gets a rename to marker_id), so from the live link this looks
+    for take "<command number>" and fails; it works only from the page's own review menu. The op should send the take
+    under its own field and the page read it. Errors: no take, no frames. Page replies {id, poses, seconds, frames}.
+    Emits: take_view."""
+    return page_cmd(scene, 'take_view', {'take': take, 'n': n, 'layout': layout}, timeout=30)
+
+
+@op(mutates=True)
+def stage_take_view_clear(scene: str) -> str:
+    """Remove the 4D take view (page command: take_view_clear). Page replies {cleared: true}. Emits: nothing."""
+    return page_cmd(scene, 'take_view_clear', {}, timeout=30)
+
+
+@op(mutates=True)
+def stage_actor_play(scene: str, person: str, take: str, actor: str = None, loop: bool = True, rate: float = 1,
+               trim: list = None, in_place: bool = False, assets: str = None, takes: str = None) -> str:
+    """Play a take on a person: their skinned body replaces the statue and is driven by the take's head and hands,
+    scaled to their height (page command: actor_play). actor defaults from the person (a fixed table in actors.js);
+    trim [t0, t1] in the take's seconds defaults to the take's saved trim (the page treats an explicit null as "no
+    trim", which a None default here cannot express); in_place plays it where it was recorded instead of where the
+    person stands; assets / takes read the body / take from another scene. Errors: no actor for that person, no take,
+    no frames. Page replies {person, actor, frames, scale}. Emits: actor_stop (a take already on them), actor_play."""
+    return page_cmd(scene, 'actor_play', {'person': person, 'take': take, 'actor': actor, 'loop': loop, 'rate': rate, 'trim': trim, 'in_place': in_place, 'assets': assets, 'takes': takes}, timeout=30)
+
+
+@op(mutates=True)
+def stage_actor_stop(scene: str, person: str, why: str = 'stopped') -> str:
+    """Stop a played take or a live follow on a person; the statue comes back (page command: actor_stop). Page
+    replies {stopped} (false when nothing was playing: no error). Emits: actor_stop {person, why, live}."""
+    return page_cmd(scene, 'actor_stop', {'person': person, 'why': why}, timeout=30)
+
+
+@op(mutates=True)
+def stage_actor_follow(scene: str, person: str, actor: str = None, mode: str = 'place', mirror: bool = False,
+                 assets: str = None) -> str:
+    """Make a person move with the person in VR, live, from where they stand (page command: actor_follow). mode:
+    place (dances on the spot) | walk (walks as the user walks); mirror reflects left and right. It stops by itself
+    when the user goes more than 6 m away. Meant for VR (it reads the live head and hands). Errors: no actor for that
+    person, no live body source. Page replies {person, actor, following: true, scale}. Emits: actor_stop (anything
+    already on them), actor_follow; later actor_stop {why: walked_away}."""
+    return page_cmd(scene, 'actor_follow', {'person': person, 'actor': actor, 'mode': mode, 'mirror': mirror, 'assets': assets}, timeout=30)
+
+
+@op(mutates=True)
+def stage_anchor_set(scene: str, object: str, hand: str = 'left', joint: str = 'thumb-metacarpal', at: str = 'keep') -> str:
+    """Pin an object to a joint of a tracked hand for this session (page command: anchor). hand: left | right; joint:
+    a WebXR hand joint name; at: keep (holds the pose it has now, relative to the joint) | joint (its origin onto the
+    joint). Never saved: the edits file keeps the object where it was, and leaving VR or the scene releases it. Errors:
+    no such object, the hand is not tracked or has no such joint. Page replies {anchored, hand, joint}. Emits:
+    anchor_released (when it was already pinned), anchored."""
+    return page_cmd(scene, 'anchor', {'object': object, 'hand': hand, 'joint': joint, 'at': at}, timeout=30)
+
+
+@op(mutates=True)
+def stage_anchor_release(scene: str, object: str = None) -> str:
+    """Release a pinned object back to where it was, or every pinned object when none is named (page command:
+    anchor_release). Page replies {released} (the names). Emits: anchor_released, one per object."""
+    return page_cmd(scene, 'anchor_release', {'object': object}, timeout=30)
+
+
+@op(mutates=True)
+def stage_clock_set(scene: str, action: str = None, t: float = None, rate: float = None, span: list = None) -> str:
+    """Drive the scene's stage clock (page command: clock). action: play | pause (only these two act; the clock.js
+    header also names seek, rate and span, which work as the fields below instead). t seeks (clamped to the span),
+    rate sets the speed, span [t0, t1] sets the timeline span in seconds. Playing loops at the end. Page replies
+    {t, playing, rate, span}. Emits: clock (when t is given)."""
+    return page_cmd(scene, 'clock', {'action': action, 't': t, 'rate': rate, 'span': span}, timeout=30)
+
+
+@op(mutates=True)
+def stage_key_set(scene: str, name: str, t: float = None) -> str:
+    """Key an object's current Blender world transform at time t (default: the playhead) (page command: key). A key
+    at the same time is replaced. Not saved until anim_save. Errors: no object. Page replies {name, t, keys}. Emits:
+    keyed."""
+    return page_cmd(scene, 'key', {'name': name, 't': t}, timeout=30)
+
+
+@op(mutates=True)
+def stage_key_delete(scene: str, name: str, t: float = None) -> str:
+    """Delete an object's key at time t, or all its keys when t is None (page command: key_delete). Not saved until
+    anim_save. Page replies {deleted} (a count, 0 when it had none). Emits: nothing."""
+    return page_cmd(scene, 'key_delete', {'name': name, 't': t}, timeout=30)
+
+
+@op(mutates=True)
+def stage_anim_save(scene: str) -> str:
+    """Save the keys and growth spans to scenes/<scene>/anim.json (the old one goes to history/), read by the Blender
+    renders (page command: anim_save). Errors: the server refused it. Page replies the server's {ok, path}. Emits:
+    anim_saved (from the page with {objects, path}, and from the server with {objects})."""
+    return page_cmd(scene, 'anim_save', {}, timeout=30)
+
+
+@op(mutates=True)
+def stage_anim_clear(scene: str, name: str = None) -> str:
+    """Drop one object's keys, or every object's keys when name is None (growth spans stay) (page command:
+    anim_clear). Not saved until anim_save. Page replies {cleared} (the name or 'all'). Emits: nothing."""
+    return page_cmd(scene, 'anim_clear', {'name': name}, timeout=30)
+
+
+@op(mutates=True)
+def stage_timeline_show(scene: str, show: bool = True) -> str:
+    """Show the timeline bar in front of the person (0.6 m ahead, 30 cm below the eyes), or hide it (page command:
+    timeline). Page replies {shown}. Emits: nothing."""
+    return page_cmd(scene, 'timeline', {'show': show}, timeout=30)
+
+
+@op(mutates=True)
+def stage_growth_set(scene: str, name: str, t0: float, t1: float) -> str:
+    """Map the clock onto one tree's growth: it grows from nothing at t0 to full at t1 (page command: growth). name is
+    the tree's top-level item. Not saved until anim_save. Page replies {name, t0, t1, growers} (every tree that can
+    grow). Emits: nothing."""
+    return page_cmd(scene, 'growth', {'name': name, 't0': t0, 't1': t1}, timeout=30)
+
+
+@op(mutates=True)
+def stage_trees_reload(scene: str) -> str:
+    """Load (again) the grown trees, scenes/<scene>/trees/tree_<k>.glb, under their tree_<k> items, paced like the room
+    (page command: trees_reload). A load already running is joined, not restarted. The page also runs this by itself
+    after a scene reload. Page replies {trees, growers}. Emits: trees_loaded, voice_error (per tree that failed)."""
+    return page_cmd(scene, 'trees_reload', {}, timeout=30)
+
+
+@op(mutates=True)
+def stage_music(scene: str, action: str = 'play', url: str = None, at: str = None, lift: float = 1.0,
+                ref: float = 3, rolloff: float = 1, loop: bool = True, volume: float = 0.6) -> str:
+    """Play one audio file from a place in the room, positional (louder as the person walks up), or stop it, or set
+    its volume (page command: music). action: play | stop | volume (any value other than stop or volume plays). at is
+    an object to play from (its position, lifted by lift metres; none: the room origin). One music source at a time:
+    play replaces it. volume with nothing playing falls through to play and needs url. Page replies {playing, at,
+    seconds} | {stopped: true} | {volume}. Emits: nothing."""
+    return page_cmd(scene, 'music', {'action': action, 'url': url, 'at': at, 'lift': lift, 'ref': ref, 'rolloff': rolloff, 'loop': loop, 'volume': volume}, timeout=30)
+
+
+@op(mutates=True)
+def stage_stream(scene: str, action: str = 'play', name: str = 'master', stream_id: str = None, at: str = None,
+                 lift: float = 0.5, port: int = None, stereo: bool = False, lead: float = 0.3, ref: float = 1.5,
+                 rolloff: float = 1, volume: float = 0.7) -> str:
+    """Stream an ismail live bus from the PC into the room, played from an object through an HRTF panner (page
+    command: stream). action: play | stop | volume | move | status. name: master | bus:<name> | deck:<name>. The stream
+    is known by stream_id, else at, else name. port picks the ismail live engine (default: the newest running one,
+    chosen by server.py). Mono unless stereo; lead is the jitter buffer in seconds. stop without an id stops every
+    stream; move re-places it at `at`. Errors: bad name, no engine running, unknown stream for volume or move, no
+    AudioWorklet. Page replies {stream, name, at, rate, mono, lead} on play, {stopped} (bool or count), {volume},
+    {at}, or a status list [{stream, name, at, seconds, under, skips, lead_s}]. Emits: stream_play, stream_end,
+    stream_underrun."""
+    return page_cmd(scene, 'stream', {'action': action, 'name': name, 'stream_id': stream_id, 'at': at, 'lift': lift, 'port': port, 'stereo': stereo, 'lead': lead, 'ref': ref, 'rolloff': rolloff, 'volume': volume}, timeout=30)
+
+
+@op(mutates=True)
+def stage_sky_set(scene: str, mode: str = 'scene') -> str:
+    """Set the sky: day | night | scene (the scene's own, the default) (page command: sky). Remembered on that
+    headset for 20 minutes. Page replies {sky} (the sky now in use). Emits: nothing."""
+    return page_cmd(scene, 'sky', {'mode': mode}, timeout=30)
+
+
+@op(mutates=True)
+def stage_light_set(scene: str, light: str, energy: float = None, color: list = None) -> str:
+    """Set a light's energy (Blender watts) and / or colour (linear RGB) as one undoable edit (page command: light;
+    the page reads `name` or `light`). Errors: no such object, not a light. Page replies {light, energy, color}. Emits:
+    light_change."""
+    return page_cmd(scene, 'light', {'light': light, 'energy': energy, 'color': color}, timeout=30)
+
+
+@op(mutates=True)
+def stage_scene_go(scene: str, name: str, position: list = None, target: list = None, reload: bool = False) -> str:
+    """Go to another scene, under the construct (the grey void closes, the room is swapped, the void opens) (page
+    command: scene_go; the page reads `name` or `scene` for the destination). Unsaved edits are saved first, playing
+    actors stop, anchors release. The person is placed where this headset last stood there, else at its start camera,
+    else at position facing target (Blender xyz). reload=True with the current scene re-reads it. After this the page
+    listens on the NEW scene's bus: later ops must pass scene=name. Errors: no scene given, a change already running,
+    load failure (the old room comes back). Page replies {from, to, objects, ms}, or {from, to, already: true}. Emits:
+    scene_leaving (old scene's bus), scene_switched (new scene's bus), and on the way save, actor_stop,
+    anchor_released."""
+    return page_cmd(scene, 'scene_go', {'name': name, 'position': position, 'target': target, 'reload': reload}, timeout=600)
+
+
+@op(mutates=False)
+def stage_scene_list(scene: str) -> str:
+    """List the scenes the server has, without the ones starting with '_' (page command: scene_list). Page replies
+    {current, scenes}. Emits: nothing."""
+    return page_cmd(scene, 'scene_list', {}, timeout=30)
+
+
+@op(mutates=True)
+def stage_scene_reload(scene: str) -> str:
+    """Swap in a fresh export of this scene now, keeping the view and the unsaved edits it can (page command: reload).
+    The page also does this by itself when scene.glb and manifest.json change (not mid drag, after VR edits end). Errors:
+    a reload already running, the files cannot be read. Page replies {objects, kept_edits, dropped, selection,
+    lost_selection, why, mode, selftest, checked, selftest_fails, version}. Emits: scene_reload or scene_reload_failed,
+    then trees_loaded (the page reloads the trees 0.5 s later)."""
+    return page_cmd(scene, 'reload', {}, timeout=30)
+
+
+# page command type -> its typed op (stage_cmd refuses these and names the op)
+TYPED = {'ack': 'stage_voice_ack', 'actor_follow': 'stage_actor_follow', 'actor_play': 'stage_actor_play', 'actor_stop': 'stage_actor_stop', 'anchor': 'stage_anchor_set', 'anchor_release': 'stage_anchor_release', 'anim_clear': 'stage_anim_clear', 'anim_save': 'stage_anim_save', 'ask': 'stage_ask', 'clear_markers': 'stage_markers_clear', 'clock': 'stage_clock_set', 'cue': 'stage_cue_set', 'cue_remove': 'stage_cue_remove', 'cues_clear': 'stage_cues_clear', 'cues_list': 'stage_cues_list', 'deselect': 'stage_object_deselect', 'drop': 'stage_object_drop', 'eyecam': 'stage_view_eyecam', 'focus': 'stage_view_focus', 'gallery_add': 'stage_gallery_add', 'goto': 'stage_person_goto', 'goto_camera': 'stage_camera_goto', 'growth': 'stage_growth_set', 'highlight': 'stage_object_highlight', 'key': 'stage_key_set', 'key_delete': 'stage_key_delete', 'light': 'stage_light_set', 'look_through': 'stage_view_look_through', 'marker': 'stage_marker_set', 'music': 'stage_music', 'panel': 'stage_panel_show', 'panel_close': 'stage_panel_close', 'reload': 'stage_scene_reload', 'say': 'stage_say', 'scene_go': 'stage_scene_go', 'scene_list': 'stage_scene_list', 'select': 'stage_object_select', 'set': 'stage_object_set', 'sky': 'stage_sky_set', 'snapshot': 'stage_view_snapshot', 'stream': 'stage_stream', 'take_start': 'stage_take_start', 'take_stop': 'stage_take_stop', 'take_view': 'stage_take_view', 'take_view_clear': 'stage_take_view_clear', 'timeline': 'stage_timeline_show', 'trees_reload': 'stage_trees_reload', 'undo': 'stage_edit_undo', 'voice_rec': 'stage_voice_note', 'walk': 'stage_view_walk', 'waypoint': 'stage_waypoint_set', 'waypoint_go': 'stage_waypoint_go', 'waypoint_remove': 'stage_waypoint_remove', 'waypoints_clear': 'stage_waypoints_clear', 'waypoints_list': 'stage_waypoints_list'}

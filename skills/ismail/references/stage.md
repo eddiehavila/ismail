@@ -6,9 +6,32 @@ what one long build of a 1958 bar and a club, with a VR editor beside Blender, t
 before building any scene, look or editor a person will work inside, and with `music-video.md` (shots and the cut)
 and `user-experience.md` (their words, senses and consent).
 
-The stage itself (a browser and WebXR editor with a Blender round trip, hands, voice and panels) is still being
-brought into ismail (see ROADMAP.md). Everything below holds for any editor where a person and an agent change the
-same scene.
+The stage itself (a browser and WebXR editor with a Blender round trip, hands, voice and panels) is part of ismail:
+`ismail.stage`, driven by the `stage_*` tools (below). Everything after that section holds for any editor where a
+person and an agent change the same scene.
+
+## Running the stage
+
+- **Scenes live in the song:** `<song>/video/vr/scenes/<name>/` holds `scene.glb` and `manifest.json` (from the
+  Blender bridge), `edits.json` (what the person moved), `world.json` (who plays whom, facings, partners, the floor,
+  keep-out boxes, spawn, credits, and `build`: the room script that exports it), waypoints, cues, takes, voice
+  notes and snapshots. `scenes/stage.json` may name the default scene. Takes, voice and snapshots are the person's:
+  never share them by default.
+- **Start:** `stage_start(scenes="<song>/video/vr/scenes")` replies with the address. Open
+  `<address>?scene=<name>` on the desktop, or in the headset through `tailscale serve` (https). One server per port;
+  `stage_status` lists servers, scenes and which pages are live.
+- **Drive:** each page command is a typed tool that waits for the page's answer: `stage_object_set`,
+  `stage_object_select`, `stage_say`, `stage_panel_show`, `stage_waypoint_set`, `stage_actor_play`, `stage_stream`,
+  `stage_scene_go` and the rest. A tool fails with the next step when no page shows the scene; `stage_cmd` is only
+  for a command that has no tool yet.
+- **Listen:** `stage_events(scene, since=, types=[...], wait=)` is what the person did and said: `voice_in` the
+  moment a voice note lands (answer "got it" then), `voice_message` with its text and what they pointed at,
+  `gesture`, `select`, `transform_end`, `cmd_done`, `page_error`, frame beats in the client log.
+- **Verify from their side** before saying done: the reply's position, a `stage_view_snapshot`, or the event that
+  proves it. Say "not verified yet" otherwise.
+- **Rebuild a room:** `stage_scene_export(scene)` runs `world.json` `build.script` in Blender in a heavy-job slot.
+  An open page swaps it in under the construct, never while the person is in VR.
+- **Changes they will notice:** `stage_note(scenes, title, level)` feeds the "updates ready" card in the headset.
 
 ## Choose the surface for the decision
 

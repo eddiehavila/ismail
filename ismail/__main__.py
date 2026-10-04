@@ -73,8 +73,9 @@ def main(argv):
         print(f"ERROR unknown op {name!r}; run 'python -m ismail ops'", file=sys.stderr)
         return 2
     project = kw.pop('project', project)
+    takes_project = next(iter(inspect.signature(OPS[name]).parameters), None) == 'project'   # stage_* take scene
     try:
-        print(OPS[name](project, **kw))
+        print(OPS[name](project, **kw) if takes_project else OPS[name](**kw))
         return 0
     except (OpError, ValueError) as e:  # analysis/instrument/fx errors are ValueErrors with guidance
         print(f"ERROR {e}", file=sys.stderr)
