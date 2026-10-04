@@ -26,6 +26,9 @@
   floor, keep-out boxes, the default scene, the build script) lives in `scenes/<name>/world.json` and
   `scenes/stage.json`. Session files (client log, speech cache, bundle, update notes) go to `<scenes>/_stage/`.
 - One server per port: a busy port is refused (Windows let two servers bind one port and split the live link).
+- Desktop movement: the wheel steps forward where you look (along the floor in walk mode), the orbit pivot
+  travelling with the camera, so zoom no longer shrinks the orbit until the wheel stalls; walk and key speed scale
+  with the scene (3.5 m/s in the Crossroads club, was 1.2), Shift 3x.
 - Scene lineage (M75): a scene's world.json may say `derives_from` (and `pass`, `pass_env`, `assets`).
   `stage_scene_export` builds a derived scene from its ancestor's full build, then its line's passes in the bridge
   (`VR_PASS`), the line's edits merged (the variant's win) and the Quest diet in the bridge (`VR_DIET`), so a remodel

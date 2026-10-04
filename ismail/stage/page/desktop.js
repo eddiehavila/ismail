@@ -12,6 +12,9 @@ export function initDesktop(ed) {
   const { renderer, camera, scene } = ed;
   const canvas = renderer.domElement;
   const orbit = new OrbitControls(camera, canvas);
+  // the wheel flies the camera and the pivot together (below): zoom only shrank the orbit until the wheel stalled at
+  // the pivot (the user: "I can't move forward with mousewheel... it zooms, messing up my orbit")
+  orbit.enableZoom = false;
   const tc = new TransformControls(camera, canvas);
   tc.setSize(0.8);
   const tch = tc.getHelper();
@@ -487,7 +490,16 @@ export function initDesktop(ed) {
   // ---- keyboard movement, always on (orbit and walk): W/S along the view flattened to the floor, A/D strafe, Q/E
   // down/up, Shift faster, arrows too. In orbit the target travels with the camera, so the orbit pivot comes along.
   const MOVE_KEYS = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyE', 'ShiftLeft', 'ShiftRight', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'];
-  const SPEED = 1.2, FAST = 3.0;            // m/s: a 3 x 4 m room in a few seconds
+  // m/s, scaled to the scene: 1.2 crosses a 3 x 4 m room in a few seconds but took a minute across the 50 m club
+  // block (the user: "walking mode really walks soooo slow"); Shift is 3x
+  let SPEED = 1.2, FAST = 3.6;
+  const pace = () => {
+    const d = props.isEmpty() ? 0 : props.getSize(new THREE.Vector3()).length();
+    SPEED = THREE.MathUtils.clamp(d / 8, 1.5, 8);
+    FAST = SPEED * 3;
+  };
+  pace();
+  ed.addEventListener('loaded', pace);
   function tickWalk() {
     const now = performance.now(), dt = Math.min(0.1, (now - (walk.last || now)) / 1000);
     walk.last = now;
@@ -546,6 +558,19 @@ export function initDesktop(ed) {
     if (!v.lengthSq()) return;
     shiftCam(c, v.multiplyScalar(dt * (k.has('ShiftLeft') || k.has('ShiftRight') ? FAST : SPEED) * 0.5));
   }
+  // the wheel in orbit and walk: a step forward where you look (walk: along the floor), the orbit pivot travelling
+  // with the camera so the orbit stays as it was; Shift steps 4x. Trackpads send many small deltas: scale by them.
+  canvas.addEventListener('wheel', (e) => {
+    if (flight || view.through) return;
+    e.preventDefault();
+    const notches = Math.min(3, Math.abs(e.deltaMode === 1 ? e.deltaY / 3 : e.deltaY / 100));
+    const step = SPEED * 0.4 * notches * (e.shiftKey ? 4 : 1) * Math.sign(-e.deltaY);
+    const dir = walk.on ? new THREE.Vector3(-Math.sin(walk.yaw), 0, -Math.cos(walk.yaw))
+      : camera.getWorldDirection(new THREE.Vector3());
+    const v = dir.multiplyScalar(step);
+    camera.position.add(v);
+    if (!walk.on) { orbit.target.add(v); orbit.update(); }
+  }, { passive: false });
   canvas.addEventListener('wheel', (e) => {
     if (!view.through || flight) return;
     e.preventDefault();
