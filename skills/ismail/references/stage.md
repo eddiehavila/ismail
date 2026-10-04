@@ -112,6 +112,25 @@ For pictures:
 - **Go wide when the person is away.** Prepare several independent exams so one answer settles many things.
 - **Give each subject its own exam letter.** Two exams named S1 cost a round of confusion.
 
+## Ask what is missing, before the person does
+
+In the 1958 cafe the pool table had its balls and no cues. The person found that, and most other gaps, by walking in
+with a list of what was missing: the first one to ask "what is missing here?" was the person, not the agent that
+built the room. Ask it yourself first, while designing and again before they go in, then ask them.
+
+- **Ask yourself, object by object and person by person.** What goes with this thing in use (a pool table: cues, a
+  rack, chalk, a cue rack on the wall; a stage: cables, stands, a set list taped down; a bar: what is on it at this
+  hour)? What is each person holding, wearing, carrying? What does the room need to work (light sources, a way in,
+  signage, air in a Mississippi summer)? What would someone who worked there notice first? What did the era have,
+  and not have?
+- **Then ask the story.** The notes, the treatment and the lineage (a remodel keeps what survived, loses what was
+  cut down) say what must be there; read them again with the list in hand.
+- **Write the list down and sort it**: build now (cheap and in frame), keep as a note (in `PROGRESS.md`, under the
+  scene), or ask. Missing does not mean build everything: naming a gap is the job, the person decides the scope.
+- **Then ask the person** with the list in hand: "here is what I think is missing; what else?", before they go in.
+  Their walk-through should find what only they can know, not the cues.
+
+
 ## Bodies, props and contact
 
 - **Fix locally from the state the person liked.** When a liked pose has one flaw, restore that pose and change only
