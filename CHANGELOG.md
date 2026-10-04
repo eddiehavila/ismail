@@ -51,7 +51,7 @@
   floor, keep-out boxes, the default scene, the build script) lives in `scenes/<name>/world.json` and
   `scenes/stage.json`. Session files (client log, speech cache, bundle, update notes) go to `<scenes>/_stage/`.
 - One server per port: a busy port is refused (Windows let two servers bind one port and split the live link).
-- Panels that ride with the person: `stage_panel_show(anchor="body", side="right"|"left", ttl=)` keeps a message just
+- Panels that ride with the person: `stage_panel_show(anchor="body", side="right"|"left", seconds=)` keeps a message just
   out of view beside where their body faces (a new body heading from the head and hands: a held head turn or the
   hands held out turn it, a glance does not), following them as they move; dragging it moves its place around them.
   World panels stay for notes about a place. Speech and new panels wait while the person is talking (a note

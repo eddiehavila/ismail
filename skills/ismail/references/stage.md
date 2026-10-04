@@ -194,7 +194,7 @@ A person in a headset cannot see your terminal. Contact is part of the interface
   session.
 - **A message to the person rides with them; a note about a place stays there.** `stage_panel_show(anchor="body")`
   puts it just out of view beside where their body faces (not their head: looking left or right finds it, looking
-  ahead does not), with a `ttl` or until they close it. Panels and speech wait while they talk, and for 3 s after a
+  ahead does not), with `seconds` or until they close it, and never holds your command queue. Panels and speech wait while they talk, and for 3 s after a
   note, because they often send the next one at once.
 
 ## Shared editing: never lose what the person did

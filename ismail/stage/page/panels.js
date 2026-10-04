@@ -5,7 +5,7 @@
 // panel_closed {id, why}. The poke also works on any other registered surface (the colour panel in xr.js).
 // anchor 'body' (the user, 2026-10-04: a message "needs to stick to me, just like my utility belt"): the panel rides
 // with the user, just out of view to the right (side 'right', the default) or left of where their BODY faces
-// (body.js), so turning the head finds it; ttl seconds or the X closes it; dragging it moves its place around them.
+// (body.js), so turning the head finds it; seconds or the X closes it; dragging it moves its place around them.
 // A panel that tells about a place stays in the world (the default). No panel opens while the user is talking.
 import * as THREE from 'three';
 import { GIZMO } from './editor.js';
@@ -127,10 +127,9 @@ export function initPanels(ed, xrApi, hands, voice, live, body) {
     if (!c.quiet) voice.EAR.incoming();
     live.emit('panel_shown', { id, title: p.title, image: c.image || null, buttons: p.buttons, anchor: p.body ? 'body' : 'world',
       ...(p.body ? { side: p.body.deg < 0 ? 'left' : 'right' } : {}) });
-    const ttl = c.ttl ?? c.seconds;
     const done = new Promise((resolve) => {
       p.resolve = resolve;
-      if (ttl) p.timer = setTimeout(() => close(id, 'timeout'), ttl * 1000);
+      if (c.seconds) p.timer = setTimeout(() => close(id, 'timeout'), c.seconds * 1000);
     });
     return c.wait === false ? { id, shown: true } : done;
   }

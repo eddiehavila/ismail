@@ -181,12 +181,12 @@ def stage_voice_note(scene: str, action: str = 'start') -> str:
 @op(mutates=True)
 def stage_panel_show(scene: str, panel_id: str = None, title: str = '', text: str = '', image: str = None,
                buttons: list = None, width: float = None, seconds: float = None, quiet: bool = False,
-               wait: bool = True, near: list = None, anchor: str = 'world', side: str = 'right',
-               ttl: float = None) -> str:
+               wait: bool = None, near: list = None, anchor: str = 'world', side: str = 'right') -> str:
     """Open a panel in VR with a title, text, an image (URL) and buttons (page command: panel). anchor='world'
     (default) fixes it 0.7 m in front of the person: for a note about a place. anchor='body' makes it ride with them,
     just out of view to the `side` ('right' or 'left') of where their body faces, so they turn their head to read it
-    and it follows them as they move: for a message to them. ttl (or seconds) closes it by itself; the X closes it.
+    and it follows them as they move: for a message to them. seconds closes it by itself; the X closes it. wait defaults
+    to True for a world panel (a question) and False for a body panel (a message never holds the command queue).
     It never opens while they are talking (a note recording, the phone gesture, 3 s after a note): it waits, and
     emits panel_held. The person answers by poking a button, pointing and pinching, or a right thumbs
     up / down held 450 ms (first / last button). seconds closes it by itself. quiet skips the chime. wait=True BLOCKS the
@@ -196,8 +196,9 @@ def stage_panel_show(scene: str, panel_id: str = None, title: str = '', text: st
     {id, shown: true} with wait=False. Emits: panel_shown, panel_answer, panel_closed."""
     if anchor not in ('world', 'body') or side not in ('right', 'left'):
         raise OpError(f"anchor is 'world' or 'body' and side 'right' or 'left' (got {anchor!r}, {side!r})")
-    secs = ttl if ttl is not None else seconds
-    return page_cmd(scene, 'panel', {'panel_id': panel_id, 'title': title, 'text': text, 'image': image, 'buttons': buttons, 'width': width, 'seconds': seconds, 'ttl': ttl, 'quiet': quiet, 'wait': wait, 'near': near, 'anchor': anchor, 'side': side}, timeout=((60 if secs is None else secs) + 120))
+    if wait is None:
+        wait = anchor == 'world'
+    return page_cmd(scene, 'panel', {'panel_id': panel_id, 'title': title, 'text': text, 'image': image, 'buttons': buttons, 'width': width, 'seconds': seconds, 'quiet': quiet, 'wait': wait, 'near': near, 'anchor': anchor, 'side': side}, timeout=((60 if seconds is None else seconds) + 120))
 
 
 @op(mutates=True)

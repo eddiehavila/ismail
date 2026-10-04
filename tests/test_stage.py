@@ -424,9 +424,10 @@ def test_a_panel_can_ride_with_the_person(stage):
     page = FakePage(stage['port'], 'room')
     try:
         out = OPS['stage_panel_show'](scene='room', title='Lucy', text='the amp moved', anchor='body', side='left',
-                                      ttl=20, wait=False)
+                                      seconds=20)
         c = page.seen[-1]
-        assert (c['type'], c['anchor'], c['side'], c['ttl']) == ('panel', 'body', 'left', 20)
+        # a body panel is a message: it never holds the command queue unless asked to
+        assert (c['type'], c['anchor'], c['side'], c['seconds'], c['wait']) == ('panel', 'body', 'left', 20, False)
         assert 'width' not in c                       # the page picks the narrower body width
         assert 'panel' in out
         with pytest.raises(OpError, match="anchor is 'world' or 'body'"):
