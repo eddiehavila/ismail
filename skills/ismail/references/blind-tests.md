@@ -47,6 +47,21 @@ fix. A round the person always gets, or never gets, gives no direction: make the
   the one tested) or a closer listener, and say what to listen for.
 - **Check alignment.** The onsets of A and B must come from the same detector as R's, run on the full signal. A mask edge once made every A lag 12 ms.
 
+**The listening device is part of the exam.**
+- **Record it every round**, on the page next to Submit: laptop speakers, wired headphones, Bluetooth and its codec
+  (SBC, AAC, aptX, LDAC), a phone. A listener once switched from laptop speakers to a Bluetooth speaker between
+  rounds, and only the page's device field caught it.
+- **One device per round.** A round on another device is a new round, not a continuation.
+- **Sweep devices when the question is how people will hear it** (phones, earbuds, Bluetooth): the same clips on two
+  or three devices. An artifact that grows on a lossy link and not on wired playback is tandem coding (a second lossy
+  stage amplifying a first), which is measurable.
+- **Calibrate the listener's floor first** with known lenses: the clean render against the same through MP3 at 128
+  and 64 kb/s, plus an identical pair. On a Bluetooth speaker one listener heard 64 kb/s at once and 128 kb/s not at
+  all, and described the artifact's shape, so keep the words of the tell, not only the score. Then a later "can't
+  tell" means something. What a generated track's artifact is remains an open question: neural codec lenses at 6 and
+  12 kb/s went unheard in the same rounds, so do not assume them.
+- **Log each round's floor** in the song's notes: the ear gets finer, and the next round can aim one notch smaller.
+
 **Page mechanics.** Keep the page in the song (`songs/<slug>/exam/<round>/`), never on a public host when it contains clips of the recording.
 - **Always host it, always open it where the person already is.** Serve it on 127.0.0.1 and open `http://127.0.0.1:<port>/<round>/` for them in the browser they can see beside the conversation (a browser pane, preview, web view or browser tool, whichever your harness has). Never send the user a file path or a `file://` page: browsers block audio from file pages, and an external browser means switching away (where a copy button may not work).
 - **Submit, don't copy.** A small server serves the round and takes `POST /<round>/answers`, appending them with a timestamp to `exam/<round>/answers.txt`; the user presses Submit and says "done", and you read the file. Keep a copy button as a fallback that also shows the text in a box. Songs are not in the repository, so there is no shared copy: if a song on this machine has one (`songs/tambopata/work/exam_server.py`, `songs/vox/rec/server.py`), copy it into your song's `work/`; otherwise write it (about 40 lines of `http.server`).

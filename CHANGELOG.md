@@ -22,6 +22,8 @@
 - development.md: a public voice, instrument or profile stays compatible with the songs that use it (new behavior
   as a new param whose default is the old sound); when it cannot, the new one ships beside its ancestor under a
   findable name, with `derived_from` in its data and credit both ways.
+- blind-tests.md: the listening device is part of the exam (record it, one per round, a device sweep when it
+  matters, calibrate the listener's floor with codec lenses, log the floor) (S30).
 - Skill text describes actions in plain words with synonyms (send a message to a session, conversation or agent;
   a browser pane, preview or web view) instead of one harness's tool names.
 
