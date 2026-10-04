@@ -166,7 +166,7 @@ export function initTouch(ed, xrApi, hands, emit) {
   const drop = { since: 0, done: false };
   function dropUpdate(now) {
     const L = hands.state.left;
-    const on = !!(L && L.f && L.g === 'thumbs_down' && ed.selected && ed.canMove(ed.selected) && !held.left && !held.right);
+    const on = !hands.performing && !!(L && L.f && L.g === 'thumbs_down' && ed.selected && ed.canMove(ed.selected) && !held.left && !held.right);
     if (!on) { drop.since = 0; drop.done = false; return; }
     if (!drop.since) drop.since = now;
     if (!drop.done && now - drop.since > 500) {
@@ -193,7 +193,7 @@ export function initTouch(ed, xrApi, hands, emit) {
         if (held[side]) {
           if (!(held[side].how === 'pinch' ? pinch : fist)) release(side);
           else follow(side, p);
-        } else if (rose && !hands.state[side].resting) {
+        } else if (rose && !hands.state[side].resting && !hands.performing) {   // perform.js: no grabs while performing
           const n = rose === 'pinch' ? nearAt(p.pinchPt) || nearAt(p.palm) : nearAt(p.palm) || nearAt(p.pinchPt);
           if (n && !n.locked && ed.canMove(n.item)) grab(side, n, rose, p);
           else if (n && !n.locked && rose === 'pinch' && ed.selected !== n.item) ed.select(n.item, 'touch');   // its menu opens

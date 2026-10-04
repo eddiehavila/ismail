@@ -16,6 +16,10 @@ POST /take/frames|/take/meta?scene=&take=  the page appends samples / merges met
 POST /voice/in?scene=&kind=message|take[&take=]  audio from the headset mic (voice.js): a message is saved to
                          scenes/<name>/voice/ and transcribed by speakwright (CPU whisper, 127.0.0.1:8765) into a
                          `voice_message` event; a take's audio goes to takes/<id>/audio.<ext>
+POST /voice/perf?scene=&perf=&clip=N&seq=K   a performance clip's audio, chunk K appended (perform.js; a Follow is
+                         a performance); ...&end=1&at=&seconds=&by= closes clip N: transcribed with word times snapped
+                         onto the voice (perform.py) into a `perform_clip` event and performances/<perf>/perf.json
+POST /perf/meta?scene=&perf=   the page merges a performance's meta (person, markers, ended, take)
 GET  /voice/say?text=&voice=   speech for the headset (speakwright's Kokoro), audio/wav
 POST /snapshot?scene=<name>&tag=<camera>  (png body) -> scenes/<name>/snapshots/<tag>_<time>.png
 POST /save?scene=<name>  -> writes scenes/<name>/edits.json; the previous one moves to scenes/<name>/history/ first
@@ -48,7 +52,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from . import presence
+from . import perform, presence
 
 PAGE = Path(__file__).resolve().parent / 'page'
 SCENES = Path('scenes').resolve()                          # set by configure(): the song's scenes folder
@@ -179,7 +183,7 @@ def save_edits(name, edits):
 CMD_TYPES = {'cue', 'cue_remove', 'cues_clear', 'cues_list', 'waypoint', 'waypoint_remove', 'waypoints_clear', 'waypoints_list', 'waypoint_go', 'sky', 'scene_go', 'scene_list', 'actor_follow', 'trees_reload', 'clock', 'key', 'key_delete', 'anim_save', 'anim_clear', 'timeline', 'growth', 'music', 'take_start', 'take_stop', 'eyecam', 'voice_rec', 'say', 'goto', 'goto_camera', 'focus', 'select', 'deselect', 'highlight', 'marker', 'clear_markers', 'set',
              'light', 'walk', 'look_through', 'snapshot', 'reload', 'undo', 'ask', 'panel', 'panel_close',
              'ack', 'gallery_add', 'drop', 'take_view', 'take_view_clear', 'actor_play', 'actor_stop', 'stream', 'anchor', 'anchor_release',
-             'take_keep_last', 'follow_anchor'}
+             'take_keep_last', 'follow_anchor', 'perform', 'batch'}
 COND = threading.Condition()
 LIVE = {}                      # scene -> {'state', 'state_t', 'events': [...], 'ev_id', 'cmds': [...], 'cmd_id'}
 
@@ -253,6 +257,20 @@ def stt(audio, filename):
                                  headers={'Content-Type': f'multipart/form-data; boundary={b}'})
     with urllib.request.urlopen(req, timeout=120) as r:
         return json.loads(r.read()).get('text', '').strip()
+
+
+def stt_words(audio, filename):
+    """{text, words: [{word, start, end}] or None} (None: the speech server predates verbose_json)."""
+    import urllib.request
+    b = '----stage' + str(int(time.time() * 1000))
+    body = (f'--{b}\r\nContent-Disposition: form-data; name="response_format"\r\n\r\nverbose_json\r\n'
+            f'--{b}\r\nContent-Disposition: form-data; name="file"; filename="{filename}"\r\n'
+            f'Content-Type: application/octet-stream\r\n\r\n').encode() + audio + f'\r\n--{b}--\r\n'.encode()
+    req = urllib.request.Request(SPEAK + '/v1/audio/transcriptions', data=body, method='POST',
+                                 headers={'Content-Type': f'multipart/form-data; boundary={b}'})
+    with urllib.request.urlopen(req, timeout=300) as r:
+        got = json.loads(r.read())
+    return {'text': (got.get('text') or '').strip(), 'words': got.get('words')}
 
 
 def tts(text, voice=None):
@@ -607,8 +625,11 @@ class Handler(SimpleHTTPRequestHandler):
                     c['type'] = c.pop('cmd', None)
                 if c['type'] not in CMD_TYPES:
                     raise ValueError(f"unknown command {c['type']!r}; known: {sorted(CMD_TYPES)}")
-                if c['type'] == 'marker' and 'id' in c:    # "id" is the command id below; keep the pin's own id
-                    c.setdefault('marker_id', c.pop('id'))
+                for x in (c.get('cmds') or []) if c['type'] == 'batch' else [c]:     # stage_batch: each one inside too
+                    if not isinstance(x, dict) or x.get('type') not in CMD_TYPES or (x is not c and x.get('type') == 'batch'):
+                        raise ValueError(f"unknown command {x.get('type') if isinstance(x, dict) else x!r} in a batch")
+                    if x['type'] == 'marker' and 'id' in x:    # "id" is the command id below; keep the pin's own id
+                        x.setdefault('marker_id', x.pop('id'))
             with COND:
                 L = live(name)
                 out = []
@@ -782,6 +803,42 @@ class Handler(SimpleHTTPRequestHandler):
             server_event(name, {'type': 'voice_in', 'file': rel, 'bytes': len(audio), **{k: v for k, v in extra.items() if k in ('seconds', 'via')}})
             threading.Thread(target=transcribe_message, args=(name, f, rel, extra), daemon=True).start()
             return self._json(200, {'ok': True, 'file': str(f)})
+        if u.path in ('/voice/perf', '/perf/meta'):               # a performance (perform.js / perform.py)
+            qs = parse_qs(u.query)
+            name, perf_id = qs.get('scene', [''])[0], qs.get('perf', [''])[0]
+            if not NAME.match(name) or not (SCENES / name / 'scene.glb').is_file() or not perform.ID.match(perf_id):
+                return self._json(400, {'error': 'bad scene or perf'})
+            d = perform.folder(SCENES, name, perf_id)
+            body = self.rfile.read(int(self.headers.get('Content-Length', 0)))
+            if u.path == '/perf/meta':
+                try:
+                    patch = json.loads(body or b'{}')
+                except ValueError:
+                    return self._json(400, {'error': 'bad json'})
+                if not isinstance(patch, dict):
+                    return self._json(400, {'error': 'meta must be an object'})
+                perform.merge(d, patch)
+                return self._json(200, {'ok': True})
+            try:
+                n = int(qs.get('clip', [''])[0])
+            except ValueError:
+                return self._json(400, {'error': 'bad clip'})
+            if 'end' in qs:
+                at, secs = float(qs.get('at', ['0'])[0]), float(qs.get('seconds', ['0'])[0])
+                by = qs.get('by', ['page'])[0][:40]
+                server_event(name, {'type': 'perform_clip_in', 'perf': perf_id, 'clip': n, 'at': at, 'seconds': secs, 'by': by})
+                files = sorted(d.glob(f'clip_{n}.*'))
+                perform.set_clip(d, {'n': n, 'at': at, 'seconds': secs, 'by': by, 'file': files[0].name if files else None,
+                                     'state': 'transcribing'})
+                threading.Thread(target=perform.transcribe_clip, daemon=True,
+                                 args=(d, n, at, secs, by, stt_words, lambda ev: server_event(name, ev))).start()
+                return self._json(200, {'ok': True})
+            ext = {'audio/webm': 'webm', 'audio/ogg': 'ogg', 'audio/mp4': 'm4a'}.get(
+                (self.headers.get('Content-Type') or '').split(';')[0].strip(), 'webm')
+            d.mkdir(parents=True, exist_ok=True)
+            with open(d / f'clip_{n}.{ext}', 'wb' if qs.get('seq', ['0'])[0] == '0' else 'ab') as fh:
+                fh.write(body)
+            return self._json(200, {'ok': True, 'bytes': len(body)})
         if u.path in ('/take/frames', '/take/meta'):                # a performance take from the page (hands.js)
             qs = parse_qs(u.query)
             name, take = qs.get('scene', [''])[0], qs.get('take', [''])[0]

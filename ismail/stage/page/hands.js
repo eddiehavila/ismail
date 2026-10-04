@@ -220,11 +220,13 @@ export function initHands(ed, xrApi, emit) {
   // user, 2026-10-04: a 61 s follow of the bartender he liked was gone, because a plain Follow kept nothing). The last
   // one (up to SHADOW_MAX_S, the newest part) waits until the next Follow or a reload; keepLast saves it as a take.
   const SHADOW_MAX_S = 180;
-  const shadow = { on: false, t0: 0, last: 0, frames: [], person: null, started: null };
+  const shadow = { on: false, t0: 0, last: 0, frames: [], person: null, started: null, perf: null };
   let lastFollow = null;
-  function shadowStart(person) {
+  // t0 and perf: the performance's clock (perform.js), so its voice clips line up with these frames
+  function shadowStart(person, t0 = null, perf = null) {
     if (rec.on) return;
-    Object.assign(shadow, { on: true, t0: performance.now(), last: 0, frames: [], person, started: new Date() });
+    const now = performance.now();
+    Object.assign(shadow, { on: true, t0: t0 || now, last: 0, frames: [], person, started: new Date(Date.now() - (now - (t0 || now))), perf });
   }
   function shadowStop() {
     if (!shadow.on) return null;
@@ -234,7 +236,8 @@ export function initHands(ed, xrApi, emit) {
     if (fr.length < REC_HZ) return null;                        // under a second: nothing worth keeping
     const t0 = fr[0].t;                                         // the buffer may have dropped its oldest part
     lastFollow = { person: shadow.person, frames: t0 ? fr.map((f) => ({ ...f, t: r4(f.t - t0) })) : fr,
-      started: new Date(shadow.started.getTime() + t0 * 1000), seconds: r4(fr[fr.length - 1].t - t0) };
+      started: new Date(shadow.started.getTime() + t0 * 1000), seconds: r4(fr[fr.length - 1].t - t0),
+      perf: shadow.perf ? { performance: shadow.perf.id, perf_shift: r4(t0), perf_scene: shadow.perf.scene } : null };
     emit('follow_buffered', { person: lastFollow.person, frames: fr.length, seconds: lastFollow.seconds });
     return lastFollowInfo();
   }
@@ -244,7 +247,7 @@ export function initHands(ed, xrApi, emit) {
     if (!lastFollow) throw new Error('no follow to keep: the last Follow is kept in memory until the next one or a reload');
     const lf = lastFollow, label = name || lf.person || 'follow', id = takeId(lf.started, label);
     await post('take/meta', { id, name: label, scene: scene_(), started: lf.started.toISOString(), ...TAKE_FORMAT, presenting: true,
-      from: 'follow' }, id);
+      from: 'follow', ...(lf.perf || {}) }, id);
     for (let i = 0; i < lf.frames.length; i += 300) await post('take/frames', lf.frames.slice(i, i + 300), id);
     await post('take/meta', { ended: new Date(lf.started.getTime() + lf.seconds * 1000).toISOString(), frames: lf.frames.length,
       seconds: lf.seconds }, id);
@@ -371,6 +374,7 @@ export function initHands(ed, xrApi, emit) {
     }
     // travel aims along the same ray as selecting (the system's shoulder-through-hand target ray), not the index
     // finger: two directions made the beam jump whenever the pose changed between point and gun
+    if (api.performing) { gunAim = stickAim = null; if (aim.by) hideAim(); }   // perform.js: no gesture acts
     if (gunAim) {
       const c = xrApi.ctls.find((x) => x.src && x.src.handedness === gunAim.side);
       if (c) {
@@ -397,7 +401,7 @@ export function initHands(ed, xrApi, emit) {
   // actors.js follow: the frame a take would record right now (a person moves with the user, live)
   const frameNow = () => makeFrame(performance.now(), 0);
   const api = { update, startTake, stopTake, rec, state: H, aim, frameNow, stickAiming: () => aim.by === 'stick', framing: false,
-    shadowStart, shadowStop, keepLast, discardLast, lastFollowInfo,
+    shadowStart, shadowStop, keepLast, discardLast, lastFollowInfo, lastFollowData: () => lastFollow, performing: false,
     addUIGuard: (fn) => uiGuards.push(fn) };
   return api;
 }

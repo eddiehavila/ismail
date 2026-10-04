@@ -128,16 +128,23 @@ export function initActions(ed, hands, panels, live, takes) {
         cur = id + '_' + (++round);
         followPanels.set(it.name, cur);
         const pinned = takes.actors.pinsOf ? takes.actors.pinsOf(it.name) : [];
-        const r = await panels.show({ panel_id: cur, title: (rec ? '● Recording: ' : 'Following: ') + ed.label(it),
-          // the mic: talking while following is not heard unless it is a voice note (the user, 2026-10-04, spoke a
-          // minute into a Follow and none of it reached Claude)
-          text: (pinned.length ? '📌 pinned: ' + pinned.join(', ') + '. ' : '') + '🎙 Talking is not recorded: phone gesture for a voice note.',
+        // a Follow is a performance (perform.js): the voice records with it and gestures are off, so the panel says so
+        // and its buttons are poked
+        const pf = takes.perform ? takes.perform.state() : { performing: false };
+        const mic = pf.performing ? (pf.mic ? `🎙 Your voice records with it (clip ${pf.clip.n}).` : '🎙 Mic off.') : '';
+        const r = await panels.show({ panel_id: cur, title: (rec ? '● Recording: ' : 'Performing: ') + ed.label(it),
+          text: (pinned.length ? '📌 pinned: ' + pinned.join(', ') + '. ' : '') + mic + ' Gestures are off: poke the buttons.',
           buttons: [rec ? '■ Stop take' : '■ Stop', '⟲ Turn him', st.mirror ? '⇄ Mirror: on' : '⇄ Mirror: off',
             st.mode === 'walk' ? '📍 Dance in place' : '🚶 Walk with me', pinned.includes('hips') ? '📌 Unpin hips' : '📌 Pin hips',
-            ...(rec ? [] : ['⇲ Move him here'])],
+            ...(pf.performing ? [pf.mic ? '🎙 Mic off' : '🎙 Mic on'] : []), ...(rec ? [] : ['⇲ Move him here'])],
           near, width: 0.46, quiet: true, wait: true });
         const ans = r && r.answer;
         if (!ans) break;
+        if (ans === '🎙 Mic off' || ans === '🎙 Mic on') {
+          try { await (ans === '🎙 Mic off' ? takes.perform.micOff('user') : takes.perform.clipStart('user')); }
+          catch (e) { live.emit('voice_error', { where: 'performance mic', error: String(e.message || e) }); }
+          continue;
+        }
         if (ans === '📌 Pin hips' || ans === '📌 Unpin hips') {
           try { takes.actors.anchor({ person: it.name, joint: 'hips', ...(ans === '📌 Pin hips' ? { to: 'here' } : { clear: true }) }); }
           catch (e) { live.emit('voice_error', { where: 'pin', error: String(e.message || e) }); }
@@ -166,9 +173,15 @@ export function initActions(ed, hands, panels, live, takes) {
     if (!lf || !it || lf.person !== person) return;
     const pid = 'keep_follow_' + Date.now();
     offerId = pid;
+    // it plays back first, with the voice (the user, 2026-10-04: after a Follow the performance plays back before
+    // anything else), and loops while the user decides
+    const lfd = takes.lastFollowData && takes.lastFollowData();
+    const back = !!(lfd && canAct(it)) && await takes.actors.play({ person, frames: lfd.frames, meta: lfd.perf || {}, take: 'last follow', loop: true })
+      .then(() => true).catch((e) => { live.emit('voice_error', { where: 'follow playback', error: String(e.message || e) }); return false; });
     const a = await panels.show({ panel_id: pid, title: `Keep that follow of ${ed.label(it)}?`,
-      text: `${lf.seconds.toFixed(0)} s, not recorded as a take. Keep it and it plays back on them to trim or redo.`,
+      text: `${lf.seconds.toFixed(0)} s${back ? ', playing back on them now' : ''}. Keep it as a take to trim it, or discard it.`,
       buttons: ['💾 Keep as take', '🗑 Discard'], width: 0.5, quiet: true, seconds: 120 });
+    if (back && takes.actors.playing.get(person)?.take === 'last follow') takes.actors.stop({ person });
     const x = a && a.answer;
     if (x === '💾 Keep as take') {
       try { const t = await takes.keepLast(person); await review(it, t); } catch (e) { live.emit('voice_error', { where: 'keep follow', error: String(e.message || e) }); }
