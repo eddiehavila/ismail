@@ -51,6 +51,9 @@
   floor, keep-out boxes, the default scene, the build script) lives in `scenes/<name>/world.json` and
   `scenes/stage.json`. Session files (client log, speech cache, bundle, update notes) go to `<scenes>/_stage/`.
 - One server per port: a busy port is refused (Windows let two servers bind one port and split the live link).
+- A poke at UI wins over travel: while a hand's fingertip is within 10 cm of a panel, menu or button, or for 0.8 s
+  after it pokes one, the finger gun shows no travel arc and its thumb click does nothing (`travel_held` says so).
+  Poking menu buttons with the same finger gun that aims travel had teleported the person twice.
 - Panels that ride with the person: `stage_panel_show(anchor="body", side="right"|"left", seconds=)` keeps a message just
   out of view beside where their body faces (a new body heading from the head and hands: a held head turn or the
   hands held out turn it, a glance does not), following them as they move; dragging it moves its place around them.

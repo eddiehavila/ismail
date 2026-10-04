@@ -260,6 +260,15 @@ export function initHands(ed, xrApi, emit) {
     if (rec.buf.length >= REC_HZ) flushTake();
   }
 
+  // ---- a poke at UI wins over travel (the user, 2026-10-04: poking menu buttons with the same finger gun that aims
+  // travel teleported him twice). A guard answers, for a hand and its index tip, why travel must wait (a panel or
+  // button within 10 cm, or one just poked) or null; while one does, that hand shows no aim and its click is ignored.
+  const uiGuards = [];
+  function uiHold(side, f) {
+    for (const g of uiGuards) { const why = g(side, f.indexTip); if (why) return why; }
+    return null;
+  }
+
   // ---- per frame (called from xr.update while presenting)
   function update() {
     const now = performance.now();
@@ -288,6 +297,13 @@ export function initHands(ed, xrApi, emit) {
         emit('gesture', { hand: side, gesture: h.g, prev, palm: h.palm,
           from_head_cm: { right: Math.round(rel.x * 100), up: Math.round(rel.y * 100), forward: Math.round(-rel.z * 100) },
           curl: Object.fromEntries(Object.entries(f.curl).map(([k, v]) => [k, Math.round(v)])), pinch_cm: +(f.pinch * 100).toFixed(1) });
+      }
+      const held = uiHold(side, f);
+      if (held) {
+        if (h.g === 'gun' && h.heldFor !== h.since) { h.heldFor = h.since; emit('travel_held', { hand: side, ...held }); }
+        h.armed = false; h.clickN = 0; h.restUntil = Math.max(h.restUntil || 0, now + 500);   // and a moment after leaving
+        if (aim.by === side) hideAim();
+        continue;
       }
       // the click: while aiming, the thumb coming down onto the side of the index or the middle finger travels at
       // once, whatever the hand classifies as on the way (a half-curled index used to read as 'none' and the click was lost)
@@ -333,6 +349,7 @@ export function initHands(ed, xrApi, emit) {
 
   // actors.js follow: the frame a take would record right now (a person moves with the user, live)
   const frameNow = () => makeFrame(performance.now(), 0);
-  const api = { update, startTake, stopTake, rec, state: H, aim, frameNow, stickAiming: () => aim.by === 'stick', framing: false };
+  const api = { update, startTake, stopTake, rec, state: H, aim, frameNow, stickAiming: () => aim.by === 'stick', framing: false,
+    addUIGuard: (fn) => uiGuards.push(fn) };
   return api;
 }

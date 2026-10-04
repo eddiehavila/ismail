@@ -187,6 +187,24 @@ export function initPanels(ed, xrApi, hands, voice, live, body) {
     return { closed: true };
   }
 
+  // ---- how far a point is from the nearest shown surface (a panel, a menu, the colour panel), in metres
+  const nearP = new THREE.Vector3();
+  function uiDistance(pt) {
+    let best = Infinity;
+    for (const pk of pokeables) {
+      let shown = !!pk.mesh.parent;
+      for (let o = pk.mesh; o && shown; o = o.parent) shown = o.visible;
+      if (!shown) continue;
+      pk.mesh.updateMatrixWorld();
+      nearP.copy(pt); pk.mesh.worldToLocal(nearP);
+      const pg = pk.mesh.geometry.parameters, s = pk.mesh.getWorldScale(new THREE.Vector3());
+      const dx = Math.max(0, Math.abs(nearP.x) - pg.width / 2) * s.x, dy = Math.max(0, Math.abs(nearP.y) - pg.height / 2) * s.y;
+      best = Math.min(best, Math.hypot(dx, dy, nearP.z * s.z));
+    }
+    return best;
+  }
+  const pokedAt = { left: 0, right: 0 };
+
   // ---- finger poke on any registered surface: hover inside HOVER, press on crossing POKE_IN from the front
   const tipState = { left: { inside: null }, right: { inside: null } };
   const local = new THREE.Vector3();
@@ -221,6 +239,7 @@ export function initPanels(ed, xrApi, hands, voice, live, body) {
       if (best.z < POKE_IN && st.inside !== best.pk) {          // crossed the surface: one press per touch
         st.inside = best.pk;
         const settled = !best.pk.panel || now - (best.pk.panel.droppedAt || 0) > 800;   // not just let go of
+        pokedAt[side] = now;
         if (settled && inView(best.pk)) best.pk.press(best.uv, 'poke ' + side);
       } else if (best.z > POKE_OUT && st.inside === best.pk) st.inside = null;
     }
@@ -300,5 +319,13 @@ export function initPanels(ed, xrApi, hands, voice, live, body) {
 
   function registerPokeable(mesh, press, hover) { const pk = { mesh, press, hover }; pokeables.push(pk); return pk; }
   xrApi.addNearCheck(handAtPanel);
-  return { show, close, update, registerPokeable, panels };
+  // travel waits while a hand is at the UI: within UI_NEAR of a surface, or UI_AFTER_MS after a poke (hands.js)
+  const UI_NEAR = 0.10, UI_AFTER_MS = 800;
+  hands.addUIGuard((side, tip) => {
+    if (!renderer.xr.isPresenting) return null;
+    if (performance.now() - pokedAt[side] < UI_AFTER_MS) return { why: 'just poked a panel' };
+    const d = uiDistance(tip);
+    return d < UI_NEAR ? { why: 'a panel or button is within 10 cm', cm: Math.round(d * 100) } : null;
+  });
+  return { show, close, update, registerPokeable, panels, uiDistance };
 }
