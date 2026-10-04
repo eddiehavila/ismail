@@ -46,13 +46,14 @@ something you do.
   it shows "nobody is listening" in amber. `stage_presence()` says whether they are in, where, the last note and
   who is listening.
 - **No silent notes.** A note you were handed but did not answer (`stage_say`, `stage_voice_ack`) within 6 s is
-  acked for you, so they hear it landed; a note nobody was handed gets "Nobody is listening right now. I saved your
+  announced as "Handed to <your name>", so they hear it landed and was not yet answered; a note nobody was handed gets "Nobody is listening right now. I saved your
   note." out loud and goes to `_stage/unread.jsonl`. Read the unread notes when you start listening.
-- **Hooks** start an agent when nobody is running one: `~/.ismail/stage_hooks.json` or `<scenes>/_stage/hooks.json`,
+- **Hooks** start an agent when nobody is running one: `~/.ismail/stage_hooks.json`,
   `{"entered_vr": [...], "left_vr": [...], "voice_note": [...], "voice_unheard": [...]}`, each a shell command (or an
   argv list) run with `STAGE_EVENT`, `STAGE_SCENE`, `STAGE_TEXT`, `STAGE_FILE`, `STAGE_EVENT_ID`, `STAGE_URL`,
   `STAGE_SCENES` in its environment (a toast, a webhook, `claude -p "..."`, `codex exec "..."`); output goes to
-  `_stage/hooks.log`.
+  `_stage/hooks.log`. A song's own `_stage/hooks.json` runs only when the home file lists its scenes folder in
+  `"trust": [...]`: a scenes folder travels, and must never run commands for whoever opens it.
 
 ## Deriving a scene
 

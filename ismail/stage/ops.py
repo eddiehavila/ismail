@@ -175,8 +175,8 @@ def stage_listen(who: str, since: int = None, wait: float = 25, port: int = None
     """Listen to the person in the headset across every scene: their voice notes (voice_in, then voice_message with
     the text), whether a note was heard (voice_heard), entering and leaving VR (headset, vr_exit) and scene switches,
     oldest first. who= your name as the headset shows it ("Claude is listening": e.g. "crossroads film"); while you
-    call this at least every 40 s you count as listening, and a note you were handed is acked for you if you do not
-    answer it within 6 s (a note nobody was handed gets "nobody is listening" said out loud). since= the `last` from
+    call this at least every 40 s you count as listening, and a note you were handed is announced as "handed to
+    <who>" if you do not answer it within 6 s (a note nobody was handed gets "nobody is listening" said out loud). since= the `last` from
     the previous call (left out: start now), wait= seconds to wait for something new (up to 60). Answer a note with
     stage_say or stage_voice_ack on its scene."""
     rec = link.server_for(port=port)
@@ -194,8 +194,8 @@ def stage_listen(who: str, since: int = None, wait: float = 25, port: int = None
 def stage_presence(port: int = None) -> str:
     """Is the person in the headset, in which scene, since when; their last voice note and whether it was heard;
     who is listening (stage_listen, or following a scene with stage_events since=); unread notes; the hooks set up
-    (~/.ismail/stage_hooks.json and <scenes>/_stage/hooks.json: commands run on entered_vr, left_vr, voice_note,
-    voice_unheard with STAGE_EVENT, STAGE_SCENE, STAGE_TEXT, STAGE_URL ... in their environment)."""
+    (~/.ismail/stage_hooks.json; a song's _stage/hooks.json only when that file trusts its scenes folder: commands
+    run on entered_vr, left_vr, voice_note, voice_unheard with STAGE_EVENT, STAGE_SCENE, STAGE_TEXT, STAGE_URL ... in their environment)."""
     rec = link.server_for(port=port)
     p = link.http(rec, 'live/presence')
     lv = p.get('last_voice') or {}

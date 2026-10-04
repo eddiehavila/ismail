@@ -7,10 +7,12 @@ So the server keeps presence:
 - a listener is anything following the live log: GET /live/events with since= (that scene), or GET /live/inbox
   (every scene). `who=` names it; `who=op` (an op waiting for its own answer) is not a listener.
 - a voice note no listener took within HEARD_WAIT_S is unheard: the headset says so out loud, the note is kept in
-  <state>/unread.jsonl, and the voice_unheard hooks run. A note a listener took but did not answer gets an ack, so
-  the user hears it landed.
-- hooks: commands in ~/.ismail/stage_hooks.json and <state>/hooks.json, run on entered_vr, left_vr, voice_note and
-  voice_unheard (any agent: a toast, a webhook, `claude -p`, `codex exec`), with STAGE_* in their environment.
+  <state>/unread.jsonl, and the voice_unheard hooks run. A note a listener took but did not answer is said to be
+  "handed to <who>" (not the listener's own ack: the user can tell taken from answered).
+- hooks: commands in ~/.ismail/stage_hooks.json, run on entered_vr, left_vr, voice_note and voice_unheard (any
+  agent: a toast, a webhook, `claude -p`, `codex exec`), with STAGE_* in their environment. Never from the scenes
+  folder by itself: a song's folder travels (a copied world), so its <state>/hooks.json runs only when the home file
+  names that scenes folder in "trust".
 - GET /live/presence and <state>/presence.json: in VR or not, the scene, the last note, the listeners, the unread.
 """
 import json
@@ -32,7 +34,7 @@ LOCK = threading.Lock()
 P = {'in_vr': False, 'scene': None, 'since': None, 'page_seen': 0.0, 'last_voice': None, 'unread': 0}
 LISTENERS = {}               # key -> {who, scene ('*' = every scene), seen, delivered: {scene: event id}, inbox: seq}
 ANSWERED = {}                # scene -> time of the last ack / say / ask queued for it
-NOTES = {}                   # (scene, file) -> {id, t, seq, state: 'waiting' | 'heard' | 'acked' | 'unheard', text}
+NOTES = {}                   # (scene, file) -> {id, t, seq, state: 'waiting' | 'heard' | 'handed' | 'unheard', text}
 INBOX = []                   # every scene's voice and headset events, numbered across scenes: {seq, scene, ...}
 SEQ = [0]
 STARTED = time.time()
@@ -165,8 +167,9 @@ def _check(scene, file):
     if answered:
         state = 'heard'
     elif took:
-        state = 'acked'
-        S.server_cmd(scene, {'type': 'ack', 'by': 'server for ' + ', '.join(took)})
+        state = 'handed'
+        names = [w for w in took if w != 'unnamed'] or ['an agent']
+        S.server_cmd(scene, {'type': 'say', 'text': 'Handed to ' + ' and '.join(names) + '.', 'by': 'server: handed'})
     else:
         state = 'unheard'
         S.server_cmd(scene, {'type': 'say', 'text': NOBODY, 'by': 'server: no listener'})
@@ -205,17 +208,27 @@ def _changed():
 
 
 # ---- hooks
-def hook_files():
-    return [Path.home() / '.ismail' / 'stage_hooks.json', _server().STATE / 'hooks.json']
+def home_hooks():
+    return Path(os.environ.get('ISMAIL_STAGE_HOOKS') or Path.home() / '.ismail' / 'stage_hooks.json')
+
+
+def _read(f):
+    try:
+        d = json.loads(Path(f).read_text(encoding='utf-8'))
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
 
 
 def hooks():
+    """The home file's hooks, plus <state>/hooks.json when the home file trusts this scenes folder:
+    {"trust": ["D:/ismail/songs/crossroads/video/vr/scenes"], "voice_unheard": [...]}."""
+    S = _server()
+    home = _read(home_hooks())
+    trusted = {str(Path(p).resolve()).lower() for p in home.get('trust') or []}
+    files = [home] + ([_read(S.STATE / 'hooks.json')] if str(S.SCENES.resolve()).lower() in trusted else [])
     out = {k: [] for k in HOOK_EVENTS}
-    for f in hook_files():
-        try:
-            d = json.loads(f.read_text(encoding='utf-8'))
-        except (OSError, ValueError):
-            continue
+    for d in files:
         for k in HOOK_EVENTS:
             v = d.get(k) or []
             out[k] += v if isinstance(v, list) else [v]
