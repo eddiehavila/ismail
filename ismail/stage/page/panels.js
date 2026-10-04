@@ -14,6 +14,13 @@ const CW = 1024;                         // canvas width; the height follows the
 const WIDTH = 0.56;                      // metres
 const POKE_IN = 0.012, POKE_OUT = 0.03, HOVER = 0.08;   // fingertip to the surface, metres
 const VERDICT_HOLD_MS = 450;
+// who a panel is from (the user, 2026-10-04: "tell me who this information came from"): a command's `from` (the
+// agent's name, e.g. "crossroads film", "stage") shows as a coloured chip and border, the colour fixed per name, and a
+// sender's messages keep to one side of the body (senderSide), so the user knows at a glance who is talking
+const SENDER_COLOURS = ['#38bdf8', '#a78bfa', '#f472b6', '#34d399', '#fbbf24', '#fb923c'];   // never red: red is recording
+const hashOf = (s) => [...String(s)].reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) >>> 0, 7);
+export const senderColour = (from) => (!from ? null : from === 'stage' ? '#94a3b8' : SENDER_COLOURS[hashOf(from) % SENDER_COLOURS.length]);
+export const senderSide = (from) => (from && hashOf(from) % 2 ? 'left' : 'right');
 const BODY_WIDTH = 0.42, BODY_DEG = 72, BODY_DIST = 0.6, BODY_DROP = 0.12;   // a 0.42 m panel 72 degrees out sits just
                                                                             // past the Quest 3's view straight ahead
 
@@ -24,7 +31,7 @@ export function initPanels(ed, xrApi, hands, voice, live, body) {
 
   // ---- drawing
   function layoutOf(p) {
-    const pad = 28, titleH = p.title ? 64 : 0, imgH = p.img ? Math.round((CW - 2 * pad) * p.img.height / p.img.width) : 0;
+    const pad = 28, titleH = (p.title ? 64 : 0) + (p.from ? 52 : 0), imgH = p.img ? Math.round((CW - 2 * pad) * p.img.height / p.img.width) : 0;
     const textLines = p.text ? wrap(p.text, 52) : [], textH = textLines.length * 38 + (textLines.length ? 14 : 0);
     // up to four buttons in a row; more wrap into rows of three (the user, 2026-10-03: a person's menu had eight
     // buttons in one row and they were "getting scrunched")
@@ -53,10 +60,19 @@ export function initPanels(ed, xrApi, hands, voice, live, body) {
     g.clearRect(0, 0, CW, L.H);
     g.fillStyle = 'rgba(16,18,22,0.94)'; g.beginPath(); g.roundRect(0, 0, CW, L.H, 26); g.fill();
     let y = L.pad;
+    if (p.from) {                                              // the sender: a chip in its colour, and the border
+      const col = senderColour(p.from);
+      g.strokeStyle = col; g.lineWidth = 6; g.beginPath(); g.roundRect(3, 3, CW - 6, L.H - 6, 24); g.stroke();
+      g.font = 'bold 28px system-ui, sans-serif'; g.textBaseline = 'middle';
+      const label = String(p.from).toUpperCase(), lw = Math.min(CW - 2 * L.pad - 80, g.measureText(label).width + 32);
+      g.fillStyle = col; g.beginPath(); g.roundRect(L.pad, y, lw, 40, 20); g.fill();
+      g.fillStyle = '#0b0d10'; g.fillText(label, L.pad + 16, y + 21, lw - 32);
+      y += 52;
+    }
     if (p.title) {
       g.fillStyle = '#f5f5f4'; g.font = 'bold 40px system-ui, sans-serif'; g.textBaseline = 'middle';
       g.fillText(p.title, L.pad, y + 28, CW - 2 * L.pad - 70);
-      y += L.titleH;
+      y += 64;
     }
     const x = p.rects.find((r) => r.id === '__close');
     g.fillStyle = p.hover === '__close' ? '#b91c1c' : 'rgba(255,255,255,0.12)'; g.beginPath(); g.roundRect(x.x, x.y, x.w, x.h, 10); g.fill();
@@ -104,8 +120,8 @@ export function initPanels(ed, xrApi, hands, voice, live, body) {
       new THREE.MeshBasicMaterial({ map: tex, transparent: true, toneMapped: false, side: THREE.DoubleSide, depthTest: false, depthWrite: false }));   // drawn over the world, like Quest system panels (the user, 2026-10-03: a panel cut through a seated man)
     mesh.layers.set(GIZMO); mesh.renderOrder = 990;
     const p = { id, title: c.title || '', text: c.text || '', buttons: (c.buttons || []).map(String), img: null, cv, tex, mesh,
-      width, hover: null, answer: null, resolve: null, timer: null, t0: performance.now(),
-      body: onBody ? { deg: (c.side === 'left' ? -1 : 1) * (c.angle ?? BODY_DEG), dist: c.distance ?? BODY_DIST, dy: -BODY_DROP } : null };
+      width, from: c.from ? String(c.from) : null, hover: null, answer: null, resolve: null, timer: null, t0: performance.now(),
+      body: onBody ? { deg: ((c.side || senderSide(c.from)) === 'left' ? -1 : 1) * (c.angle ?? BODY_DEG), dist: c.distance ?? BODY_DIST, dy: -BODY_DROP } : null };
     if (c.image) {
       p.img = await new Promise((res) => { const im = new Image(); im.onload = () => res(im); im.onerror = () => res(null); im.src = c.image; });
       if (!p.img) p.text = (p.text ? p.text + '\n' : '') + '(could not load ' + c.image + ')';
@@ -125,7 +141,7 @@ export function initPanels(ed, xrApi, hands, voice, live, body) {
     mesh.userData.panelApi = p.poke;
     xrApi.addTarget(mesh);
     if (!c.quiet) voice.EAR.incoming();
-    live.emit('panel_shown', { id, title: p.title, image: c.image || null, buttons: p.buttons, anchor: p.body ? 'body' : 'world',
+    live.emit('panel_shown', { id, title: p.title, from: p.from, image: c.image || null, buttons: p.buttons, anchor: p.body ? 'body' : 'world',
       ...(p.body ? { side: p.body.deg < 0 ? 'left' : 'right' } : {}) });
     const done = new Promise((resolve) => {
       p.resolve = resolve;

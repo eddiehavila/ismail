@@ -428,6 +428,11 @@ def test_a_panel_can_ride_with_the_person(stage):
         c = page.seen[-1]
         # a body panel is a message: it never holds the command queue unless asked to
         assert (c['type'], c['anchor'], c['side'], c['seconds'], c['wait']) == ('panel', 'body', 'left', 20, False)
+        OPS['stage_say'](scene='room', text='the cables are in', sender='crossroads film')
+        assert (page.seen[-1]['type'], page.seen[-1]['from']) == ('say', 'crossroads film')
+        OPS['stage_panel_show'](scene='room', title='from the dev', anchor='body', sender='stage dev')
+        c = page.seen[-1]
+        assert c['from'] == 'stage dev' and 'side' not in c    # the page puts a sender on its own side
         assert 'width' not in c                       # the page picks the narrower body width
         assert 'panel' in out
         with pytest.raises(OpError, match="anchor is 'world' or 'body'"):

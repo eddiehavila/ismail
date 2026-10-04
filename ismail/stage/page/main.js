@@ -112,8 +112,10 @@ live.handlers.say = async (c) => {
   if (ed.renderer.xr.isPresenting && age < 60000) {
     const words = String(c.text).split(/\s+/).length;
     // long enough to read and to still be there when the speech arrives (the user: "I didn't catch that last card")
-    panels.show({ panel_id: 'caption_' + Date.now(), title: 'Claude', text: String(c.text), seconds: Math.min(120, 25 + words * 0.8),
-      width: 0.46, quiet: true, wait: false });
+    // a message, so it rides with the user on its sender's side (the user, 2026-10-04: "it kind of needs to stick to
+    // me"), and says who it is from
+    panels.show({ panel_id: 'caption_' + Date.now(), title: c.from ? '' : 'Claude', from: c.from, text: String(c.text),
+      seconds: Math.min(120, 25 + words * 0.8), quiet: true, wait: false, anchor: 'body', side: c.side });
   }
   return age >= 20000 ? { ...r, spoken: false, stale_s: Math.round(age / 1000) } : r;
 };

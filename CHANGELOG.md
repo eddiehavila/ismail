@@ -51,6 +51,10 @@
   floor, keep-out boxes, the default scene, the build script) lives in `scenes/<name>/world.json` and
   `scenes/stage.json`. Session files (client log, speech cache, bundle, update notes) go to `<scenes>/_stage/`.
 - One server per port: a busy port is refused (Windows let two servers bind one port and split the live link).
+- Every panel and caption says who it is from: `stage_say(sender=)`, `stage_panel_show(sender=)` (a command's `from`)
+  draw a chip and border in that name's colour, fixed per name, and a sender's body panels keep to one side. The VR
+  card that goes with a spoken line rides with the person now, titled by its sender instead of "Claude". The
+  server's own lines are from "stage".
 - Pin touches land: a to-do pin's card takes a fingertip as well as its diamond, a pin re-arms after 1.2 s even
   if the hand stayed close (it needed the tip to leave by 18 cm), the gaze window is 60 degrees, and a tip at a pin
   that does not open it says why (`pin_touch_missed`). A finger gun at a pin does not travel.
