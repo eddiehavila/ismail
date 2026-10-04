@@ -458,6 +458,17 @@ export function initLive(ed, desktop, xr) {
       for (const fn of codeV.on) fn(v);
     }
   }
+  // who is listening (the server's presence: an agent following the live log) and which server process answers; the
+  // user spent nine minutes in VR talking to nobody (2026-10-04), so the headset shows it
+  const heard = { listening: null, server: null, on: [] };
+  function presence(j) {
+    if (!Array.isArray(j.listening)) return;
+    const was = heard.listening, wasSrv = heard.server, now = JSON.stringify(j.listening);
+    if (now === was && j.server === wasSrv) return;
+    heard.listening = now; heard.server = j.server;
+    const ch = { listening: j.listening, first: was === null, server_changed: wasSrv !== null && j.server !== wasSrv };
+    for (const fn of heard.on) fn(ch);
+  }
   let loadedV = null, seenV = null, reloading = false, versionPath = 'live';
   let wrapSwap = null;                                       // scenes.js: run a reload under the construct
   async function readVersion() {
@@ -468,6 +479,7 @@ export function initLive(ed, desktop, xr) {
         if (!j.glb || !j.manifest) throw new Error('missing file');
         if (j.code_name) codeV.name = j.code_name;
         code(j.code);
+        presence(j);
         return { key: JSON.stringify([j.glb, j.manifest]), complete: j.manifest[0] >= j.glb[0] };
       }
       if (r.status !== 404) throw new Error(r.status);
@@ -544,5 +556,5 @@ export function initLive(ed, desktop, xr) {
   }
 
   const setWrapSwap = (fn) => { wrapSwap = fn; };
-  return { pageId, emit, onEmit: (fn) => watchers.push(fn), gather, postState, handlers, say, setMarker, clearMarkers, highlight, markers, highlights, pageLoaded, hotReload, codeV, setWrapSwap };
+  return { pageId, emit, onEmit: (fn) => watchers.push(fn), gather, postState, handlers, say, setMarker, clearMarkers, highlight, markers, highlights, pageLoaded, hotReload, codeV, heard, setWrapSwap };
 }

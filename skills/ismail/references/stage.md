@@ -34,6 +34,26 @@ person and an agent change the same scene.
   An open page swaps it in under the construct, never while the person is in VR.
 - **Changes they will notice:** `stage_note(scenes, title, level)` feeds the "updates ready" card in the headset.
 
+## Listening while the person is in
+
+The person once spent nine minutes in the headset, sent six voice notes and asked "Is there a reason you're not
+using voice to talk to me?": no agent was polling, so nobody heard. The live link is pull only, so listening is
+something you do.
+
+- **Listen before you tell them to go in.** `stage_listen(who="<your name>")` in a loop (pass `since=` the `last`
+  it returned; it waits up to `wait=` seconds), or `stage_events(scene=, since=)` on one scene. While you call it at
+  least every 40 s the headset shows "listening: <your name>" on entering VR and whenever that changes; with nobody
+  it shows "nobody is listening" in amber. `stage_presence()` says whether they are in, where, the last note and
+  who is listening.
+- **No silent notes.** A note you were handed but did not answer (`stage_say`, `stage_voice_ack`) within 6 s is
+  acked for you, so they hear it landed; a note nobody was handed gets "Nobody is listening right now. I saved your
+  note." out loud and goes to `_stage/unread.jsonl`. Read the unread notes when you start listening.
+- **Hooks** start an agent when nobody is running one: `~/.ismail/stage_hooks.json` or `<scenes>/_stage/hooks.json`,
+  `{"entered_vr": [...], "left_vr": [...], "voice_note": [...], "voice_unheard": [...]}`, each a shell command (or an
+  argv list) run with `STAGE_EVENT`, `STAGE_SCENE`, `STAGE_TEXT`, `STAGE_FILE`, `STAGE_EVENT_ID`, `STAGE_URL`,
+  `STAGE_SCENES` in its environment (a toast, a webhook, `claude -p "..."`, `codex exec "..."`); output goes to
+  `_stage/hooks.log`.
+
 ## Deriving a scene
 
 A remodel, another era, the same place at dawn: a scene made from another is derived, never rebuilt. One build of a

@@ -103,7 +103,7 @@ def page_cmd(scene, ctype, fields, timeout=30):
     t_end = time.time() + timeout
     while time.time() < t_end:
         for s in since:
-            got = http(rec, f'live/events?{q(scene=s, since=since[s], wait=min(10 if len(since) == 1 else 1, max(1, t_end - time.time())), limit=500)}',
+            got = http(rec, f'live/events?{q(scene=s, since=since[s], wait=min(10 if len(since) == 1 else 1, max(1, t_end - time.time())), limit=500, who="op")}',
                        timeout=20)
             since[s] = got['last']
             for e in got['events']:
