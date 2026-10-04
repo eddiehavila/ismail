@@ -127,12 +127,22 @@ export function initActions(ed, hands, panels, live, takes) {
         // 2026-10-03: "when I clicked turn him the menu disappeared")
         cur = id + '_' + (++round);
         followPanels.set(it.name, cur);
+        const pinned = takes.actors.pinsOf ? takes.actors.pinsOf(it.name) : [];
         const r = await panels.show({ panel_id: cur, title: (rec ? '● Recording: ' : 'Following: ') + ed.label(it),
+          // the mic: talking while following is not heard unless it is a voice note (the user, 2026-10-04, spoke a
+          // minute into a Follow and none of it reached Claude)
+          text: (pinned.length ? '📌 pinned: ' + pinned.join(', ') + '. ' : '') + '🎙 Talking is not recorded: phone gesture for a voice note.',
           buttons: [rec ? '■ Stop take' : '■ Stop', '⟲ Turn him', st.mirror ? '⇄ Mirror: on' : '⇄ Mirror: off',
-            st.mode === 'walk' ? '📍 Dance in place' : '🚶 Walk with me', ...(rec ? [] : ['⇲ Move him here'])],
+            st.mode === 'walk' ? '📍 Dance in place' : '🚶 Walk with me', pinned.includes('hips') ? '📌 Unpin hips' : '📌 Pin hips',
+            ...(rec ? [] : ['⇲ Move him here'])],
           near, width: 0.46, quiet: true, wait: true });
         const ans = r && r.answer;
         if (!ans) break;
+        if (ans === '📌 Pin hips' || ans === '📌 Unpin hips') {
+          try { takes.actors.anchor({ person: it.name, joint: 'hips', ...(ans === '📌 Pin hips' ? { to: 'here' } : { clear: true }) }); }
+          catch (e) { live.emit('voice_error', { where: 'pin', error: String(e.message || e) }); }
+          continue;
+        }
         if (ans === '⟲ Turn him') { takes.actors.turnBy(it.name, 45); continue; }
         if (ans.startsWith('⇄ Mirror')) { takes.actors.setMirror(it.name, !st.mirror); continue; }
         if (ans === '🚶 Walk with me' || ans === '📍 Dance in place') { takes.actors.setMode(it.name, ans === '🚶 Walk with me' ? 'walk' : 'place'); continue; }

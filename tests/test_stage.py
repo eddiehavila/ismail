@@ -466,3 +466,32 @@ def test_the_last_follow_can_be_kept_by_an_agent(stage):
             OPS['stage_cmd'](scene='room', type='take_keep_last')
     finally:
         page.stop = True
+
+
+def test_a_follow_pin_goes_to_the_page(stage):
+    page = FakePage(stage['port'], 'room')
+    try:
+        OPS['stage_follow_anchor'](scene='room', person='person_bar_lean', to='stool_3')
+        c = page.seen[-1]
+        assert (c['type'], c['person'], c['joint'], c['to'], c['legs']) == ('follow_anchor', 'person_bar_lean', 'hips', 'stool_3', 'keep_pose')
+        OPS['stage_follow_anchor'](scene='room', person='person_bar_lean', joint='feet', to=[1.0, 2.0, 0.3])
+        assert page.seen[-1]['to'] == [1.0, 2.0, 0.3]
+        with pytest.raises(OpError, match="joint is"):
+            OPS['stage_follow_anchor'](scene='room', person='p', joint='knee', to='stool_3')
+        with pytest.raises(OpError, match='to='):
+            OPS['stage_follow_anchor'](scene='room', person='p')
+    finally:
+        page.stop = True
+
+
+def test_follow_anchor_takes_to_from_the_cli_as_a_list_or_a_word(stage):
+    from ismail.__main__ import parse_args
+    page = FakePage(stage['port'], 'room')
+    try:
+        for arg, want in (('to=[1,2,0]', [1, 2, 0]), ('to=here', 'here'), ('to=stool_3', 'stool_3')):
+            kw = parse_args(['person=person_bar_lean', arg])
+            assert kw['to'] == want
+            OPS['stage_follow_anchor'](scene='room', **kw)
+            assert page.seen[-1]['to'] == want
+    finally:
+        page.stop = True

@@ -201,6 +201,9 @@ A person in a headset cannot see your terminal. Contact is part of the interface
   puts it just out of view beside where their body faces (not their head: looking left or right finds it, looking
   ahead does not), with `seconds` or until they close it, and never holds your command queue. Panels and speech wait while they talk, and for 3 s after a
   note, because they often send the next one at once.
+- **Seat a person before they are followed.** `stage_follow_anchor(person, joint="hips", to="<their seat>")` keeps
+  them seated while the person drives them sitting or standing; a Follow keeps nothing, so keep a good one with
+  `stage_take_keep_last`.
 - **Say who you are.** Pass `sender=` (your name as the person knows it, e.g. "crossroads film") on `stage_say` and
   `stage_panel_show`: the card shows it in your colour, on your side. Several agents can be talking to them at once.
 
