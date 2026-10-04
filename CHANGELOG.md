@@ -33,6 +33,9 @@
   saved your note.") and kept in `_stage/unread.jsonl`. Hooks (`~/.ismail/stage_hooks.json`; a song's
   `_stage/hooks.json` only when that file trusts its folder) run commands on entered_vr, left_vr, voice_note and voice_unheard. GET /live/presence, `_stage/presence.json`,
   `stage_presence`. The page also says when the server behind it restarted. (After six notes went unheard.)
+- Desktop movement: the wheel steps forward where you look (along the floor in walk mode), the orbit pivot
+  travelling with the camera, so zoom no longer shrinks the orbit until the wheel stalls; walk and key speed scale
+  with the scene (3.5 m/s in the Crossroads club, was 1.2), Shift 3x.
 - Scene lineage (M75): a scene's world.json may say `derives_from` (and `pass`, `pass_env`, `assets`).
   `stage_scene_export` builds a derived scene from its ancestor's full build, then its line's passes in the bridge
   (`VR_PASS`), the line's edits merged (the variant's win) and the Quest diet in the bridge (`VR_DIET`), so a remodel
