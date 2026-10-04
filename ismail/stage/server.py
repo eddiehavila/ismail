@@ -1,7 +1,13 @@
-"""Static files + save endpoint + live link for the VR scene editor.
+"""The stage server: the page (ismail/stage/page), a song's scenes, and the live link between the page and agents.
 
-  python server.py                 http://127.0.0.1:8862/?scene=lucy   (desktop)
-  python server.py --tls           https://<lan-ip>:8863/?scene=lucy   (Quest; run make_cert.py once first)
+  python -m ismail.stage.server --scenes <song>/video/vr/scenes            http://127.0.0.1:8862/   (desktop)
+  python -m ismail.stage.server --scenes <dir> --tls --cert c.pem --key k.pem   https on the LAN (Quest)
+  (behind `tailscale serve`, plain http on 127.0.0.1 is enough: the tailnet gives the headset https)
+
+The page is served from the package; everything a session writes (logs, the speech cache, the built bundle, the
+update notes) goes to <scenes>/_stage/, never into the package. One server per port: a busy port is refused (on
+Windows two servers could both bind one port and split the live link between them). A running server records
+itself in ~/.ismail/stage/<port>.json, which the stage_* ops read.
 
 GET  /scenes             -> ["lucy", ...]  (folders under scenes/ that hold a scene.glb)
 GET  /edits?scene=<name> -> the scene's edits.json, or null
@@ -42,10 +48,32 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-ROOT = Path(__file__).resolve().parent
-SCENES = ROOT / 'scenes'
-FOOTAGE = ROOT.parent / 'footage' / 'quest'                # headset recordings sent from upload.html
+PAGE = Path(__file__).resolve().parent / 'page'
+SCENES = Path('scenes').resolve()                          # set by configure(): the song's scenes folder
+STATE = SCENES / '_stage'                                  # logs, speech cache, bundle, update notes
+FOOTAGE = STATE / 'footage'                                # headset recordings sent from upload.html
+PHRASES = STATE / 'speech'                                 # short lines Claude says, rendered once (spoken earcons)
+CONFIG = {}                                                # ~/.ismail/stage.json: {"esbuild": path, "speak": url}
 NAME = re.compile(r'^[A-Za-z0-9_\-]+$')
+
+
+def registry_dir():
+    return Path(os.environ.get('ISMAIL_STAGE_REGISTRY') or Path.home() / '.ismail' / 'stage')
+
+
+def configure(scenes, footage=None, state=None):
+    """Point the server at a scenes folder (and where headset footage and session files go)."""
+    global SCENES, STATE, FOOTAGE, PHRASES, SPEAK
+    SCENES = Path(scenes).resolve()
+    STATE = Path(state).resolve() if state else SCENES / '_stage'
+    FOOTAGE = Path(footage).resolve() if footage else STATE / 'footage'
+    PHRASES = STATE / 'speech'
+    STATE.mkdir(parents=True, exist_ok=True)
+    try:
+        CONFIG.update(json.loads((Path.home() / '.ismail' / 'stage.json').read_text(encoding='utf-8')))
+    except (OSError, ValueError):
+        pass
+    SPEAK = os.environ.get('ISMAIL_SPEAK') or CONFIG.get('speak') or SPEAK
 
 
 def scene_names():
@@ -57,25 +85,32 @@ SRC_MTIME = Path(__file__).stat().st_mtime_ns     # a server running older code 
 
 def code_version():
     """The newest page file (js, html, css, earcons): the page offers a reload when this changes."""
-    here = Path(__file__).parent
-    fs = [*here.glob('*.js'), *here.glob('*.html'), *here.glob('*.css'), *here.glob('sounds/*.wav')]
-    fs = [f for f in fs if f.name != 'bundle.js' and not f.name.startswith('history_')]
+    fs = [*PAGE.glob('*.js'), *PAGE.glob('*.html'), *PAGE.glob('*.css'), *PAGE.glob('sounds/*.wav')]
     return max((f.stat().st_mtime_ns for f in fs), default=0)
 
 
 BUNDLE_LOCK = threading.Lock()
 
 
+def esbuild_path():
+    """esbuild for the bundle: ESBUILD, or ~/.ismail/stage.json "esbuild", or none (the page loads its modules)."""
+    p = os.environ.get('ESBUILD') or CONFIG.get('esbuild')
+    return p if p and Path(p).exists() else None
+
+
 def bundle():
-    """bundle.js, rebuilt (build_bundle.mjs, esbuild) when a page module is newer: the headset boots in one request."""
-    here = Path(__file__).parent
-    out = here / 'bundle.js'
+    """bundle.js in the state folder, rebuilt (build_bundle.mjs, esbuild) when a page module is newer: the headset
+    boots in one request. None without esbuild."""
+    out = STATE / 'bundle.js'
+    eb = esbuild_path()
     with BUNDLE_LOCK:
-        src = [f for f in here.glob('*.js') if f.name != 'bundle.js' and not f.name.startswith('history_')]
-        newest = max(f.stat().st_mtime_ns for f in src)
+        newest = max(f.stat().st_mtime_ns for f in PAGE.glob('*.js'))
         if not out.is_file() or out.stat().st_mtime_ns < newest:
+            if not eb:
+                return None
             import subprocess
-            r = subprocess.run(['node', str(here / 'build_bundle.mjs')], cwd=here, capture_output=True, text=True, timeout=120)
+            r = subprocess.run(['node', str(PAGE / 'build_bundle.mjs')], cwd=PAGE, capture_output=True, text=True, timeout=120,
+                               env={**os.environ, 'ESBUILD': eb, 'BUNDLE_OUT': str(out)})
             print('[bundle]', (r.stdout + r.stderr).strip()[-600:], flush=True)
             if r.returncode != 0:
                 return None
@@ -180,7 +215,7 @@ def server_event(name, ev):
     return e
 
 
-SPEAK = 'http://127.0.0.1:8765'           # speakwright (D:\speakwright), started CPU-only for the stage
+SPEAK = 'http://127.0.0.1:8765'           # speech in and out: an OpenAI-style audio server (here speakwright)
 
 
 def stt(audio, filename):
@@ -202,7 +237,6 @@ def tts(text, voice=None):
         return r.read()
 
 
-PHRASES = ROOT / 'sounds' / 'speech'         # short lines Claude says, rendered once (the user's idea: spoken earcons)
 PHRASE_MAX = 160
 
 
@@ -308,7 +342,16 @@ class Handler(SimpleHTTPRequestHandler):
                       '.glb': 'model/gltf-binary', '.html': 'text/html', '.css': 'text/css'}
 
     def __init__(self, *a, **kw):
-        super().__init__(*a, directory=str(ROOT), **kw)
+        super().__init__(*a, directory=str(PAGE), **kw)
+
+    def translate_path(self, path):
+        """The page from the package; scenes/<name>/... from the scenes folder (nothing above it)."""
+        p = urlparse(path).path
+        if p.startswith('/scenes/'):
+            from urllib.parse import unquote
+            rel = [x for x in unquote(p[len('/scenes/'):]).split('/') if x and x not in ('.', '..')]
+            return str(SCENES.joinpath(*rel))
+        return super().translate_path(path)
 
     def end_headers(self):
         self.send_header('Cache-Control', 'no-store')
@@ -502,6 +545,18 @@ class Handler(SimpleHTTPRequestHandler):
                 return self._json(400, {'error': str(e)})
         if u.path == '/scenes':
             return self._json(200, scene_names())
+        if u.path == '/stage':                     # what this server serves: the default scene first
+            from .world import default_scene
+            return self._json(200, {'scenes': scene_names(), 'default': default_scene(SCENES), 'code': code_version()})
+        if u.path == '/world':                     # a scene's world.json with defaults (who plays whom, facings, ...)
+            from .world import load_world
+            name = parse_qs(u.query).get('scene', [''])[0]
+            if not NAME.match(name) or not (SCENES / name).is_dir():
+                return self._json(400, {'error': f'no scene {name!r}'})
+            return self._json(200, load_world(SCENES, name))
+        if u.path == '/updates.json':              # the update notes (update_note), newest code changes first
+            f = STATE / 'updates.json'
+            return self._json(200, json.loads(f.read_text(encoding='utf-8')) if f.is_file() else {'updates': []})
         if u.path == '/livestream':
             return self._livestream(parse_qs(u.query))
         if u.path in ('/waypoints', '/cues'):     # the scene's pins (waypoints.js) or cues (cues.js), [] when none
@@ -682,7 +737,7 @@ class Handler(SimpleHTTPRequestHandler):
             who = f"{self.client_address[0]} {str(body.get('ua', ''))[:60]}"
             ents = [e for e in body.get('entries', []) if isinstance(e, dict)][:200]
             stamp = time.strftime('%H:%M:%S')
-            append_lines(Path(__file__).parent / 'clientlog.jsonl', [{'at': stamp, 'who': who, 'page': body.get('page'), **e} for e in ents])
+            append_lines(STATE / 'clientlog.jsonl', [{'at': stamp, 'who': who, 'page': body.get('page'), **e} for e in ents])
             for e in ents:
                 if e.get('level') == 'beat':
                     continue
@@ -731,29 +786,56 @@ class Handler(SimpleHTTPRequestHandler):
             super().log_message(fmt, *args)
 
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument('--tls', action='store_true', help='https on the LAN using certs/cert.pem + certs/key.pem')
+class Server(ThreadingHTTPServer):
+    allow_reuse_address = os.name != 'nt'          # Windows: SO_REUSEADDR lets a second server bind the same port
+    daemon_threads = True
+
+
+def register(port, scheme, host):
+    d = registry_dir()
+    d.mkdir(parents=True, exist_ok=True)
+    rec = {'pid': os.getpid(), 'port': port, 'host': host, 'scheme': scheme, 'scenes': str(SCENES), 'state': str(STATE),
+           'started': time.time(), 'url': f'{scheme}://127.0.0.1:{port}/'}
+    (d / f'{port}.json').write_text(json.dumps(rec, indent=1), encoding='utf-8')
+    return d / f'{port}.json'
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description='The ismail stage server (VR scene editor and live link).')
+    ap.add_argument('--scenes', required=True, help="the song's scenes folder (one subfolder per scene, each with scene.glb)")
     ap.add_argument('--port', type=int)
     ap.add_argument('--host')
-    a = ap.parse_args()
+    ap.add_argument('--footage', help='where headset recordings from upload.html go (default <scenes>/_stage/footage)')
+    ap.add_argument('--tls', action='store_true', help='https on the LAN (needs --cert and --key)')
+    ap.add_argument('--cert')
+    ap.add_argument('--key')
+    a = ap.parse_args(argv)
+    configure(a.scenes, a.footage)
     port = a.port or (8863 if a.tls else 8862)
     host = a.host or ('0.0.0.0' if a.tls else '127.0.0.1')
-    srv = ThreadingHTTPServer((host, port), Handler)
+    try:
+        srv = Server((host, port), Handler)
+    except OSError as e:
+        raise SystemExit(f'port {port} is busy ({e}); another stage server may be running: stage_status, or pick --port')
     scheme = 'http'
     if a.tls:
-        cert, key = ROOT / 'certs' / 'cert.pem', ROOT / 'certs' / 'key.pem'
-        if not (cert.is_file() and key.is_file()):
-            raise SystemExit('no certs found: run `python make_cert.py` first')
+        if not (a.cert and a.key and Path(a.cert).is_file() and Path(a.key).is_file()):
+            raise SystemExit('--tls needs --cert and --key (a self-signed pair, e.g. from the openssl command line)')
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-        ctx.load_cert_chain(cert, key)
+        ctx.load_cert_chain(a.cert, a.key)
         srv.socket = ctx.wrap_socket(srv.socket, server_side=True)
         scheme = 'https'
-    print(f'crossroads-vr on {scheme}://{host}:{port}/?scene=lucy  scenes: {scene_names()}', flush=True)
+    reg = register(port, scheme, host)
+    print(f'ismail stage on {scheme}://{host}:{port}/  scenes {SCENES}: {scene_names()}', flush=True)
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
         pass
+    finally:
+        try:
+            reg.unlink()
+        except OSError:
+            pass
 
 
 if __name__ == '__main__':

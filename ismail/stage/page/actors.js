@@ -11,30 +11,23 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { JOINTS } from './hands.js';
 import { cutout } from './editor.js';
+import { world } from './world.js';
 
-export const ACTOR_OF = {
-  person_bartender: 'bf_pete', person_bar_lean: 'bf_sam', person_couple_1_m: 'bf_jo', person_couple_1_f: 'bf_mae',
-  person_couple_2_m: 'bf_earl', person_couple_2_f: 'bf_ruby', person_couple_3_m: 'bf_otis', person_couple_3_f: 'bf_hattie',
-  // the band (the stage's stand-ins), each their own body: the user, 2026-10-03: "I'd rather not use cloned couples,
-  // but give them distinct looks so that the scene tracks"
-  cyrus: 'cyrus', jimmy_bass: 'jimmy', dell_drums: 'dell',
-};
+// who plays whom, facings, partners and the floor are the scene's (world.json via world.js), not the runtime's
 // where a person stands: the bottom of their stand-in (the band is up on the stage), the room's floor without one
-const FLOOR = 0.09;
 // which way a person faces: a person keeps THEIR OWN facing while the user drives them, whichever way the user faces
 // (the user, 2026-10-03, at the bar: "I want him to be facing the same direction that he's facing ... I can see what
 // his hands are doing and I can see his face"). A couple faces the partner (person_couple_k_m <-> _f; the posed
 // people's facing is in their meshes, not their objects); the people with a known spot face the way the room says
 // (Blender xy: the bartender the room, Sam the bar, the band the floor); anyone else faces the user where they stand.
-const FACING_B = { person_bartender: [0, -1], person_bar_lean: [0, 1], cyrus: [-1, 0], jimmy_bass: [-1, 0], dell_drums: [-1, 0] };
 function facingOf(ed, person, at, user) {
-  const m = /^person_couple_(\d+)_(m|f)$/.exec(person);
-  const other = m && ed.byName.get(`person_couple_${m[1]}_${m[2] === 'm' ? 'f' : 'm'}`);
+  const pn = world().partners[person];
+  const other = pn && ed.byName.get(pn);
   if (other) {
     const d = other.obj.getWorldPosition(new THREE.Vector3()).sub(at).setY(0);
     if (d.lengthSq() > 1e-4) return d.normalize();
   }
-  const fb = FACING_B[person];
+  const fb = world().facings[person];
   if (fb) return new THREE.Vector3(fb[0], 0, -fb[1]).normalize();            // Blender (x, y) -> three (x, -y)
   if (user) {
     const d = user.clone().sub(at).setY(0);
@@ -89,6 +82,7 @@ function mirrorFrame(f, st) {
   return g;
 }
 const groundOf = (it) => {
+  const FLOOR = world().floor || 0;
   if (!it) return FLOOR;
   const y = new THREE.Box3().setFromObject(it.obj).min.y;
   return Number.isFinite(y) && y > -0.5 && y < 3 ? Math.max(FLOOR, y) : FLOOR;
@@ -267,8 +261,8 @@ export function initActors(ed, live) {
 
   // ---- play / stop
   async function play(c) {
-    const person = c.person, who = c.actor || ACTOR_OF[person];
-    if (!who) throw new Error('no actor for ' + person);
+    const person = c.person, who = c.actor || world().actors[person];
+    if (!who) throw new Error('no actor for ' + person + ' (world.json actors, or pass actor)');
     const base = `scenes/${encodeURIComponent(c.assets || scn())}/`;
     const tbase = `scenes/${encodeURIComponent(c.takes || scn())}/takes/${encodeURIComponent(c.take)}/`;
     const [rig0, meta, txt] = await Promise.all([load(who, base), fetch(tbase + 'meta.json', { cache: 'no-store' }).then((r) => r.json()),
@@ -285,7 +279,7 @@ export function initActors(ed, live) {
     const rig = playing.size && [...playing.values()].some((p) => p.rig.who === who) ? await cloneRig(rig0) : rig0;
     const J = Object.fromEntries((meta.joints || []).map((n, i) => [n, i]));
     // scale: the user's standing head height to the actor's
-    const floor = FLOOR;                                    // the user's floor while recording
+    const floor = world().floor || 0;                       // the user's floor while recording
     const heads = frames.map((f) => f.head[1]).sort((a, b) => a - b);
     // the median: a take can hold moments raised on the thumbstick, which a high percentile took for standing height
     const userH = heads[Math.floor(heads.length * 0.5)] - floor, actorH = rig.rest.head.p.y - rig.rest.foot_l.p.y + 0.08;
@@ -317,13 +311,13 @@ export function initActors(ed, live) {
   // ---- follow: the person moves with the user, live, from where they stand (no take needed; a take on a person
   // turns it on while recording). Same puppet map as a played take, fed the user's frame of this moment.
   async function follow(c) {
-    const person = c.person, who = c.actor || ACTOR_OF[person];
-    if (!who) throw new Error('no actor for ' + person);
+    const person = c.person, who = c.actor || world().actors[person];
+    if (!who) throw new Error('no actor for ' + person + ' (world.json actors, or pass actor)');
     if (!source) throw new Error('no live body source');
     const rig0 = await load(who, `scenes/${encodeURIComponent(c.assets || scn())}/`);
     stop({ person });
     const rig = [...playing.values()].some((p) => p.rig.who === who) ? await cloneRig(rig0) : rig0;
-    const f0 = source(), floor = FLOOR;
+    const f0 = source(), floor = world().floor || 0;
     const userH = Math.max(0.5, f0.head[1] - floor), actorH = rig.rest.head.p.y - rig.rest.foot_l.p.y + 0.08;
     const s = THREE.MathUtils.clamp(actorH / userH, 0.6, 1.4);
     const it = ed.byName.get(person);
@@ -423,7 +417,7 @@ export function initActors(ed, live) {
     }
   }
   ed.preRender.push(update);
-  const canPlay = (person) => !!ACTOR_OF[person];
+  const canPlay = (person) => !!world().actors[person];
   const setSource = (fn) => { source = fn; };
   // where a playing take is now (its own clock, seconds) and its span
   const at = (person) => { const st = playing.get(person); return st && st.frames ? { t: st.frames[st.i].t, t0: st.frames[0].t, t1: st.frames[st.frames.length - 1].t } : null; };

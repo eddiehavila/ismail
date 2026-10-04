@@ -25,8 +25,12 @@ import { initScenes } from './scenes.js';
 import { initWaypoints } from './waypoints.js';
 import { initCues } from './cues.js';
 import { initAnchors } from './anchor.js';
+import { loadWorld } from './world.js';
 
-const name = new URLSearchParams(location.search).get('scene') || 'lucy';
+// the scene: ?scene=, else the server's default (scenes/stage.json "default", else its first scene)
+const name = new URLSearchParams(location.search).get('scene')
+  || await fetch('stage', { cache: 'no-store' }).then((r) => r.json()).then((j) => j.default).catch(() => null) || '';
+await loadWorld(name);
 document.getElementById('scenename').textContent = name;
 const ed = new Editor(name);
 initReveal(ed);                                    // everything enters a piece at a time (reveal.js)
@@ -73,7 +77,7 @@ live.onEmit((type) => { if (type === 'scene_reload' && live.handlers.trees_reloa
 const stageClock = initClock(ed, live, xr, panels);   // the 4D timeline: keyed objects, tree growth
 window.VR_clock = stageClock;
 window.VR_trees = initTrees(ed, live, stageClock);   // grow_tree.py's trees, grown on the clock
-fetch(`scenes/${encodeURIComponent(new URLSearchParams(location.search).get('scene') || 'lucy')}/names.json`, { cache: 'no-store' })
+fetch(`scenes/${encodeURIComponent(name)}/names.json`, { cache: 'no-store' })
   .then((r) => (r.ok ? r.json() : {})).then((n) => { ed.names = n; }).catch(() => {});
 ed.preRender.push(() => { if (actors.playing.size) wake(); });   // a playing actor keeps the desktop view drawing
 live.handlers.actor_play = (c) => actors.play(c);
@@ -81,6 +85,7 @@ live.handlers.actor_stop = (c) => actors.stop(c);
 window.VR_actors = actors;
 // scenes from inside: go to another scene, or take a re-export of this one, under the construct (scenes.js)
 window.VR_scenes = initScenes(ed, live, xr, construct, { get actors() { return actors; }, get view() { return takes4d; } });
+ed.addEventListener('switched', () => loadWorld(ed.sceneName));
 ed.addEventListener('switched', () => fetch(`scenes/${encodeURIComponent(ed.sceneName)}/names.json`, { cache: 'no-store' })
   .then((r) => (r.ok ? r.json() : {})).then((n) => { ed.names = n; }).catch(() => { ed.names = {}; }));
 panels.registerPokeable(xr.panelMesh, (uv) => xr.pressUV(uv), (uv) => xr.hoverUV(uv));   // the colour panel takes a fingertip too

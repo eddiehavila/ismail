@@ -14,6 +14,7 @@
 // anim_save, anim_clear {name?}, timeline {show}, growth {name, t0, t1}. Events: clock {t, playing}, keyed, anim_saved.
 import * as THREE from 'three';
 import { GIZMO } from './editor.js';
+import { world } from './world.js';
 
 const W = 0.9, H = 0.16, CW = 1800, CH = 320;                  // the bar in metres and its canvas
 const BTN = [['play', '▶'], ['back', '⏮'], ['step-', '◀'], ['step+', '▶▶'], ['key', '◆'], ['auto', 'AUTO'], ['save', 'SAVE']];
@@ -80,16 +81,12 @@ export function initClock(ed, live, xrApi, panels) {
   // the eaves; above them the roof hides it) is not drawn (the user in VR, 2026-10-03: branches came through the storage
   // room's ceiling and the posters). The trees themselves should grow around the buildings (grow_tree.py); this is the
   // stage's safety net until then.
-  const KEEP_OUT = [
-    [6.4, 19.6, 6.6, 14.4, -1, 3.05],          // the Blue Front (blue_front_block.py: FX 6.5 .. BX 19.5, Y0 6.7 .. Y1 14.3, H 3.0)
-    [15.3, 19.6, 14.3, 17.6, -1, 2.75],        // the storage room behind it (bf_detail.back_room)
-    [-16.1, -7.9, 6.9, 17.1, -1, 4.05],        // J. T. Price's store (bf_ground.STORE, eaves 4.0)
-    [12.0, 16.0, -21.0, -11.6, -1, 3.25], [22.0, 26.0, -21.0, -11.6, -1, 3.25], [32.0, 36.0, -22.0, -12.6, -1, 3.25],   // the shotgun houses
-    [-34.0, -26.0, 33.0, 47.0, -1, 4.45],      // the church
-  ];
-  const koMin = KEEP_OUT.map(([x0, , , y1, z0]) => new THREE.Vector3(x0, z0, -y1));     // Blender (x, y, z) -> three (x, z, -y)
-  const koMax = KEEP_OUT.map(([, x1, y0, , , z1]) => new THREE.Vector3(x1, z1, -y0));
-  const KO_GLSL = `uniform vec3 uKoMin[${KEEP_OUT.length}]; uniform vec3 uKoMax[${KEEP_OUT.length}]; varying vec3 vKoW;`;
+  // the boxes come from the scene's world.json (keep_out); with none, one empty box keeps the shader valid
+  function keepOut() {
+    const ko = world().keep_out && world().keep_out.length ? world().keep_out : [[1e9, -1e9, 1e9, -1e9, 1e9, -1e9]];
+    return { n: ko.length, min: ko.map(([x0, , , y1, z0]) => new THREE.Vector3(x0, z0, -y1)),     // Blender -> three (x, z, -y)
+      max: ko.map(([, x1, y0, , , z1]) => new THREE.Vector3(x1, z1, -y0)) };
+  }
 
   // ---- growth: patch the materials of meshes that carry the attributes, once per tree (its top-level item)
   function patchGrowth() {
@@ -104,13 +101,14 @@ export function initClock(ed, live, xrApi, panels) {
       if (!g) { g = { name, u: { value: 1 } }; growers.push(g); }
       const wood = !!at._axis, card = !!at._pivot, from = wood && !!at._from;
       o.material = o.material.clone();
+      const KO = keepOut(), KO_GLSL = `uniform vec3 uKoMin[${KO.n}]; uniform vec3 uKoMax[${KO.n}]; varying vec3 vKoW;`;
       o.material.onBeforeCompile = (sh) => {
         sh.uniforms.uGrow = g.u;
-        sh.uniforms.uKoMin = { value: koMin };
-        sh.uniforms.uKoMax = { value: koMax };
+        sh.uniforms.uKoMin = { value: KO.min };
+        sh.uniforms.uKoMax = { value: KO.max };
         sh.fragmentShader = sh.fragmentShader.replace('#include <common>', `#include <common>
 ${KO_GLSL}`).replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>
-for (int i = 0; i < ${KEEP_OUT.length}; i++) if (all(greaterThan(vKoW, uKoMin[i])) && all(lessThan(vKoW, uKoMax[i]))) discard;`);
+for (int i = 0; i < ${KO.n}; i++) if (all(greaterThan(vKoW, uKoMin[i])) && all(lessThan(vKoW, uKoMax[i]))) discard;`);
         sh.vertexShader = sh.vertexShader.replace('#include <common>', `#include <common>
 ${KO_GLSL}
 uniform float uGrow; attribute float _born;
@@ -126,7 +124,7 @@ ${!wood && !card ? '  transformed *= on;' : ''} }`)
           .replace('#include <project_vertex>', `#include <project_vertex>
 vKoW = (modelMatrix * vec4(transformed, 1.0)).xyz;`);
       };
-      o.material.customProgramCacheKey = () => 'grow' + (wood ? 'w' : '') + (from ? 'f' : '') + (card ? 'c' : '') + 'ko' + KEEP_OUT.length;
+      o.material.customProgramCacheKey = () => 'grow' + (wood ? 'w' : '') + (from ? 'f' : '') + (card ? 'c' : '') + 'ko' + KO.n;
       o.frustumCulled = false;                                  // the bounds are the grown tree's; a sapling sits inside them
     });
     return growers.map((g) => g.name);
