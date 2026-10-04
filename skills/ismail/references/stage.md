@@ -47,7 +47,8 @@ crude stools, no bottles, block trees and cylinder people: every lesson already 
   (`pass` in world.json, `pass_env` for its switches). It removes, adds and repaints what changed; everything else
   is the source's. `stage_scene_export` runs the whole line (the source's build, every pass oldest first, the
   edits of the line merged with the variant's winning, the diet). Room scripts exec `os.environ["VR_BRIDGE"]` at
-  their end so the passes and the diet run.
+  their end so the passes and the diet run. A room with its own Quest merge defines `stage_diet()` and skips that
+  merge in its build when `VR_DIET` is set: a pass that runs after the merge finds one joined mesh, not the stools.
 - **Check it beside its source from the same camera** before the person sees it: the same view of both, side by
   side, and look for anything that went back to a blockout.
 - **Renders of a scene go in `renders/<scene>/`** (a script reads `STAGE_SCENE`), so a camera both scenes share

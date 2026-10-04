@@ -7,7 +7,9 @@ VR_EXPORT=<dir>   writes <dir>/scene.glb (Y-up glTF, modifiers applied, curves a
 VR_PASS=<f>[;<f>] a derived scene's passes (world.json derives_from + pass), run in order on the built parent
                   scene before the edits (each file is exec'd with S = the scene); paths joined by os.pathsep
 VR_DIET=1         the Quest diet (quest.py next to this file, found through VR_BRIDGE) after the passes and
-                  edits, before the export: merged groups, triangle and texture budgets, MakeHuman skin
+                  edits, before the export: merged groups, triangle and texture budgets, MakeHuman skin.
+                  A room script that defines stage_diet() before exec'ing this file gets its own diet instead
+                  (it must skip that diet in its build when VR_DIET is set, so the passes see whole objects)
 VR_EDITS=<file>   applies an edits.json written by the editor (Blender world space, Z-up):
                   {"objects": {name: {"location": [x,y,z], "quaternion": [w,x,y,z], "scale": [x,y,z]}},
                    "lights": {name: {"energy": W, "color": [r,g,b]}},
@@ -164,8 +166,11 @@ if os.environ.get('VR_EDITS'):
 if os.environ.get('VR_DIET') and os.environ.get('VR_EXPORT'):
     import sys as _sys
     _sys.path.insert(0, os.path.dirname(os.environ.get('VR_BRIDGE') or os.path.abspath('.')))
-    import quest as _quest                                          # noqa: E402
-    _quest.quest_diet()
+    if callable(globals().get('stage_diet')):                      # the room's own diet (merges it built for)
+        stage_diet()                                                # noqa: F821
+    else:
+        import quest as _quest                                      # noqa: E402
+        _quest.quest_diet()
 if os.environ.get('VR_EXPORT'):
     vr_export(os.environ['VR_EXPORT'])
     import sys
