@@ -60,11 +60,11 @@ def test_a_clip_arrives_in_chunks_and_comes_back_as_words_on_the_follow_clock(st
     monkeypatch.setattr(S, 'stt_words', fake_stt)
     _post(port, f'perf/meta?scene=room&perf={perf}', {'id': perf, 'person': 'person_bar_lean', 'markers': [{'t': 2.0, 'label': 'legs', 'by': 'agent'}]})
     half = len(data) // 2
-    _raw(port, f'voice/perf?scene=room&perf={perf}&clip=2&seq=0', data[:half], 'audio/ogg')
-    _raw(port, f'voice/perf?scene=room&perf={perf}&clip=2&seq=1', data[half:], 'audio/ogg')
+    _raw(port, f'voice/perf?scene=room&perf={perf}&clip=2&seq=0', data[:half], 'audio/wav')
+    _raw(port, f'voice/perf?scene=room&perf={perf}&clip=2&seq=1', data[half:], 'audio/wav')
     _raw(port, f'voice/perf?scene=room&perf={perf}&clip=2&end=1&at=12.5&seconds=1.8&by=agent', b'')
     d = stage['scenes'] / 'room' / 'performances' / perf
-    assert (d / 'clip_2.ogg').read_bytes() == data                       # the chunks, in order
+    assert (d / 'clip_2.wav').read_bytes() == data                       # the chunks, in order
     for _ in range(100):
         got = _events(port, {'perform_clip'})
         if got:
@@ -86,7 +86,7 @@ def test_an_old_speech_server_still_gives_the_text(stage, monkeypatch, tmp_path)
     wav = tmp_path / 'v.wav'
     _voice_wav(wav)
     monkeypatch.setattr(S, 'stt_words', lambda a, n: {'text': 'hello', 'words': None})
-    _raw(port, f'voice/perf?scene=room&perf={perf}&clip=1&seq=0', wav.read_bytes())
+    _raw(port, f'voice/perf?scene=room&perf={perf}&clip=1&seq=0', wav.read_bytes(), 'audio/wav')
     _raw(port, f'voice/perf?scene=room&perf={perf}&clip=1&end=1&at=0&seconds=1.8', b'')
     for _ in range(100):
         got = _events(port, {'perform_clip'})
@@ -206,3 +206,19 @@ def test_any_error_in_a_batch_rolls_back(stage, monkeypatch):
         assert OPS['stage_world'](scene='room') == before
     finally:
         page.stop = True
+
+
+def test_without_ffmpeg_a_webm_clip_keeps_its_text(stage, monkeypatch):
+    port, perf = stage['port'], 'p2'
+    monkeypatch.delenv('ISMAIL_FFMPEG', raising=False)
+    monkeypatch.setattr(P.shutil, 'which', lambda name: None)
+    monkeypatch.setattr(S, 'stt_words', lambda a, n: {'text': 'cut', 'words': [{'word': 'cut', 'start': 0.1, 'end': 0.4}]})
+    _raw(port, f'voice/perf?scene=room&perf={perf}&clip=1&seq=0', b'not really opus', 'audio/webm')
+    _raw(port, f'voice/perf?scene=room&perf={perf}&clip=1&end=1&at=3&seconds=1', b'')
+    for _ in range(100):
+        got = _events(port, {'perform_clip'})
+        if got:
+            break
+        time.sleep(0.05)
+    ev = got[-1]
+    assert ev['text'] == 'cut' and 'words' not in ev and ev['words_missing'].startswith('ffmpeg not found')

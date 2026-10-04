@@ -58,12 +58,24 @@ def set_clip(d, clip):
         return m
 
 
+class NoDecoder(RuntimeError):
+    """The clip's format needs ffmpeg and there is none."""
+
+
 def pcm(path):
-    """The clip as 16 kHz mono float32 (ffmpeg on PATH, or $ISMAIL_FFMPEG)."""
+    """The clip as 16 kHz mono float32: a WAV read with soundfile, anything else (the headset's webm/ogg opus) with
+    ffmpeg (on PATH, or $ISMAIL_FFMPEG)."""
     import os
+    if str(path).lower().endswith('.wav'):
+        import soundfile as sf
+        x, sr = sf.read(str(path), dtype='float32', always_2d=True)
+        x = x.mean(axis=1)
+        if sr != SR:                                   # linear resampling is plenty for a power envelope
+            x = np.interp(np.arange(int(len(x) * SR / sr)) * sr / SR, np.arange(len(x)), x).astype(np.float32)
+        return x
     exe = os.environ.get('ISMAIL_FFMPEG') or shutil.which('ffmpeg')
     if not exe:
-        raise RuntimeError('ffmpeg not found (needed to measure the voice); install it or set ISMAIL_FFMPEG')
+        raise NoDecoder('ffmpeg not found: words not snapped (install it or set ISMAIL_FFMPEG)')
     r = subprocess.run([exe, '-v', 'error', '-i', str(path), '-ac', '1', '-ar', str(SR), '-f', 's16le', '-'],
                        capture_output=True, timeout=120)
     if r.returncode:
@@ -115,13 +127,17 @@ def transcribe_clip(d, n, at, seconds, by, stt_words, emit):
         try:
             got = stt_words(files[0].read_bytes(), files[0].name)
             clip['text'] = got.get('text', '')
-            v = voiced(pcm(files[0]))
-            clip['voice'] = voice_span(v)
             if got.get('words') is None:
                 clip['words'] = None
                 clip['words_missing'] = 'the speech server gave no word times (restart speakwright for verbose_json)'
             else:
-                clip['words'] = snap_words(got['words'], v)
+                try:
+                    v = voiced(pcm(files[0]))
+                except NoDecoder as e:                    # the text still arrives; raw times never do
+                    clip['words'], clip['words_missing'] = None, str(e)
+                else:
+                    clip['voice'] = voice_span(v)
+                    clip['words'] = snap_words(got['words'], v)
         except Exception as e:                                    # noqa: BLE001
             clip['error'] = str(e)
     set_clip(d, clip)

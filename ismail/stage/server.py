@@ -833,7 +833,7 @@ class Handler(SimpleHTTPRequestHandler):
                 threading.Thread(target=perform.transcribe_clip, daemon=True,
                                  args=(d, n, at, secs, by, stt_words, lambda ev: server_event(name, ev))).start()
                 return self._json(200, {'ok': True})
-            ext = {'audio/webm': 'webm', 'audio/ogg': 'ogg', 'audio/mp4': 'm4a'}.get(
+            ext = {'audio/webm': 'webm', 'audio/ogg': 'ogg', 'audio/mp4': 'm4a', 'audio/wav': 'wav'}.get(
                 (self.headers.get('Content-Type') or '').split(';')[0].strip(), 'webm')
             d.mkdir(parents=True, exist_ok=True)
             with open(d / f'clip_{n}.{ext}', 'wb' if qs.get('seq', ['0'])[0] == '0' else 'ab') as fh:
