@@ -454,3 +454,15 @@ def test_an_ask_says_who_asks(stage):
 def test_an_agent_following_a_scene_can_name_itself(stage):
     OPS['stage_events'](scene='room', since=1, who='vr dev')
     assert _get(stage['port'], 'live/presence')[1]['listening'] == ['vr dev']
+
+
+def test_the_last_follow_can_be_kept_by_an_agent(stage):
+    page = FakePage(stage['port'], 'room')
+    try:
+        out = OPS['stage_take_keep_last'](scene='room', name='bartender')
+        assert page.seen[-1]['type'] == 'take_keep_last' and page.seen[-1]['name'] == 'bartender'
+        assert 'take_keep_last' in out
+        with pytest.raises(OpError, match='stage_take_keep_last'):
+            OPS['stage_cmd'](scene='room', type='take_keep_last')
+    finally:
+        page.stop = True

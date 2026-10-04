@@ -147,10 +147,28 @@ export function initActions(ed, hands, panels, live, takes) {
       }
     } finally { followPanels.delete(it.name); }
   }
+  // after a plain Follow: keep it as a take? (hands.js buffered it; the user, 2026-10-04, lost a liked follow)
+  let offerId = null;
+  live.onEmit((type) => { if (type === 'follow_kept' && offerId) panels.close(offerId, 'kept by an agent'); });   // stage_take_keep_last
+  async function offerKeep(person) {
+    const lf = takes.lastFollow && takes.lastFollow();
+    const it = ed.byName.get(person);
+    if (!lf || !it || lf.person !== person) return;
+    const pid = 'keep_follow_' + Date.now();
+    offerId = pid;
+    const a = await panels.show({ panel_id: pid, title: `Keep that follow of ${ed.label(it)}?`,
+      text: `${lf.seconds.toFixed(0)} s, not recorded as a take. Keep it and it plays back on them to trim or redo.`,
+      buttons: ['💾 Keep as take', '🗑 Discard'], width: 0.5, quiet: true, seconds: 120 });
+    const x = a && a.answer;
+    if (x === '💾 Keep as take') {
+      try { const t = await takes.keepLast(person); await review(it, t); } catch (e) { live.emit('voice_error', { where: 'keep follow', error: String(e.message || e) }); }
+    } else if (x === '🗑 Discard') takes.discardLast();
+  }
   live.onEmit((type, d) => {
     if (type !== 'actor_stop' || !d || !d.live) return;
     const id = followPanels.get(d.person);
     if (id) panels.close(id, 'follow ended');
+    if (!takes.recording()) setTimeout(() => offerKeep(d.person), 0);   // after hands.js has buffered it (main.js order)
     if (d.why === 'walked_away' && takes.recording()) {
       const it = ed.byName.get(d.person);
       setTimeout(async () => { const t = await takes.stop(); if (it) await review(it, t); }, 0);
