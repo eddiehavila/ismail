@@ -187,3 +187,22 @@ def test_a_batch_refuses_what_cannot_be_in_it(stage):
         OPS['stage_batch'](scene='room', ops=[{'op': 'stage_scene_go', 'name': 'attic'}])
     with pytest.raises(OpError, match='one scene'):
         OPS['stage_batch'](scene='room', ops=[{'op': 'stage_say', 'scene': 'attic', 'text': 'x'}])
+
+
+def test_any_error_in_a_batch_rolls_back(stage, monkeypatch):
+    from ismail.stage import world as W
+    real = W.save_world
+
+    def half_then_fail(d, scene, world):
+        real(d, scene, world)
+        raise KeyError('boom')
+    page = BatchPage(stage['port'], 'room')
+    try:
+        before = OPS['stage_world'](scene='room')
+        monkeypatch.setattr(W, 'save_world', half_then_fail)
+        with pytest.raises(OpError, match=r"\[0\] stage_world: ERROR KeyError: 'boom'"):
+            OPS['stage_batch'](scene='room', ops=[{'op': 'stage_world', 'world': {'actors': {'person_bar_lean': 'mh_man'}}}])
+        monkeypatch.setattr(W, 'save_world', real)
+        assert OPS['stage_world'](scene='room') == before
+    finally:
+        page.stop = True

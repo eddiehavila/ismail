@@ -390,8 +390,9 @@ def stage_batch(scene: str, ops: list, stop_on_error: bool = True) -> str:
     Ops that are page commands go to the page together as one command and run back to back there (the ones that
     answer at once land in the same frame); an op that runs here (stage_world, stage_events, stage_performance, ...)
     first sends the page commands before it, so the order holds. With stop_on_error (default) the first failure stops
-    the batch: files the ops here changed (world.json and the like) go back to what they were, and what the page
-    already did stays (the page cannot roll back; the reply says what ran). Not in a batch: stage_batch, stage_start,
+    the batch: the scene folder's top-level .json files that the ops here changed (world.json and the like) go back
+    to what they were; takes, performances and voice files are not put back, and what the page already did stays
+    (the page cannot roll back; the reply says what ran). Not in a batch: stage_batch, stage_start,
     stage_stop, stage_listen, stage_scene_export, stage_scene_new, stage_scene_go. Replies one line per op:
     [i] op: its answer."""
     import inspect
@@ -447,10 +448,19 @@ def stage_batch(scene: str, ops: list, stop_on_error: bool = True) -> str:
                 flush()
             if failed and stop_on_error:
                 break
-            before = {} if on_page else {f: f.read_bytes() for f in sdir.glob('*.json')}
+            before = None if on_page else {f: f.read_bytes() for f in sdir.glob('*.json')}
+
+            def note_changes():                        # a file this op changed here, failed or not
+                for f in set(before) | set(sdir.glob('*.json')):
+                    if f not in changed and (not f.exists() or f.read_bytes() != before.get(f)):
+                        changed[f] = before.get(f)    # None: the op made it
             try:
                 r = OPS[name](**kw)
-            except OpError as err:
+            except Exception as err:                   # any failure rolls back, not only OpError
+                if before is not None:
+                    note_changes()
+                if not isinstance(err, OpError):
+                    err = f'{type(err).__name__}: {err}'
                 if stop_on_error:                  # nothing queued after the last send has run: it does not run now
                     out.extend(f'[{j}] {n}: not run (an op after it failed first)' for j, n in queued)
                     queued.clear()
@@ -461,9 +471,7 @@ def stage_batch(scene: str, ops: list, stop_on_error: bool = True) -> str:
             if on_page:
                 queued.append((i, name))
                 continue
-            for f in set(before) | set(sdir.glob('*.json')):
-                if f not in changed and (not f.exists() or f.read_bytes() != before.get(f)):
-                    changed[f] = before.get(f)        # None: the op made it
+            note_changes()
             out.append(f'[{i}] {name}: {r}')
         if not (failed and stop_on_error):
             flush()
