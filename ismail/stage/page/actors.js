@@ -10,7 +10,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { JOINTS } from './hands.js';
-import { cutout } from './editor.js';
+import { cutout, b2tPos } from './editor.js';
 import { world } from './world.js';
 
 // who plays whom, facings, partners and the floor are the scene's (world.json via world.js), not the runtime's
@@ -96,6 +96,13 @@ const FINGER_JOINTS = {
 };
 const SPINE = [['spine_01', 0.15], ['spine_02', 0.3], ['spine_03', 0.5], ['neck_01', 0.75], ['head', 1.0]];
 const STEP_AT = 0.22, STEP_S = 0.28, LIFT = 0.07;
+// pins while following (the user, 2026-10-04, sitting in real life while following a man on a bar stool: "anchors his
+// butt to the chair, so if I do anything with my head and hands his butt's gonna be anchored unless I move completely
+// away from the chair"). Pinned hips stay on the seat, facing the person's own way; the user's head bends the spine
+// toward it (direction only, so sitting lower or higher does not sink or lift him) and the hands drive the arms; the
+// feet plant in front of the seat (a seated pose) or on their own pins. The head clearly away from the seat
+// (PIN_AWAY_M for PIN_AWAY_MS) lets go for that follow.
+const SEAT_ABOVE = 0.09, SEAT_FOOT = 0.42, LEAN_MAX = 0.9, PIN_AWAY_M = 0.7, PIN_AWAY_MS = 600;
 const Y = new THREE.Vector3(0, 1, 0);
 
 export function initActors(ed, live) {
@@ -200,16 +207,32 @@ export function initActors(ed, live) {
     const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(qc).setY(0);
     const yaw = new THREE.Quaternion().setFromUnitVectors(rig.fwd, fwd.lengthSq() > 1e-6 ? fwd.normalize() : rig.fwd);
     const head = P(f.head);
-    // the hips under the head, turned with it
+    const pin = st.pins && st.pins.hips;
+    // the hips under the head, turned with it; or pinned to a seat, facing the person's own way
     const pel = rig.bones.pelvis;
-    const off = rig.rest.pelvis.p.clone().sub(rig.rest.head.p).applyQuaternion(yaw);
-    const hipAt = head.clone().add(off);
-    hipAt.y = Math.min(hipAt.y, st.floor + rig.rest.pelvis.p.y - rig.rest.foot_l.p.y + 0.08);   // never off the ground
+    const base = pin ? (st.pinYaw || yaw) : yaw;
+    let hipAt;
+    if (pin) hipAt = pin.clone();
+    else {
+      hipAt = head.clone().add(rig.rest.pelvis.p.clone().sub(rig.rest.head.p).applyQuaternion(yaw));
+      hipAt.y = Math.min(hipAt.y, st.floor + rig.rest.pelvis.p.y - rig.rest.foot_l.p.y + 0.08);   // never off the ground
+    }
+    st.lastHip = hipAt.clone(); st.lastYaw = yaw.clone();
     pel.parent.updateMatrixWorld(true);
     pel.position.copy(pel.parent.worldToLocal(hipAt.clone()));
-    setWorldQ(pel, yaw.clone().multiply(rig.rest.pelvis.q));
+    setWorldQ(pel, base.clone().multiply(rig.rest.pelvis.q));
+    // pinned: the spine leans from the seat toward where the user's head is (its length kept)
+    let lean = null;
+    if (pin) {
+      const up = rig.rest.head.p.clone().sub(rig.rest.pelvis.p).applyQuaternion(base).normalize();
+      const to = head.clone().sub(hipAt).normalize();
+      lean = new THREE.Quaternion().setFromUnitVectors(up, to);
+      const ang = 2 * Math.acos(Math.min(1, Math.abs(lean.w)));
+      if (ang > LEAN_MAX) lean = new THREE.Quaternion().slerp(lean, LEAN_MAX / ang);
+    }
     for (const [n, k] of SPINE) {
-      const q = new THREE.Quaternion().slerpQuaternions(yaw, delta, k);
+      const q = new THREE.Quaternion().slerpQuaternions(base, delta, k);
+      if (lean) q.premultiply(new THREE.Quaternion().slerp(lean, Math.min(1, k * 1.25)));
       setWorldQ(rig.bones[n], q.multiply(rig.rest[n].q));
     }
     // arms and hands, fingers
@@ -238,8 +261,24 @@ export function initActors(ed, live) {
       }
     };
     side('l', 'left'); side('r', 'right');
-    // legs: planted feet, a step when the hips leave them
+    // legs: planted feet, a step when the hips leave them; pinned hips: the feet in front of the seat, or on their pins
     const now = f.t;
+    if (pin) {
+      const fw = rig.fwd.clone().applyQuaternion(base);
+      for (const sd of ['l', 'r']) {
+        const own = st.pins['foot_' + sd];
+        // on the floor in front of the seat; a seat too high for that (a bar stool) rests them on a rung, knees bent
+        const leg = rig.rest[`thigh_${sd}`].p.distanceTo(rig.rest[`calf_${sd}`].p) + rig.rest[`calf_${sd}`].p.distanceTo(rig.rest[`foot_${sd}`].p);
+        const floorY = st.floor + rig.rest[`foot_${sd}`].p.y, high = hipAt.y - floorY > 0.8 * leg;
+        const at = own ? own.clone() : hipAt.clone().addScaledVector(fw, high ? SEAT_FOOT * 0.45 : SEAT_FOOT)
+          .add(rig.rest[`foot_${sd}`].p.clone().sub(rig.rest.pelvis.p).setY(0).applyQuaternion(base));
+        if (!own) at.y = high ? hipAt.y - 0.62 * leg : floorY;
+        const knee = rig.bones[`thigh_${sd}`].getWorldPosition(new THREE.Vector3()).addScaledVector(fw, 1.0).add(new THREE.Vector3(0, 0.4, 0));
+        twoBone(rig, `thigh_${sd}`, `calf_${sd}`, `foot_${sd}`, at, knee);
+        setWorldQ(rig.bones[`foot_${sd}`], base.clone().multiply(rig.rest[`foot_${sd}`].q));
+      }
+      return;
+    }
     for (const sd of ['l', 'r']) {
       const ft = st.feet[sd];
       const want = hipAt.clone().add(rig.rest[`foot_${sd}`].p.clone().sub(rig.rest.pelvis.p).applyQuaternion(yaw));
@@ -334,8 +373,10 @@ export function initActors(ed, live) {
       mirror: !!c.mirror, mirrorN: facing ? new THREE.Vector3(facing.z, 0, -facing.x) : null,
       last: new THREE.Vector3(f0.head[0], f0.head[1], f0.head[2]),
       alignInv: align.clone().invert(), feet: { l: {}, r: {} }, t0: performance.now(), it };
+    const pins = anchors.get(person);
+    if (pins) usePins(st, pins);
     playing.set(person, st);
-    live.emit('actor_follow', { person, actor: who, scale: +s.toFixed(2) });
+    live.emit('actor_follow', { person, actor: who, scale: +s.toFixed(2), pinned: pinnedNames(st) });
     return { person, actor: who, following: true, scale: +s.toFixed(2) };
   }
   async function cloneRig(r) {                              // a second person on the same actor (couple 3)
@@ -406,6 +447,15 @@ export function initActors(ed, live) {
         const far = st.mode === 'place' ? Math.hypot(cur.x - st.to.x, cur.z - st.to.z) : Math.hypot(cur.x - st.anchor.x, cur.z - st.anchor.z);
         if (far > WALK_AWAY_M) { stop({ person: st.person, why: 'walked_away' }); continue; }
         f.t = (performance.now() - st.t0) / 1000;
+        if (st.pins && st.pins.hips) {                   // the user got up and walked off: the seat lets go of him
+          const ph = st.to.clone().add(new THREE.Vector3(f.head[0], f.head[1], f.head[2]).sub(st.anchor).multiplyScalar(st.s));
+          const away = Math.hypot(ph.x - st.pins.hips.x, ph.z - st.pins.hips.z) > PIN_AWAY_M * st.s;
+          st.awaySince = away ? (st.awaySince || performance.now()) : 0;
+          if (away && performance.now() - st.awaySince > PIN_AWAY_MS) {
+            st.pins = null; st.awaySince = 0;
+            live.emit('pin_released', { person: st.person, why: 'moved away from the seat' });
+          }
+        }
         pose(st, st.mode === 'place' ? shifted(f, st.drift) : f);
         continue;
       }
@@ -428,5 +478,49 @@ export function initActors(ed, live) {
     live.emit('actor_mirror', { person, mirror: st.mirror });
     return { person, mirror: st.mirror };
   }
-  return { play, stop, follow, setSource, playing, load, pose, canPlay, turnBy, setMode, moveTo, at, setMirror };
+  // ---- pins: per person, for this page's session (an agent sets them before a Follow; the Follow panel's Pin too)
+  const anchors = new Map();                     // person -> { hips: Vector3|null, foot_l, foot_r, legs }
+  const pinnedNames = (st) => (st.pins ? Object.entries(st.pins).filter(([k, v]) => v && k !== 'legs').map(([k]) => k) : []);
+  function usePins(st, pins) {
+    st.pins = { hips: pins.hips && pins.hips.clone(), foot_l: pins.foot_l && pins.foot_l.clone(), foot_r: pins.foot_r && pins.foot_r.clone(), legs: pins.legs || 'keep_pose' };
+    // the person's own facing (world.json facings, or where they face now); the head no longer turns the hips
+    const fc = facingOf(ed, st.person, st.to, null);
+    st.pinYaw = fc ? new THREE.Quaternion().setFromUnitVectors(st.rig.fwd, fc.clone().setY(0).normalize()) : (st.lastYaw ? st.lastYaw.clone() : null);
+    st.awaySince = 0;
+  }
+  // where a pin goes: an object's top (a seat; the hips sit SEAT_ABOVE over it), or a Blender xyz
+  function pinPoint(to, joint) {
+    if (Array.isArray(to)) return b2tPos(to);
+    const it = ed.byName.get(to);
+    if (!it) throw new Error('no object ' + to + ' to pin to (an object name, or [x, y, z] in Blender metres)');
+    const b = new THREE.Box3().setFromObject(it.obj), c = b.getCenter(new THREE.Vector3());
+    return new THREE.Vector3(c.x, b.max.y + (joint === 'hips' ? SEAT_ABOVE : 0), c.z);
+  }
+  // live: follow_anchor {person, joint: hips | foot_l | foot_r | feet, to: object | [x,y,z] | 'here', legs, clear}
+  function anchor(c) {
+    const person = c.person;
+    if (!person || !world().actors[person] && !ed.byName.get(person)) throw new Error('no person ' + person);
+    const cur = anchors.get(person) || { hips: null, foot_l: null, foot_r: null, legs: 'keep_pose' };
+    const joints = c.joint === 'feet' ? ['foot_l', 'foot_r'] : [c.joint || 'hips'];
+    for (const j of joints) if (!['hips', 'foot_l', 'foot_r'].includes(j)) throw new Error("joint is 'hips', 'foot_l', 'foot_r' or 'feet'");
+    const st = playing.get(person);
+    for (const j of joints) {
+      if (c.clear) { cur[j] = null; continue; }
+      if (c.to === 'here' || c.to == null) {                 // where that joint is now, while they follow
+        if (!st || !st.live) throw new Error('to="here" pins where the person is now: start a Follow first, or give an object or [x, y, z]');
+        cur[j] = j === 'hips' ? st.lastHip.clone() : st.rig.bones[j === 'foot_l' ? 'foot_l' : 'foot_r'].getWorldPosition(new THREE.Vector3());
+      } else cur[j] = pinPoint(c.to, j);
+    }
+    if (c.legs) cur.legs = c.legs;
+    if (!cur.hips && !cur.foot_l && !cur.foot_r) anchors.delete(person); else anchors.set(person, cur);
+    if (st && st.live) { if (anchors.has(person)) usePins(st, cur); else st.pins = null; }
+    const t2b = (v) => (v ? [+v.x.toFixed(3), +(-v.z).toFixed(3), +v.y.toFixed(3)] : null);
+    const r = { person, pinned: Object.fromEntries(['hips', 'foot_l', 'foot_r'].map((k) => [k, t2b(cur[k])]).filter(([, v]) => v)), legs: cur.legs,
+      following: !!(st && st.live) };
+    live.emit('anchored_joint', r);
+    return r;
+  }
+  live.handlers.follow_anchor = (c) => anchor(c);
+  const pinsOf = (person) => { const st = playing.get(person); return st ? pinnedNames(st) : Object.keys(anchors.get(person) || {}).filter((k) => k !== 'legs' && anchors.get(person)[k]); };
+  return { play, stop, follow, setSource, playing, load, pose, canPlay, turnBy, setMode, moveTo, at, setMirror, anchor, pinsOf };
 }
