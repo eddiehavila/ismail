@@ -19,6 +19,9 @@
   meaning, nothing that hitches while the person is in, a purpose for every run, panels that stay put, everything
   touchable by hand, who answers when two sessions listen, listeners reconnect after a restart; the reload advice is
   corrected (the plain scene address).
+- development.md: a public voice, instrument or profile stays compatible with the songs that use it (new behavior
+  as a new param whose default is the old sound); when it cannot, the new one ships beside its ancestor under a
+  findable name, with `derived_from` in its data and credit both ways.
 - Skill text describes actions in plain words with synonyms (send a message to a session, conversation or agent;
   a browser pane, preview or web view) instead of one harness's tool names.
 

@@ -203,9 +203,19 @@ A studio agent built it inside its song and listed it in `HANDOFF.md`; the inclu
    defaults, presets and the rigs they were fitted with, render speed, and where it came from (sources and licences,
    the exams that judged it and their scores, the song that built it). `voice_help` prints it; agents read nothing
    else before using it.
-7. **Nothing that exists changes by accident.** Presets and existing voices render the same as before unless the
-   change is the point (palm mute must leave the strat70 presets, which use no mute, untouched): a regression test
-   compares before and after. A deliberate change of sound says so in the CHANGELOG ("a new take").
+7. **Nothing that exists changes by accident: other people's songs play on it.** A public voice, instrument type or
+   profile is shared by every user's songs, so an update keeps them sounding the same. Presets and existing voices
+   render as before unless the change is the point (palm mute must leave the strat70 presets, which use no mute,
+   untouched): a regression test compares before and after. New behavior arrives as a new param or lane whose
+   default is the old sound; a param is never renamed or given a new meaning in place. A deliberate change of sound
+   says so in the CHANGELOG ("a new take").
+   **When it cannot stay compatible** (a song's improved copy of a public voice that sounds different by design),
+   first ask whether it still belongs in the public library. If it does, it ships beside its ancestor under a new,
+   findable name (`electric2`, `cello_v2`, or a name for what changed), never over it, and records its lineage in its
+   data: `derived_from` in the voice's INFO or the profile's JSON (the ancestor's name and the ismail version it
+   came from), plus who built the change and in which song, in INFO and in a comment at the top of the code. Credit
+   goes where git cannot see it: a song that derived a voice credits the voice it started from, and the public
+   copy credits the song and its sources. Git history covers the rest.
 8. **Tests**: a round trip on synthetic material with a known answer, one regression test per bug the handoff
    describes, window invariance, live parity. Run the touched ones locally; CI runs the rest.
 9. **Cost**: measure its render speed and peak memory; put the numbers in live.md's table and the PR. A voice that
