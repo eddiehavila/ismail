@@ -637,6 +637,9 @@ DEFAULT_PARAMS = {
     'beat': 0.5,          # decaying kinds: scale on the measured beating between unison strings (0 = one string);
                           # 0.5 because the measured depth runs high and a listener preferred less (2026-09-29)
     'knock': 1.0,         # scale on the measured attack map (hammer knock, thump, scrape, pick); 0 = off
+    'mono': False,        # compute one channel and copy it to both (for a caller that sums to mono)
+    'floor': None,        # dB: skip partials this far under the strongest (None = all). 60 renders drafts faster
+                          # but dulls the top of low notes by 3 to 5 dB (cello C2, 2026-10-04)
 }
 
 _PROFILES = {}
@@ -721,7 +724,7 @@ def render(profile, freq, t, vel, gate, sr=SR, **params):
     """One note -> (2, len(t)) array."""
     p = dict(DEFAULT_PARAMS)
     p.update(profile.get('defaults') or {})          # a profile can carry its instrument's own settings
-    p.update({k: v for k, v in params.items() if v is not None or k in ('damp',)})
+    p.update({k: v for k, v in params.items() if v is not None or k in ('damp', 'floor')})
     unknown = set(params) - set(DEFAULT_PARAMS)
     if unknown:
         raise ValueError(f"unknown mimic params {sorted(unknown)}; valid: {sorted(DEFAULT_PARAMS)}")
@@ -794,6 +797,10 @@ def render(profile, freq, t, vel, gate, sr=SR, **params):
         else:
             bhz = bdb = np.zeros(len(kk))
 
+    # partials far under the strongest are inaudible in the sum: skip them (low notes reach 200 partials)
+    lvl0 = base + np.interp(np.log2(fk), body_hz, body_db)
+    weak = lvl0 < lvl0.max() - p['floor'] if p['floor'] is not None else np.zeros(len(kk), bool)
+    mono = bool(p['mono'])
     players = max(1, int(p['players']))
     phi_c = None
     for pl in range(players):
@@ -807,14 +814,19 @@ def render(profile, freq, t, vel, gate, sr=SR, **params):
         f0s = np.interp(np.arange(n) / sr, tc, f0c)
         phase = 2 * np.pi * np.cumsum(f0s) / sr
         pan = 0.0 if players == 1 else prng.uniform(-0.6, 0.6)
+        if mono:
+            pan = 0.0
+        one = mono or (p['width'] == 0 and pan == 0)       # both channels would be the same: compute one
         te = np.maximum(tc - delay, 0)
         yl = np.zeros(n)
-        yr = np.zeros(n)
+        yr = yl if one else np.zeros(n)
         tot_env = np.zeros(ncs)
         # the whole note swells and dips slowly (bow pressure, breath), fading in after the attack
         swell_db = (mix('swell') * p['swell'] * _smooth_noise(prng, ncs, 0.8, sr_c) *
                     np.clip(te / 0.4, 0, 1)) if kind == 'sustained' else 0.0
         for i, k in enumerate(kk):
+            if weak[i]:
+                continue
             # body at the partial's current frequency: vibrato moves it across the resonances
             fi = k * stretch[i] * f0c
             lvl = base[i] + np.interp(np.log2(fi), body_hz, body_db)
@@ -837,33 +849,40 @@ def render(profile, freq, t, vel, gate, sr=SR, **params):
             if amp_c.max() < 1e-5:
                 continue
             tot_env += amp_c ** 2
-            amp = np.interp(np.arange(n) / sr, tc, amp_c)
+            # compute the partial only while it sounds: a long tail after the release is mostly silence
+            m = min(n, (int(np.nonzero(amp_c >= 1e-5)[0][-1]) + 2) * CTRL)
+            amp = np.interp(np.arange(m) / sr, tc, amp_c)
             ph0 = prng.uniform(0, 2 * np.pi)
             dphi = p['width'] * prng.uniform(-np.pi / 2, np.pi / 2) if k > 1 else 0.0
             dl = 1 + p['width'] * prng.uniform(-0.12, 0.12)
-            th = k * stretch[i] * phase + ph0
+            if mono:
+                dphi, dl = 0.0, 1.0
+            th = k * stretch[i] * phase[:m] + ph0
             if kind != 'sustained' and bhz[i] > 0 and bdb[i] > 0.5:
                 # a second unison string, detuned by the measured beat rate: the partial swells and dips
                 g = 10 ** (bdb[i] / 20)
-                m = (g - 1) / (g + 1)
                 # struck together, the strings start in phase: the first cancellation comes 1/(2*beat) s later,
                 # the dip a listener hears as the note "fading out in the middle"
-                th2 = th + 2 * np.pi * bhz[i] * np.arange(n) / sr
-                yl += amp * (np.sin(th) + m * np.sin(th2)) / np.sqrt(1 + m * m) * dl
-                yr += amp * (np.sin(th + dphi) + m * np.sin(th2 + dphi * 1.3)) / np.sqrt(1 + m * m) / dl
+                th2 = th + 2 * np.pi * bhz[i] * np.arange(m) / sr
+                mg = (g - 1) / (g + 1)
+                yl[:m] += amp * (np.sin(th) + mg * np.sin(th2)) / np.sqrt(1 + mg * mg) * dl
+                if not one:
+                    yr[:m] += amp * (np.sin(th + dphi) + mg * np.sin(th2 + dphi * 1.3)) / np.sqrt(1 + mg * mg) / dl
             else:
-                yl += amp * np.sin(th) * dl
-                yr += amp * np.sin(th + dphi) / dl
+                yl[:m] += amp * np.sin(th) * dl
+                if not one:
+                    yr[:m] += amp * np.sin(th + dphi) / dl
             if smear[i] > 0.02:
                 # the noise skirt: the line's own amplitude wobbling fast and randomly, so noise clusters around
                 # the harmonic the way bow and breath noise does
-                spec = np.fft.rfft(prng.standard_normal(n))
-                spec[np.fft.rfftfreq(n, 1 / sr) > _skirt_bw(freq)] = 0
-                nz = np.fft.irfft(spec, n)
+                spec = np.fft.rfft(prng.standard_normal(m))
+                spec[np.fft.rfftfreq(m, 1 / sr) > _skirt_bw(freq)] = 0
+                nz = np.fft.irfft(spec, m)
                 nz /= np.sqrt(np.mean(nz ** 2)) + 1e-12
                 sk = amp * smear[i] * nz
-                yl += sk * np.sin(th + 1.1) * dl
-                yr += sk * np.sin(th + 1.1 + dphi) / dl
+                yl[:m] += sk * np.sin(th + 1.1) * dl
+                if not one:
+                    yr[:m] += sk * np.sin(th + 1.1 + dphi) / dl
         gl, gr = np.sqrt(0.5 * (1 - pan)), np.sqrt(0.5 * (1 + pan))
         out[0] += yl * gl * np.sqrt(2)
         out[1] += yr * gr * np.sqrt(2)
@@ -889,10 +908,12 @@ def render(profile, freq, t, vel, gate, sr=SR, **params):
     for spec_db, envc, level_ref in layers:
         g = 10 ** ((np.interp(lf, nz_hz, spec_db, left=-150, right=-150) + level_ref) / 20)
         g[fr < 20] = 0
-        for ch in range(2):
+        for ch in range(1 if mono else 2):
             wn = rng.standard_normal(n)
             shaped = np.fft.irfft(np.fft.rfft(wn) * g, n)
             out[ch] += shaped * np.interp(np.arange(n) / sr, tc, envc)
+        if mono:
+            out[1] = out[0]
     if 'atk_tf' in a and 'atk_tf' in b and p['knock'] > 0:
         out += _attack_noise(a, b, w, rng, n, sr, p['knock'], _rms_window(out, a['kind'], sr))
     out /= players ** 0.5
@@ -1005,6 +1026,12 @@ def _post(out, profile, p, sr, seed):
     if room and room > 0:
         from scipy.signal import fftconvolve
         ir = _room_ir(room, sr, rng)
-        wet = np.stack([fftconvolve(out[0], ir[0])[:n], fftconvolve(out[1], ir[1])[:n]])
+        if p['mono']:
+            w = fftconvolve(out.mean(axis=0), ir[0])[:n]
+            wet = np.stack([w, w])
+        else:
+            wet = np.stack([fftconvolve(out[0], ir[0])[:n], fftconvolve(out[1], ir[1])[:n]])
         out = out + wet * 10 ** (p['room_mix'] / 20)
+    if p['mono']:
+        out = np.repeat(out.mean(axis=0, keepdims=True), 2, axis=0)
     return out

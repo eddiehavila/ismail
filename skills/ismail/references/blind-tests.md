@@ -41,6 +41,10 @@ fix. A round the person always gets, or never gets, gives no direction: make the
 - **Check the answer key before the page goes up.** The key must not alternate, follow a run, or be predictable
   from another factor (the engine, the word, the trial's length). Confirm each key entry against the source
   waveform. A key with a pattern measures the pattern, not the ear.
+- **A placement exam needs a reference and a task.** Five clarinet seats heard from row 12, each played alone, were
+  all "can't tell" ("I don't get this test"): at that distance the hall's diffuse sound sat about 9 dB over the
+  direct sound. Give the ear contrast (the same note moving between two seats, or a fixed reference seat beside
+  the one tested) or a closer listener, and say what to listen for.
 - **Check alignment.** The onsets of A and B must come from the same detector as R's, run on the full signal. A mask edge once made every A lag 12 ms.
 
 **Page mechanics.** Keep the page in the song (`songs/<slug>/exam/<round>/`), never on a public host when it contains clips of the recording.
