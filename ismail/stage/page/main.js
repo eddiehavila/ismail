@@ -182,7 +182,7 @@ ed.renderer.setAnimationLoop(() => {
 });
 
 window.VR = {
-  ed, desktop, xr, live, THREE, body, panels,
+  ed, desktop, xr, live, THREE, body, panels, hands,
   selftest: () => ed.selftest(),
   save: () => ed.save(),
   undo: () => ed.undo(),

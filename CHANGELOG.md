@@ -51,6 +51,9 @@
   floor, keep-out boxes, the default scene, the build script) lives in `scenes/<name>/world.json` and
   `scenes/stage.json`. Session files (client log, speech cache, bundle, update notes) go to `<scenes>/_stage/`.
 - One server per port: a busy port is refused (Windows let two servers bind one port and split the live link).
+- Pin touches land: a to-do pin's card takes a fingertip as well as its diamond, a pin re-arms after 1.2 s even
+  if the hand stayed close (it needed the tip to leave by 18 cm), the gaze window is 60 degrees, and a tip at a pin
+  that does not open it says why (`pin_touch_missed`). A finger gun at a pin does not travel.
 - A poke at UI wins over travel: while a hand's fingertip is within 10 cm of a panel, menu or button, or for 0.8 s
   after it pokes one, the finger gun shows no travel arc and its thumb click does nothing (`travel_held` says so).
   Poking menu buttons with the same finger gun that aims travel had teleported the person twice.
