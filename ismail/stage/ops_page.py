@@ -522,7 +522,7 @@ def stage_take_keep_last(scene: str, name: str = None) -> str:
 
 
 @op(mutates=True)
-def stage_follow_anchor(scene: str, person: str, joint: str = 'hips', to=None, legs: str = 'keep_pose',
+def stage_follow_anchor(scene: str, person: str, joint: str = 'hips', to: str | list = None, legs: str = 'keep_pose',
                         clear: bool = False) -> str:
     """Pin a person's joint for when the user follows (animates) them (page command: follow_anchor): joint 'hips'
     (default), 'foot_l', 'foot_r' or 'feet'; to= an object (a seat: the hips sit just above its top) or [x, y, z] in

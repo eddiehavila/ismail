@@ -482,3 +482,16 @@ def test_a_follow_pin_goes_to_the_page(stage):
             OPS['stage_follow_anchor'](scene='room', person='p')
     finally:
         page.stop = True
+
+
+def test_follow_anchor_takes_to_from_the_cli_as_a_list_or_a_word(stage):
+    from ismail.__main__ import parse_args
+    page = FakePage(stage['port'], 'room')
+    try:
+        for arg, want in (('to=[1,2,0]', [1, 2, 0]), ('to=here', 'here'), ('to=stool_3', 'stool_3')):
+            kw = parse_args(['person=person_bar_lean', arg])
+            assert kw['to'] == want
+            OPS['stage_follow_anchor'](scene='room', **kw)
+            assert page.seen[-1]['to'] == want
+    finally:
+        page.stop = True
