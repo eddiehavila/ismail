@@ -5,7 +5,7 @@ Each op queues the command on the stage server's live link for `scene`, waits fo
 with what the page answered (positions in Blender metres, z up). A page that is not showing the scene, or a command
 the page refuses, raises OpError with the next step. Coordinates on the wire are Blender world space.
 """
-from ..api import op
+from ..api import OpError, op
 from .link import page_cmd
 
 
@@ -180,16 +180,24 @@ def stage_voice_note(scene: str, action: str = 'start') -> str:
 
 @op(mutates=True)
 def stage_panel_show(scene: str, panel_id: str = None, title: str = '', text: str = '', image: str = None,
-               buttons: list = None, width: float = 0.56, seconds: float = None, quiet: bool = False,
-               wait: bool = True, near: list = None) -> str:
-    """Open a panel in VR, fixed in the world 0.7 m in front of the person, with a title, text, an image (URL) and
-    buttons (page command: panel). The person answers by poking a button, pointing and pinching, or a right thumbs
+               buttons: list = None, width: float = None, seconds: float = None, quiet: bool = False,
+               wait: bool = True, near: list = None, anchor: str = 'world', side: str = 'right',
+               ttl: float = None) -> str:
+    """Open a panel in VR with a title, text, an image (URL) and buttons (page command: panel). anchor='world'
+    (default) fixes it 0.7 m in front of the person: for a note about a place. anchor='body' makes it ride with them,
+    just out of view to the `side` ('right' or 'left') of where their body faces, so they turn their head to read it
+    and it follows them as they move: for a message to them. ttl (or seconds) closes it by itself; the X closes it.
+    It never opens while they are talking (a note recording, the phone gesture, 3 s after a note): it waits, and
+    emits panel_held. The person answers by poking a button, pointing and pinching, or a right thumbs
     up / down held 450 ms (first / last button). seconds closes it by itself. quiet skips the chime. wait=True BLOCKS the
     command queue until the answer; wait=False replies at once. The same panel_id replaces an open panel. near is used
     by the page's own modules as a three.js vector; from a command it is unclear (a JSON list has no x/y/z) and should
     not be relied on. Page replies {id, answer, via, seconds}, {id, answer: null, why} when closed unanswered, or
     {id, shown: true} with wait=False. Emits: panel_shown, panel_answer, panel_closed."""
-    return page_cmd(scene, 'panel', {'panel_id': panel_id, 'title': title, 'text': text, 'image': image, 'buttons': buttons, 'width': width, 'seconds': seconds, 'quiet': quiet, 'wait': wait, 'near': near}, timeout=((60 if seconds is None else seconds) + 30))
+    if anchor not in ('world', 'body') or side not in ('right', 'left'):
+        raise OpError(f"anchor is 'world' or 'body' and side 'right' or 'left' (got {anchor!r}, {side!r})")
+    secs = ttl if ttl is not None else seconds
+    return page_cmd(scene, 'panel', {'panel_id': panel_id, 'title': title, 'text': text, 'image': image, 'buttons': buttons, 'width': width, 'seconds': seconds, 'ttl': ttl, 'quiet': quiet, 'wait': wait, 'near': near, 'anchor': anchor, 'side': side}, timeout=((60 if secs is None else secs) + 120))
 
 
 @op(mutates=True)

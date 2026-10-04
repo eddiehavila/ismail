@@ -418,3 +418,18 @@ def test_listen_and_presence_ops(stage, monkeypatch):
     time.sleep(0.6)
     pr = OPS['stage_presence']()
     assert 'listening: tester' in pr and 'over Lucy' in pr and 'handed' in pr
+
+
+def test_a_panel_can_ride_with_the_person(stage):
+    page = FakePage(stage['port'], 'room')
+    try:
+        out = OPS['stage_panel_show'](scene='room', title='Lucy', text='the amp moved', anchor='body', side='left',
+                                      ttl=20, wait=False)
+        c = page.seen[-1]
+        assert (c['type'], c['anchor'], c['side'], c['ttl']) == ('panel', 'body', 'left', 20)
+        assert 'width' not in c                       # the page picks the narrower body width
+        assert 'panel' in out
+        with pytest.raises(OpError, match="anchor is 'world' or 'body'"):
+            OPS['stage_panel_show'](scene='room', title='x', anchor='hip')
+    finally:
+        page.stop = True

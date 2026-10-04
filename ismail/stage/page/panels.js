@@ -3,6 +3,10 @@
 // the user, fixed in the world; the user answers by poking a button with a fingertip, pointing and pinching, or a
 // RIGHT thumbs up / down held while the panel is in view. Events: panel_shown, panel_answer {id, answer, via},
 // panel_closed {id, why}. The poke also works on any other registered surface (the colour panel in xr.js).
+// anchor 'body' (the user, 2026-10-04: a message "needs to stick to me, just like my utility belt"): the panel rides
+// with the user, just out of view to the right (side 'right', the default) or left of where their BODY faces
+// (body.js), so turning the head finds it; ttl seconds or the X closes it; dragging it moves its place around them.
+// A panel that tells about a place stays in the world (the default). No panel opens while the user is talking.
 import * as THREE from 'three';
 import { GIZMO } from './editor.js';
 
@@ -10,8 +14,10 @@ const CW = 1024;                         // canvas width; the height follows the
 const WIDTH = 0.56;                      // metres
 const POKE_IN = 0.012, POKE_OUT = 0.03, HOVER = 0.08;   // fingertip to the surface, metres
 const VERDICT_HOLD_MS = 450;
+const BODY_WIDTH = 0.42, BODY_DEG = 72, BODY_DIST = 0.6, BODY_DROP = 0.12;   // a 0.42 m panel 72 degrees out sits just
+                                                                            // past the Quest 3's view straight ahead
 
-export function initPanels(ed, xrApi, hands, voice, live) {
+export function initPanels(ed, xrApi, hands, voice, live, body) {
   const { scene, camera, renderer } = ed;
   const panels = new Map();              // id -> panel
   const pokeables = [];                  // { mesh, w, h, press(uv, via), hover(uv|null) }
@@ -42,7 +48,7 @@ export function initPanels(ed, xrApi, hands, voice, live) {
   }
   function draw(p) {
     const L = layoutOf(p), cv = p.cv;
-    if (cv.height !== L.H) { cv.height = L.H; p.mesh.geometry.dispose(); p.mesh.geometry = new THREE.PlaneGeometry(WIDTH, WIDTH * L.H / CW); }
+    if (cv.height !== L.H) { cv.height = L.H; p.mesh.geometry.dispose(); p.mesh.geometry = new THREE.PlaneGeometry(p.width, p.width * L.H / CW); }
     const g = cv.getContext('2d');
     g.clearRect(0, 0, CW, L.H);
     g.fillStyle = 'rgba(16,18,22,0.94)'; g.beginPath(); g.roundRect(0, 0, CW, L.H, 26); g.fill();
@@ -84,14 +90,22 @@ export function initPanels(ed, xrApi, hands, voice, live) {
   }
   async function show(c) {
     const id = String(c.panel_id || 'panel_' + Date.now());   // (c.id is the server's command id)
+    // never while the user is talking (the user, 2026-10-04: "your message interrupted me" and the thought was lost)
+    if (renderer.xr.isPresenting && voice.talking()) {
+      live.emit('panel_held', { id, why: 'the user is talking' });
+      while (renderer.xr.isPresenting && voice.talking()) await new Promise((res) => setTimeout(res, 300));
+    }
     if (panels.has(id)) close(id, 'replaced');
+    const onBody = c.anchor === 'body' && !c.near;
+    const width = c.width || (onBody ? BODY_WIDTH : WIDTH);
     const cv = document.createElement('canvas'); cv.width = CW; cv.height = 256;
     const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace;
-    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(c.width || WIDTH, (c.width || WIDTH) / 4),
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(width, width / 4),
       new THREE.MeshBasicMaterial({ map: tex, transparent: true, toneMapped: false, side: THREE.DoubleSide, depthTest: false, depthWrite: false }));   // drawn over the world, like Quest system panels (the user, 2026-10-03: a panel cut through a seated man)
     mesh.layers.set(GIZMO); mesh.renderOrder = 990;
     const p = { id, title: c.title || '', text: c.text || '', buttons: (c.buttons || []).map(String), img: null, cv, tex, mesh,
-      hover: null, answer: null, resolve: null, timer: null, t0: performance.now() };
+      width, hover: null, answer: null, resolve: null, timer: null, t0: performance.now(),
+      body: onBody ? { deg: (c.side === 'left' ? -1 : 1) * (c.angle ?? BODY_DEG), dist: c.distance ?? BODY_DIST, dy: -BODY_DROP } : null };
     if (c.image) {
       p.img = await new Promise((res) => { const im = new Image(); im.onload = () => res(im); im.onerror = () => res(null); im.src = c.image; });
       if (!p.img) p.text = (p.text ? p.text + '\n' : '') + '(could not load ' + c.image + ')';
@@ -101,7 +115,8 @@ export function initPanels(ed, xrApi, hands, voice, live) {
       mesh.position.copy(c.near);
       const head = camera.getWorldPosition(new THREE.Vector3());
       mesh.lookAt(head.x, mesh.position.y, head.z);
-    } else placeInFront(mesh, panels.size);
+    } else if (p.body) placeOnBody(p, 1);
+    else placeInFront(mesh, panels.size);
     scene.add(mesh);
     panels.set(id, p);
     p.poke = { mesh, press: (uv, via) => pressAt(p, uv, via), hover: (uv) => { const r = uv && rectAt(p, uv); setHover(p, r ? r.id : null); },
@@ -110,10 +125,12 @@ export function initPanels(ed, xrApi, hands, voice, live) {
     mesh.userData.panelApi = p.poke;
     xrApi.addTarget(mesh);
     if (!c.quiet) voice.EAR.incoming();
-    live.emit('panel_shown', { id, title: p.title, image: c.image || null, buttons: p.buttons });
+    live.emit('panel_shown', { id, title: p.title, image: c.image || null, buttons: p.buttons, anchor: p.body ? 'body' : 'world',
+      ...(p.body ? { side: p.body.deg < 0 ? 'left' : 'right' } : {}) });
+    const ttl = c.ttl ?? c.seconds;
     const done = new Promise((resolve) => {
       p.resolve = resolve;
-      if (c.seconds) p.timer = setTimeout(() => close(id, 'timeout'), c.seconds * 1000);
+      if (ttl) p.timer = setTimeout(() => close(id, 'timeout'), ttl * 1000);
     });
     return c.wait === false ? { id, shown: true } : done;
   }
@@ -132,6 +149,24 @@ export function initPanels(ed, xrApi, hands, voice, live) {
     mesh.lookAt(head.x, mesh.position.y, head.z);
   }
   function dragTo(p, pos) { p.mesh.position.copy(pos); faceUser(p.mesh); }
+  // ---- riding with the user: each body panel has a place around the body (degrees right of its forward, metres out,
+  // height from the eyes); panels on one side stack downward. k 1 jumps there, smaller eases (the body turns smoothly).
+  const want = new THREE.Vector3();
+  function placeOnBody(p, k) {
+    let below = 0;
+    for (const q of panels.values()) {
+      if (q === p) break;
+      if (q.body && Math.sign(q.body.deg) === Math.sign(p.body.deg)) below += q.mesh.geometry.parameters.height + 0.03;
+    }
+    body.around(p.body.deg, p.body.dist, want);
+    want.y += p.body.dy - below;
+    if (k >= 1) p.mesh.position.copy(want); else p.mesh.position.lerp(want, k);
+    faceUser(p.mesh);
+  }
+  function rebase(p) {                                          // dropped where the user wanted it: that is its place now
+    const b = body.bearing(p.mesh.getWorldPosition(new THREE.Vector3()));
+    p.body = { deg: b.deg, dist: Math.max(0.3, b.dist), dy: b.dy };
+  }
   function answer(p, a, via) {
     p.answer = a; draw(p);
     voice.EAR.sent();
@@ -230,7 +265,11 @@ export function initPanels(ed, xrApi, hands, voice, live) {
       const pt = f.p['thumb-tip'].clone().add(f.indexTip).multiplyScalar(0.5);
       const pinched = f.pinch < (drag[side] ? 0.035 : 0.02);
       if (drag[side]) {
-        if (!pinched || !panels.has(drag[side].p.id)) { drag[side].p.droppedAt = performance.now(); drag[side] = null; continue; }
+        if (!pinched || !panels.has(drag[side].p.id)) {
+          drag[side].p.droppedAt = performance.now();
+          if (drag[side].p.body) rebase(drag[side].p);
+          drag[side] = null; continue;
+        }
         dragTo(drag[side].p, pt.add(drag[side].off));
       } else if (pinched && !drag[side + 'Was']) {
         const n = nearPanelAt(pt);
@@ -248,8 +287,12 @@ export function initPanels(ed, xrApi, hands, voice, live) {
     return !!n;
   }
 
+  let lastT = 0;
   function update() {
     if (!renderer.xr.isPresenting) return;
+    const now = performance.now(), k = 1 - Math.exp(-Math.min(0.1, (now - (lastT || now)) / 1000) * 6);
+    lastT = now;
+    for (const p of panels.values()) if (p.body && !(drag.left && drag.left.p === p) && !(drag.right && drag.right.p === p)) placeOnBody(p, k);
     nearDrag();
     poke();
     thumbs(performance.now());
