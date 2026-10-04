@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Faster mimic renders (M76); placement exams (S23)
+
+- `mimic.render` computes each partial only while it sounds, so a long tail after the release costs next to
+  nothing (a cello C2 with a 3 s tail: 2.5 s to 0.4 s, the same sound within -70 dB). Channels that would be equal
+  (width 0, one player) are computed once.
+- New mimic params: `mono=True` computes one channel for a caller that sums to mono; `floor=<dB>` skips partials
+  that far under the strongest (off by default: 60 dulls the top of low notes by 3 to 5 dB).
+- blind-tests.md: a placement exam needs a reference point and a clear task.
+
 ### The VR stage (M46)
 
 - `ismail.stage`: the VR stage that grew in the Crossroads video (songs/crossroads/video/vr) is now part of the
@@ -23,6 +32,10 @@
   or another era never starts from a blockout. `stage_scene_new(name, source=)` makes one: the lineage in
   world.json, the page's pieces copied (trees, names, cues, waypoints), actor bodies from the source. Exports set
   `STAGE_SCENE` so renders go in `renders/<scene>/`. stage.md: "Deriving a scene".
+- The stage server stays up (M74): a fixed pool of 32 workers instead of a thread per request (Python 3.11 kept every
+  finished request thread, and the page polls 2.5 times a second: the old server died of a MemoryError after about
+  40,500 threads), long-polls capped per client, `GET /health` (shown by `stage_status`). A full disk no longer
+  stops the live link (state and events stay in memory) or the headset's boot (the last good bundle is served).
 - The Blender bridge and the Quest diet (`ismail/stage/bridge`: merged groups, triangle and texture budgets,
   MakeHuman skin and mask-map fixes) ship with it. three.js r180 is vendored (MIT).
 

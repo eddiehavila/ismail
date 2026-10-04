@@ -109,11 +109,19 @@ def bundle():
             if not eb:
                 return None
             import subprocess
-            r = subprocess.run(['node', str(PAGE / 'build_bundle.mjs')], cwd=PAGE, capture_output=True, text=True, timeout=120,
-                               env={**os.environ, 'ESBUILD': eb, 'BUNDLE_OUT': str(out)})
-            print('[bundle]', (r.stdout + r.stderr).strip()[-600:], flush=True)
-            if r.returncode != 0:
-                return None
+            tmp = out.with_suffix('.js.tmp')
+            try:
+                r = subprocess.run(['node', str(PAGE / 'build_bundle.mjs')], cwd=PAGE, capture_output=True, text=True,
+                                   timeout=120, env={**os.environ, 'ESBUILD': eb, 'BUNDLE_OUT': str(tmp)})
+                print('[bundle]', (r.stdout + r.stderr).strip()[-600:], flush=True)
+                if r.returncode != 0:
+                    raise OSError(f'esbuild exit {r.returncode}')
+                tmp.replace(out)
+            except (OSError, subprocess.SubprocessError) as e:
+                # a full disk or a broken build: the last good bundle (older code, but it boots), else the modules
+                print(f'[bundle] rebuild failed ({e}); serving {"the last good bundle" if out.is_file() else "modules"}',
+                      flush=True)
+                return out if out.is_file() else None
     return out
 
 
@@ -306,21 +314,39 @@ def now_iso():
     return datetime.datetime.now().astimezone().isoformat(timespec='milliseconds')
 
 
+DISK = {'warned': 0.0}
+
+
+def _disk_failed(f, e):
+    """A write that failed (a full disk): the live link carries on in memory; say so at most once a minute."""
+    if time.time() - DISK['warned'] > 60:
+        DISK['warned'] = time.time()
+        print(f'[disk] cannot write {f} ({e}); the live link keeps going in memory', flush=True)
+
+
 def write_atomic(f, text):
     tmp = f.with_suffix(f'{f.suffix}.{threading.get_ident()}.tmp')   # one per thread: two posts at once raced on one tmp
-    tmp.write_text(text, encoding='utf-8')
+    try:
+        tmp.write_text(text, encoding='utf-8')
+    except OSError as e:
+        return _disk_failed(f, e)
     for _ in range(5):             # Windows: a reader holding the file open makes replace fail for a moment
         try:
             tmp.replace(f)
             return
         except PermissionError:
             time.sleep(0.02)
+        except OSError as e:
+            return _disk_failed(f, e)
 
 
 def append_lines(f, objs):
-    with open(f, 'a', encoding='utf-8') as fh:
-        for o in objs:
-            fh.write(json.dumps(o, separators=(',', ':')) + '\n')
+    try:
+        with open(f, 'a', encoding='utf-8') as fh:
+            for o in objs:
+                fh.write(json.dumps(o, separators=(',', ':')) + '\n')
+    except OSError as e:
+        _disk_failed(f, e)
 
 
 def live_engines():
@@ -461,6 +487,15 @@ class Handler(SimpleHTTPRequestHandler):
                                                       for k, s in zip(('glb', 'manifest'), st)}})
         since = int(q.get('since', ['-1'])[0])
         wait = min(float(q.get('wait', ['0'])[0]), 60.0)
+        if wait > 0 and not self.server.longpoll_enter(self.client_address[0]):
+            wait = 0.0                             # over the cap: answer now (the caller polls again)
+        try:
+            return self._live_get_answer(u, q, name, since, wait)
+        finally:
+            if wait > 0:
+                self.server.longpoll_leave(self.client_address[0])
+
+    def _live_get_answer(self, u, q, name, since, wait):
         if u.path == '/live/state':
             with COND:
                 L = live(name)
@@ -545,6 +580,8 @@ class Handler(SimpleHTTPRequestHandler):
                 return self._json(400, {'error': str(e)})
         if u.path == '/scenes':
             return self._json(200, scene_names())
+        if u.path == '/health':                    # is the server well: workers, long-polls, threads, disk
+            return self._json(200, self.server.health())
         if u.path == '/stage':                     # what this server serves: the default scene first
             from .world import default_scene
             return self._json(200, {'scenes': scene_names(), 'default': default_scene(SCENES), 'code': code_version()})
@@ -787,8 +824,66 @@ class Handler(SimpleHTTPRequestHandler):
 
 
 class Server(ThreadingHTTPServer):
+    """A fixed pool of worker threads (a thread per request leaked: Python 3.11 keeps every finished request thread
+    of a non-daemon ThreadingHTTPServer, and the page polls 2.5 times a second; the old server died of a MemoryError
+    after about 40,500 threads in six hours). Long-polls are capped per client so they cannot hold every worker."""
     allow_reuse_address = os.name != 'nt'          # Windows: SO_REUSEADDR lets a second server bind the same port
     daemon_threads = True
+    workers = 32
+    longpoll_per_client = 8                         # everything local (agents, and the headset through
+                                                    # tailscale serve) arrives as 127.0.0.1
+
+    def __init__(self, *a, **kw):
+        from concurrent.futures import ThreadPoolExecutor
+        self.pool = ThreadPoolExecutor(self.workers, thread_name_prefix='stage')   # before the bind: a busy port
+        self.stats_lock = threading.Lock()                                          # calls server_close at once
+        self.busy = self.served = 0
+        self.polls = {}
+        self.t0 = time.time()
+        super().__init__(*a, **kw)
+
+    def process_request(self, request, client_address):
+        self.pool.submit(self._work, request, client_address)
+
+    def _work(self, request, client_address):
+        with self.stats_lock:
+            self.busy += 1
+        try:
+            self.finish_request(request, client_address)
+        except Exception:                          # noqa: BLE001  (as socketserver does: log it, keep serving)
+            self.handle_error(request, client_address)
+        finally:
+            self.shutdown_request(request)
+            with self.stats_lock:
+                self.busy -= 1
+                self.served += 1
+
+    def longpoll_enter(self, who):
+        with self.stats_lock:
+            if self.polls.get(who, 0) >= self.longpoll_per_client or sum(self.polls.values()) >= self.workers // 2:
+                return False
+            self.polls[who] = self.polls.get(who, 0) + 1
+            return True
+
+    def longpoll_leave(self, who):
+        with self.stats_lock:
+            self.polls[who] = max(0, self.polls.get(who, 0) - 1)
+
+    def health(self):
+        with self.stats_lock:
+            busy, served, polls = self.busy, self.served, sum(self.polls.values())
+        try:
+            free = round(shutil.disk_usage(STATE).free / 1e6)
+        except OSError:
+            free = None
+        return {'ok': free is None or free > 200, 'pid': os.getpid(), 'uptime_s': round(time.time() - self.t0),
+                'workers': self.workers, 'busy': busy, 'served': served, 'long_polls': polls,
+                'threads': threading.active_count(), 'scenes': len(scene_names()), 'state_free_mb': free,
+                'disk_warned_s_ago': round(time.time() - DISK['warned']) if DISK['warned'] else None}
+
+    def server_close(self):
+        super().server_close()
+        self.pool.shutdown(wait=False, cancel_futures=True)
 
 
 def register(port, scheme, host):

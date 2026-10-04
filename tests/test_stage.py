@@ -58,6 +58,12 @@ class FakePage:
         self.t.start()
 
     def run(self):
+        try:
+            self.loop()
+        except OSError:                               # the test's server closed under a poll: the page is gone
+            pass
+
+    def loop(self):
         while not self.stop:
             got = _get(self.port, f'live/cmd?scene={self.scene}&since={self.since}&wait=1')[1]
             self.since = got['last']
@@ -174,7 +180,8 @@ def test_scene_go_answers_from_the_new_scene(stage):
 
 
 def test_status_lists_the_server(stage):
-    assert str(stage['scenes']) in OPS['stage_status']()
+    out = OPS['stage_status']()
+    assert str(stage['scenes']) in out and 'well: ' in out and '/32 workers busy' in out
 
 
 def test_no_server_says_how_to_start_one(tmp_path, monkeypatch):
@@ -255,3 +262,56 @@ def test_scene_new_copies_the_page_pieces_and_writes_the_lineage(tmp_path):
     assert not (d / 'now' / 'takes').exists()
     with pytest.raises(OpError, match='exists already'):
         OPS['stage_scene_new'](name='now', source='club', scenes=str(d))
+
+
+def test_a_fixed_pool_serves_thousands_of_requests_without_new_threads(stage):
+    """The old server made a thread per request and kept them (MemoryError after ~40,500 in six hours)."""
+    import concurrent.futures as cf
+    p = stage['port']
+    _get(p, 'health')
+    before = threading.active_count()
+    with cf.ThreadPoolExecutor(8) as ex:
+        list(ex.map(lambda _: _get(p, 'live/cmd?scene=room&since=0'), range(600)))
+    h = _get(p, 'health')[1]
+    assert h['served'] >= 600 and h['busy'] <= 1 and h['workers'] == 32
+    assert threading.active_count() <= before + 32                 # at most the pool's workers, never one per request
+
+
+def test_long_polls_are_capped_per_client(stage):
+    p, srv = stage['port'], stage['srv']
+    srv.longpoll_per_client = 2
+    t0 = time.time()
+    hold = [threading.Thread(target=_get, args=(p, 'live/events?scene=room&since=999&wait=3')) for _ in range(2)]
+    for t in hold:
+        t.start()
+    time.sleep(0.4)
+    assert _get(p, 'health')[1]['long_polls'] == 2
+    _get(p, 'live/events?scene=room&since=999&wait=3')             # the third: answered at once, not after 3 s
+    assert time.time() - t0 < 2.0
+    for t in hold:
+        t.join()
+    assert _get(p, 'health')[1]['long_polls'] == 0
+
+
+def test_a_full_disk_keeps_the_live_link_in_memory(stage, monkeypatch):
+    def full(*a, **kw):
+        raise OSError(28, 'No space left on device')
+    monkeypatch.setattr(S.Path, 'write_text', full)
+    monkeypatch.setattr('builtins.open', full)
+    assert _post(stage['port'], 'live/state?scene=room', {'scene': 'room', 'mode': 'orbit'}) == {'ok': True}
+    monkeypatch.undo()
+    assert _post(stage['port'], 'live/event?scene=room', {'type': 'gesture'})['ok']
+    st = _get(stage['port'], 'live/state?scene=room')[1]
+    assert st['state']['mode'] == 'orbit'
+    assert _get(stage['port'], 'health')[1]['disk_warned_s_ago'] is not None
+
+
+def test_a_failed_rebuild_serves_the_last_good_bundle(stage, monkeypatch):
+    import subprocess
+    out = S.STATE / 'bundle.js'
+    out.write_text('// the last good bundle', encoding='utf-8')
+    import os
+    os.utime(out, (1, 1))                                          # older than every page module: a rebuild is due
+    monkeypatch.setattr(S, 'esbuild_path', lambda: 'esbuild')
+    monkeypatch.setattr(subprocess, 'run', lambda *a, **kw: (_ for _ in ()).throw(OSError(28, 'No space left on device')))
+    assert S.bundle() == out and out.read_text(encoding='utf-8') == '// the last good bundle'
