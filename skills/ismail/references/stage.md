@@ -192,6 +192,12 @@ A person in a headset cannot see your terminal. Contact is part of the interface
   scene is waiting for layout, build the scene.
 - **Findings go to the handoff.** A gap in the engine goes in the project's HANDOFF.md, not into a message to another
   session.
+- **A message to the person rides with them; a note about a place stays there.** `stage_panel_show(anchor="body")`
+  puts it just out of view beside where their body faces (not their head: looking left or right finds it, looking
+  ahead does not), with `seconds` or until they close it, and never holds your command queue. Panels and speech wait while they talk, and for 3 s after a
+  note, because they often send the next one at once.
+- **Say who you are.** Pass `sender=` (your name as the person knows it, e.g. "crossroads film") on `stage_say` and
+  `stage_panel_show`: the card shows it in your colour, on your side. Several agents can be talking to them at once.
 
 ## Shared editing: never lose what the person did
 

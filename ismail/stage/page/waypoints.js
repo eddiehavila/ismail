@@ -184,29 +184,64 @@ export function initWaypoints(ed, live, panels, hands, voice) {
 
   // quiet by distance; the label near or in the gaze, the note close
   const eye = new THREE.Vector3(), fwd = new THREE.Vector3(), to = new THREE.Vector3(), hp = new THREE.Vector3();
-  // touching a diamond with an index fingertip (within TOUCH_M, while looking toward it) opens its note, once per touch:
-  // the tip has to leave by RELEASE_M before that pin can open again (the panels' poke surface, a 1 m square through a
-  // spinning diamond, pressed pins the hand was nowhere near: the user, 2026-10-03, "they just show up all over the place")
-  const TOUCH_M = 0.07, RELEASE_M = 0.18, armed = new Map();
+  // touching a pin with an index fingertip opens its note, once per touch: the diamond (within TOUCH_M) or its card
+  // (within TOUCH_M of the card's face, while the card shows). The user, 2026-10-04: "sometimes when I'm trying to touch
+  // a to-do pin with my hand it does not touch": the card he reached for took no touch, and a pin stayed shut until
+  // the tip had left by 18 cm. It re-arms when the tip leaves by RELEASE_M or after REARM_MS. Looking roughly toward it
+  // (within 60 degrees) is still needed: a hand behind the head opened pins (2026-10-03). A tip close to a pin that
+  // does not open it says why (pin_touch_missed), so a miss can be measured.
+  const TOUCH_M = 0.07, RELEASE_M = 0.10, REARM_MS = 1200, GAZE_DOT = 0.5, NEAR_MISS_M = 0.12;
+  const armed = new Map(), cardP = new THREE.Vector3(), missedAt = new Map();
+  function cardDistance(p, tip) {
+    if (!p.card.visible || p.card.material.opacity < 0.3) return Infinity;
+    p.card.updateMatrixWorld();
+    cardP.copy(tip); p.card.worldToLocal(cardP);
+    const pg = p.card.geometry.parameters, s = p.card.scale.x;
+    p.card.geometry.computeBoundingBox();
+    const bb = p.card.geometry.boundingBox;
+    const dx = Math.max(0, bb.min.x - cardP.x, cardP.x - bb.max.x) * s, dy = Math.max(0, bb.min.y - cardP.y, cardP.y - bb.max.y) * s;
+    return Math.hypot(dx, dy, cardP.z * s);
+  }
+  function missed(p, side, d, why) {
+    const key = side + p.w.id, now = performance.now();
+    if (now - (missedAt.get(key) || 0) < 2000) return;
+    missedAt.set(key, now);
+    live.emit('pin_touch_missed', { id: p.w.id, hand: side, cm: Math.round(d * 100), why });
+  }
   function touches() {
-    if (!hands || !hands.state || noteOpen) return;
+    if (!hands || !hands.state) return;
+    const now = performance.now();
     for (const side of ['left', 'right']) {
       const f = hands.state[side] && hands.state[side].f;
       if (!f || !f.indexTip) continue;
       for (const p of pins.values()) {
         p.head.getWorldPosition(hp);
-        const d = hp.distanceTo(f.indexTip), key = side + p.w.id;
-        if (d > RELEASE_M) { armed.set(key, true); continue; }
-        if (d < TOUCH_M && armed.get(key) !== false) {
-          to.copy(hp).sub(eye).normalize();
-          if (fwd.dot(to) < 0.64) continue;                            // not looking toward it
-          armed.set(key, false);
-          openNote(p.w.id);
-          return;
-        }
+        const dHead = hp.distanceTo(f.indexTip), dCard = cardDistance(p, f.indexTip), d = Math.min(dHead, dCard);
+        const key = side + p.w.id, a = armed.get(key) ?? true;
+        if (d > RELEASE_M || (a !== true && now - a > REARM_MS)) armed.set(key, true);
+        else if (!armed.has(key)) armed.set(key, true);
+        if (d >= TOUCH_M) continue;
+        if (noteOpen) { if (noteOpen !== p.w.id) missed(p, side, d, 'another note is open'); continue; }
+        if (now < quietUntil) { missed(p, side, d, 'just closed a note'); continue; }
+        if (armed.get(key) !== true) { missed(p, side, d, 'touched a moment ago: pull back 10 cm'); continue; }
+        to.copy(dHead <= dCard ? hp : f.indexTip).sub(eye).normalize();
+        if (fwd.dot(to) < GAZE_DOT) { missed(p, side, d, 'not looking toward it'); continue; }
+        armed.set(key, now);
+        live.emit('pin_touch', { id: p.w.id, hand: side, on: dHead <= dCard ? 'diamond' : 'card', cm: Math.round(d * 100) });
+        openNote(p.w.id);
+        return;
       }
     }
   }
+  // a fingertip at a pin is a touch, not a travel (hands.js: a poke at UI wins over travel)
+  if (hands && hands.addUIGuard) hands.addUIGuard((side, tip) => {
+    for (const p of pins.values()) {
+      p.head.getWorldPosition(hp);
+      const d = Math.min(hp.distanceTo(tip), cardDistance(p, tip));
+      if (d < 0.10) return { why: 'a pin is within 10 cm', cm: Math.round(d * 100) };
+    }
+    return null;
+  });
   ed.preRender.push(function waypointsFrame() {
     if (!pins.size) return;
     ed.camera.getWorldPosition(eye); ed.camera.getWorldDirection(fwd);
@@ -241,5 +276,5 @@ export function initWaypoints(ed, live, panels, hands, voice) {
   live.handlers.waypoint_go = (c) => go(c);
   ed.addEventListener('switched', () => load());
   load();
-  return { set, remove, go, list, pinObject, load };
+  return { set, remove, go, list, pinObject, load, pins };
 }

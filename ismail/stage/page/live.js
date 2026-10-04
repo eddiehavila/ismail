@@ -109,9 +109,9 @@ export function initLive(ed, desktop, xr) {
   // ---- captions: one at a time, queued
   const capQ = [];
   let capOn = false;
-  function say(text, seconds = 8) {
+  function say(text, seconds = 8, from = null) {
     const ahead = capQ.length + (capOn ? 1 : 0);
-    capQ.push({ text: String(text), seconds: Math.max(1, +seconds || 8) });
+    capQ.push({ text: String(text), seconds: Math.max(1, +seconds || 8), from });
     pumpCaptions();
     return { captions_ahead: ahead };
   }
@@ -121,7 +121,7 @@ export function initLive(ed, desktop, xr) {
     capOn = c;
     el.className = 'caption';
     const b = document.createElement('b');
-    b.textContent = 'CLAUDE';
+    b.textContent = c.from ? String(c.from).toUpperCase() : 'CLAUDE';
     el.append(b, document.createTextNode(c.text));
     $('captions').appendChild(el);
     setTimeout(() => el.classList.add('show'), 30);
@@ -293,7 +293,7 @@ export function initLive(ed, desktop, xr) {
 
   // ---- commands in
   const handlers = {
-    say: (c) => say(c.text, c.seconds),
+    say: (c) => say(c.text, c.seconds, c.from),
     async goto(c) {
       if (presenting()) throw new Error('not in XR');
       if (!c.position || !c.target) throw new Error('goto needs position and target');

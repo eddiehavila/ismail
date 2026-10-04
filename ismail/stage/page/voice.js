@@ -98,12 +98,16 @@ export function initVoice(ed, hands, live) {
     live.emit('voice_hushed', { heard: t.slice(0, k), missed: t.slice(k), at_s: +played.toFixed(1), of_s: +dur.toFixed(1),
       will_repeat_from: t.slice(sentence, sentence + 60) });
   }
+  // the user is talking, or about to, or has just stopped: a phone gesture forming, a note recording, or less than
+  // AFTER_NOTE_MS since the last one ended (they often send the next note at once). Speech and new panels wait for it.
+  const AFTER_NOTE_MS = 3000;
+  const talking = () => !!(note.rec || note.starting || phoneSince || performance.now() - (note.endedAt || -1e9) < AFTER_NOTE_MS);
   async function speak(text, voice) {
     sayQ.push([text, voice, Date.now()]);
     if (speaking) return;
     speaking = true;
     while (sayQ.length) {
-      while ((renderer.xr.isPresenting && !head.on) || note.rec || note.starting) await new Promise((res) => setTimeout(res, 300));
+      while ((renderer.xr.isPresenting && !head.on) || talking()) await new Promise((res) => setTimeout(res, 300));
       const [t, v, at] = sayQ.shift();
       // a line that waited (the user was talking, the headset was off) and has newer ones behind it is old news: skip it
       if (sayQ.length && Date.now() - (at || 0) > 30000) { live.emit("voice_dropped", { text: t.slice(0, 80), waited_s: Math.round((Date.now() - at) / 1000) }); continue; }
@@ -115,7 +119,7 @@ export function initVoice(ed, hands, live) {
         if (!r.ok) throw new Error('tts ' + r.status);
         const a = audio(), buf = await a.decodeAudioData(await r.arrayBuffer());
         // the user may have started talking while this line was being rendered: wait for them, check again, then play
-        while ((renderer.xr.isPresenting && !head.on) || note.rec || note.starting) await new Promise((res) => setTimeout(res, 300));
+        while ((renderer.xr.isPresenting && !head.on) || talking()) await new Promise((res) => setTimeout(res, 300));
         EAR.incoming();
         await new Promise((res) => setTimeout(res, 160));
         const src = a.createBufferSource(), g = a.createGain();
@@ -203,7 +207,7 @@ export function initVoice(ed, hands, live) {
   }
   async function noteStop(why = '') {
     if (!note.rec) return { recording: false };
-    const n = note.rec; note.rec = null; clearTimeout(note.timer);
+    const n = note.rec; note.rec = null; note.endedAt = performance.now(); clearTimeout(note.timer);
     // what the user was looking at when they hung up goes with the note ("take a screenshot of this" means this
     // moment, not whenever Claude gets to it)
     clearInterval(note.snapTimer);
@@ -515,6 +519,6 @@ export function initVoice(ed, hands, live) {
   }
 
   const abortSpeech = () => { sayQ.length = 0; if (speechAbort) speechAbort.abort(); };
-  return { update, speak, noteStart, noteStop, takeAudioStart, takeAudioStop, eyeSnapshot, eyecam, EAR, mic, note, micState, head, ask,
+  return { update, speak, talking, noteStart, noteStop, takeAudioStart, takeAudioStop, eyeSnapshot, eyecam, EAR, mic, note, micState, head, ask,
     shotHooks, abortSpeech };
 }
