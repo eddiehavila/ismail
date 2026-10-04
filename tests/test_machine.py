@@ -240,3 +240,41 @@ def test_a_dead_holders_lock_is_taken_and_a_live_one_is_never_removed(board):
         with open(lock, 'w') as f:                   # a waiter broke our lock meanwhile and took it
             f.write('someone else')
     assert open(lock).read() == 'someone else'       # our release left their lock alone
+
+
+def test_every_finished_job_leaves_one_line_of_history_and_history_sums_it_by_song(board, monkeypatch, tmp_path):
+    """M87: speed claims need a record of what ran, for which song, how long it waited and what it used."""
+    monkeypatch.setattr(machine, '_GpuSampler', lambda: type('G', (), {'stop': lambda self: {
+        'gpu_busy_s': 3.0, 'gpu_mem_peak_gb': 1.5, 'gpu_samples': 4}})())
+    song = tmp_path / 'songs' / 'tambopata'
+    song.mkdir(parents=True)
+    monkeypatch.chdir(song)
+    with machine.slot('gpu', 'render draft 5', who='tambopata', est_s=60):
+        sum(i * i for i in range(300000))                 # a little CPU
+    with pytest.raises(RuntimeError):
+        with machine.slot('cpu', 'a fit that crashed', who='tambopata'):
+            raise RuntimeError('boom')
+    js = machine.history()
+    assert [j['what'] for j in js] == ['render draft 5', 'a fit that crashed']
+    a, b = js
+    assert a['song'] == 'tambopata' and a['kind'] == 'gpu' and a['exit'] == 'ok' and a['est_s'] == 60
+    assert a['gpu_busy_s'] == 3.0 and a['cpu_s'] >= 0 and a['seconds'] >= 0 and a['waited_s'] >= 0
+    assert a['at_start']['gpu_temp'] == COOL['temp'] and 'gpu_reasons' in a['at_start']
+    assert b['exit'] == 'RuntimeError'
+    assert machine.history(song='other') == []
+    text = machine.history_text()
+    assert 'tambopata: 2 jobs' in text and '1 did not end well' in text
+    assert 'never kept' in machine.history_text(song='nobody')
+
+
+def test_the_cli_records_the_commands_exit_and_its_cpu(board):
+    env = dict(os.environ, ISMAIL_MACHINE_DIR=str(board))
+    code = "import sys; sum(i * i for i in range(2000000)); sys.exit(3)"
+    out = subprocess.run([sys.executable, '-m', 'ismail.machine', 'run', '--cpu', '--force', '--what', 'busy probe', '--',
+                          sys.executable, '-c', code], capture_output=True, text=True, env=env, timeout=120)
+    assert out.returncode == 3
+    j = [x for x in machine.history() if x['what'] == 'busy probe'][-1]
+    assert j['exit'] == 3 and j['cpu_s'] > 0.05 and j['rss_peak_gb'] > 0
+    out = subprocess.run([sys.executable, '-m', 'ismail.machine', 'history', '--since', '1d', '--jobs', '1'],
+                         capture_output=True, text=True, env=env, timeout=60)
+    assert "'busy probe'" in out.stdout and 'exit 3' in out.stdout

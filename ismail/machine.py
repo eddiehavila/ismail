@@ -368,6 +368,116 @@ def check(kind, mem_gb=0.0, _jobs=None, who=None, since=None, me=None):
 
 _held = threading.local()
 
+METER_S = 1.0          # the job meter samples CPU, memory and the GPU this often
+
+
+class _GpuSampler:
+    """One nvidia-smi for a whole job, printing the GPU's load and memory every second (never a process per
+    sample). The GPU is shared: these are the whole GPU's numbers while the job held its slot."""
+
+    def __init__(self):
+        self.busy_s, self.mem_peak_gb, self.n = 0.0, 0.0, 0
+        try:
+            self.p = subprocess.Popen(['nvidia-smi', '--query-gpu=utilization.gpu,memory.used',
+                                       '--format=csv,noheader,nounits', f'--loop-ms={int(METER_S * 1000)}'],
+                                      stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+        except OSError:
+            self.p = None
+            return
+        self.t = threading.Thread(target=self._read, daemon=True)
+        self.t.start()
+
+    def _read(self):
+        for line in self.p.stdout:
+            try:
+                util, mem = (float(x) for x in line.split(','))
+            except ValueError:
+                continue
+            self.busy_s += util / 100 * METER_S
+            self.mem_peak_gb = max(self.mem_peak_gb, mem / 1024)
+            self.n += 1
+
+    def stop(self):
+        if self.p is not None:
+            self.p.terminate()
+            try:
+                self.p.wait(5)
+            except subprocess.TimeoutExpired:
+                self.p.kill()
+            return {'gpu_busy_s': round(self.busy_s, 1), 'gpu_mem_peak_gb': round(self.mem_peak_gb, 2),
+                    'gpu_samples': self.n}
+        return {}
+
+
+class _Meter:
+    """While a job holds its slot: the CPU seconds and peak memory of the process that holds it and of every child
+    it starts (a `machine run` command, Blender, a render worker), and the GPU's load."""
+
+    def __init__(self, job, gpu_sampler=True):
+        self.job, self.cpu, self.rss_peak, self.stop_ = job, {}, 0, threading.Event()
+        me = psutil.Process()
+        t = me.cpu_times()
+        self.base = (me.pid, t.user + t.system)       # the holder's CPU before the slot is not the job's
+        self.gpu = _GpuSampler() if gpu_sampler else None
+        self.t = threading.Thread(target=self._loop, daemon=True)
+        self.t.start()
+
+    def _sample(self):
+        try:
+            me = psutil.Process()
+            procs = [me] + me.children(recursive=True)
+        except psutil.Error:
+            return
+        rss = 0
+        for p in procs:
+            try:
+                t = p.cpu_times()
+                self.cpu[(p.pid, p.create_time())] = t.user + t.system
+                rss += p.memory_info().rss
+            except psutil.Error:
+                pass
+        self.rss_peak = max(self.rss_peak, rss)
+
+    def _loop(self):
+        while not self.stop_.wait(METER_S):
+            self._sample()
+
+    def stop(self):
+        self._sample()
+        self.stop_.set()
+        cpu = sum(v for (pid, _), v in self.cpu.items() if pid != self.base[0])
+        cpu += max(0.0, max((v for (pid, _), v in self.cpu.items() if pid == self.base[0]), default=0.0) - self.base[1])
+        out = {'cpu_s': round(cpu, 1), 'rss_peak_gb': round(self.rss_peak / 2 ** 30, 2)}
+        if self.gpu is not None:
+            out.update(self.gpu.stop())
+        return out
+
+
+def _song_of(cwd):
+    """The song a job ran for: the folder under songs/ in its working directory, if any."""
+    parts = os.path.normpath(cwd).replace('\\', '/').split('/')
+    for i, part in enumerate(parts[:-1]):
+        if part == 'songs' and parts[i + 1] and not parts[i + 1].startswith('_'):
+            return parts[i + 1]
+    return None
+
+
+def _record(job, wait_s, state, meter, outcome):
+    """One line per finished job in <board>/history.jsonl, append only: what ran, for which song, when, how long it
+    waited, how it ended, and what it used. Speed claims are made from this file."""
+    ended = time.time()
+    line = {'what': str(job['what'])[:200], 'who': job['who'], 'song': job.get('song') or _song_of(os.getcwd()),
+            'kind': job['kind'], 'cwd': os.getcwd(), 'est_s': job.get('est_s'), 'started': round(job['started'], 2),
+            'ended': round(ended, 2), 'seconds': round(ended - job['started'], 1), 'waited_s': round(wait_s, 1),
+            'exit': job.get('exit', outcome), 'forced': job['forced'], 'at_start': state}
+    line.update(meter)
+    try:
+        with _board_lock():
+            with open(os.path.join(board_dir(), 'history.jsonl'), 'a', encoding='utf8') as f:
+                f.write(json.dumps(line) + '\n')
+    except (OSError, MachineBusy):
+        pass                                           # a full disk or a stuck board never fails the job itself
+
 
 @contextlib.contextmanager
 def slot(kind, what, est_s=None, mem_gb=0.0, who=None, force=False, threads=THREADS, wait=None):
@@ -413,6 +523,11 @@ def slot(kind, what, est_s=None, mem_gb=0.0, who=None, force=False, threads=THRE
                 os.remove(wpath)
             except OSError:
                 pass
+    g = gpu()
+    state = {'gpu_temp': g['temp'], 'gpu_clock': g['clock'], 'gpu_reasons': hex(g['reasons']),
+             'gpu_trouble': gpu_trouble(g) or None} if g else {}
+    if _cpu_cache[1] is not None:
+        state['cpu_busy'] = round(_cpu_cache[1][0])
     with _board_lock():
         job = {'kind': kind, 'what': what, 'who': who, 'pid': me.pid, 'pid_start': me.create_time(),
                'started': time.time(), 'est_s': est_s, 'mem_gb': mem_gb, 'forced': bool(force)}
@@ -422,6 +537,8 @@ def slot(kind, what, est_s=None, mem_gb=0.0, who=None, force=False, threads=THRE
             json.dump(job, f)
     _held.depth = 1
     limits = None
+    meter = _Meter(job, gpu_sampler=g is not None)
+    outcome = 'ok'
     try:
         if threads:
             try:
@@ -430,6 +547,9 @@ def slot(kind, what, est_s=None, mem_gb=0.0, who=None, force=False, threads=THRE
             except ImportError:
                 pass
         yield job
+    except BaseException as e:
+        outcome = type(e).__name__
+        raise
     finally:
         _held.depth = 0
         if limits is not None:
@@ -438,6 +558,7 @@ def slot(kind, what, est_s=None, mem_gb=0.0, who=None, force=False, threads=THRE
             os.remove(path)
         except OSError:
             pass
+        _record(job, job['started'] - since, state, meter.stop(), outcome)
 
 
 def _who():
@@ -485,6 +606,63 @@ def board():
     return '\n'.join(L)
 
 
+def history(song=None, since=None):
+    """Finished jobs from <board>/history.jsonl, oldest first (song: only that song's; since: epoch seconds)."""
+    out = []
+    try:
+        with open(os.path.join(board_dir(), 'history.jsonl'), encoding='utf8') as f:
+            for line in f:
+                try:
+                    j = json.loads(line)
+                except ValueError:
+                    continue
+                if (song is None or j.get('song') == song) and (since is None or j.get('started', 0) >= since):
+                    out.append(j)
+    except OSError:
+        pass
+    return out
+
+
+def _since(text):
+    t = str(text).strip().lower()
+    if t[-1:] == 'd' and t[:-1].replace('.', '', 1).isdigit():
+        return time.time() - float(t[:-1]) * 86400
+    if t[-1:] in 'hms' and t[:-1].replace('.', '', 1).isdigit():
+        return time.time() - duration_s(t)
+    try:
+        return time.mktime(time.strptime(t, '%Y-%m-%d'))
+    except ValueError:
+        raise ValueError(f"--since {text!r}: a date (2026-10-04) or a span (7d, 12h)")
+
+
+def history_text(song=None, since=None, n_jobs=0):
+    js = history(song, since)
+    if not js:
+        return ("no finished jobs recorded" + (f" for {song}" if song else '') + " (the history starts with the first "
+                "job that finished after it was added; earlier jobs were never kept)")
+    first = time.strftime('%Y-%m-%d %H:%M', time.localtime(js[0]['started']))
+    by = {}
+    for j in js:
+        s = by.setdefault(j.get('song') or '(no song)', {'jobs': 0, 'wall': 0.0, 'cpu': 0.0, 'gpu': 0.0, 'failed': 0})
+        s['jobs'] += 1
+        s['wall'] += j.get('seconds', 0)
+        s['cpu'] += j.get('cpu_s', 0)
+        s['gpu'] += j.get('gpu_busy_s', 0)
+        s['failed'] += j.get('exit') not in (0, 'ok')
+    L = [f"{len(js)} jobs since {first} (wall = time holding a slot; CPU = seconds of CPU across cores; GPU = whole-GPU "
+         f"busy seconds while the job held its slot; the GPU is shared)"]
+    for name, s in sorted(by.items(), key=lambda kv: -kv[1]['wall']):
+        L.append(f"  {name}: {s['jobs']} jobs, {s['wall'] / 3600:.2f} h wall, {s['cpu'] / 3600:.2f} h CPU, "
+                 f"{s['gpu'] / 3600:.2f} h GPU busy" + (f", {s['failed']} did not end well" if s['failed'] else ''))
+    if n_jobs:
+        L.append(f"last {min(n_jobs, len(js))} jobs:")
+        for j in js[-n_jobs:]:
+            L.append(f"  {time.strftime('%m-%d %H:%M', time.localtime(j['started']))} {j['kind']} '{j['what'][:60]}' "
+                     f"({j.get('song') or '-'}) {j.get('seconds', 0) / 60:.1f} min, waited {j.get('waited_s', 0):.0f} s,"
+                     f" CPU {j.get('cpu_s', 0):.0f} s, exit {j.get('exit')}")
+    return '\n'.join(L)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description='The shared machine: the board, or run a command in a heavy-job slot.')
     sub = ap.add_subparsers(dest='cmd')
@@ -505,6 +683,10 @@ def main(argv=None):
     p.add_argument('--by', default=None, help='who gave it (the user)')
     p.add_argument('--why', default='', help='what it is for, for the board')
     p.add_argument('--clear', action='store_true')
+    h = sub.add_parser('history', help='what ran and what it used: compute time per song (history --song tambopata)')
+    h.add_argument('--song', default=None)
+    h.add_argument('--since', default=None, help='a date (2026-10-04) or a span back from now (7d, 12h)')
+    h.add_argument('--jobs', type=int, default=0, help='also list the last N jobs')
     a = ap.parse_args(argv)
     if hasattr(sys.stdout, 'reconfigure'):
         sys.stdout.reconfigure(errors='replace')
@@ -525,6 +707,12 @@ def main(argv=None):
         print(f"priority: {pr['who']} goes first in line until {time.strftime('%H:%M', time.localtime(pr['until']))} "
               f"(given by {pr['by']}); the heat limit and the busy CPU still hold")
         return 0
+    if a.cmd == 'history':
+        try:
+            print(history_text(a.song, _since(a.since) if a.since else None, a.jobs))
+        except ValueError as e:
+            ap.error(str(e))
+        return 0
     if a.cmd != 'run':
         print(board())
         return 0
@@ -542,13 +730,14 @@ def main(argv=None):
         ap.error(str(e))
     try:
         with slot(kind, a.what or ' '.join(cmd)[:80], est_s=est_s, mem_gb=a.mem,
-                  force=a.force, threads=None, wait=wait_s):
+                  force=a.force, threads=None, wait=wait_s) as job:
             p = subprocess.Popen(cmd)
             try:
                 psutil.Process(p.pid).nice(psutil.BELOW_NORMAL_PRIORITY_CLASS if sys.platform == 'win32' else 10)
             except (psutil.Error, AttributeError):
                 pass
-            return p.wait()
+            job['exit'] = p.wait()
+            return job['exit']
     except MachineBusy as e:
         print(e, file=sys.stderr)
         return 75                                            # EX_TEMPFAIL: try again later

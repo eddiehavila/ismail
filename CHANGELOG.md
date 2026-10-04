@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### What ran, and what it used: the machine's job history (M87)
+
+- Every job that held a slot leaves one line in `<board>/history.jsonl` when it ends (append only): what, the
+  session, the song (from its working folder), the kind, the estimate, start and end, how long it waited in line,
+  its exit (a `machine run` command's exit code, or the error that ended an op), CPU seconds of the holder and every
+  process it started, peak memory, the whole GPU's busy seconds and peak memory while it held the slot (one
+  `nvidia-smi` loop per job), and the machine's state at its start (GPU temperature, clock, throttle reasons, CPU).
+- `python -m ismail.machine history [--song slug] [--since 7d|2026-10-04] [--jobs N]` sums it per song.
+- History starts with this change; jobs before it were never kept.
+
 ### The machine board's lock holds under a crowd (M85); one test file is not a heavy run (M86)
 
 - `ismail.machine`: a job waiting in line no longer dies when the board's lock changes hands under it (a holder
