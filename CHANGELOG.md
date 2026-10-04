@@ -51,6 +51,9 @@
   floor, keep-out boxes, the default scene, the build script) lives in `scenes/<name>/world.json` and
   `scenes/stage.json`. Session files (client log, speech cache, bundle, update notes) go to `<scenes>/_stage/`.
 - One server per port: a busy port is refused (Windows let two servers bind one port and split the live link).
+- The version card in front of the person shows on entering VR, when the server restarts, and when listening flips
+  between somebody and nobody; no longer each time one listener of several comes or goes (an agent polling every
+  half minute kept bringing it back).
 - Body panels hold still to be read: a panel the person looks at (within 32 degrees) stays where it is, and for 1.5 s
   after; looking at it never counts as the body turning; it moves only when its place has drifted 25 cm for 0.6 s
   (a walk, a real body turn), then eases there. It used to dart away as they turned to read it.
