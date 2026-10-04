@@ -118,11 +118,19 @@ def stage_status(scene: str = None) -> str:
             info = link.http(r, 'stage', timeout=5)
             live = link.http(r, 'live', timeout=5)
         except OpError as e:
-            lines.append(f'port {r["port"]}: not answering ({e})')
+            lines.append(f'port {r["port"]}: not answering ({e}); stage_stop(port={r["port"]}) and stage_start again')
             continue
+        try:
+            h = link.http(r, 'health', timeout=5)
+            health = (f'{"well" if h["ok"] else "UNWELL"}: {h["busy"]}/{h["workers"]} workers busy, {h["long_polls"]} '
+                      f'long-polls, {h["threads"]} threads, {h["served"]} requests in {h["uptime_s"]} s, '
+                      f'{h["state_free_mb"]} MB free' + (f', a write failed {h["disk_warned_s_ago"]} s ago'
+                                                       if h.get('disk_warned_s_ago') is not None else ''))
+        except OpError:
+            health = 'no /health (an older server)'
         pages = ', '.join(f'{p["scene"]} ({p.get("mode") or "?"}, {p["age_s"]} s ago)' for p in live) or 'no page open'
         lines.append(f'{r["url"]} pid {r["pid"]}: {r["scenes"]}; scenes {", ".join(info["scenes"])}; default '
-                     f'{info["default"] or "none"}; pages: {pages}')
+                     f'{info["default"] or "none"}; pages: {pages}; {health}')
     if scene:
         rec = link.server_for(scene)
         st = link.page_state(rec, scene)

@@ -19,7 +19,8 @@ person and an agent change the same scene.
   never share them by default.
 - **Start:** `stage_start(scenes="<song>/video/vr/scenes")` replies with the address. Open
   `<address>?scene=<name>` on the desktop, or in the headset through `tailscale serve` (https). One server per port;
-  `stage_status` lists servers, scenes and which pages are live.
+  `stage_status` lists servers, scenes, which pages are live and the server's health (workers busy, long-polls,
+  threads, free disk; GET /health).
 - **Drive:** each page command is a typed tool that waits for the page's answer: `stage_object_set`,
   `stage_object_select`, `stage_say`, `stage_panel_show`, `stage_waypoint_set`, `stage_actor_play`, `stage_stream`,
   `stage_scene_go` and the rest. A tool fails with the next step when no page shows the scene; `stage_cmd` is only
