@@ -17,6 +17,10 @@
   floor, keep-out boxes, the default scene, the build script) lives in `scenes/<name>/world.json` and
   `scenes/stage.json`. Session files (client log, speech cache, bundle, update notes) go to `<scenes>/_stage/`.
 - One server per port: a busy port is refused (Windows let two servers bind one port and split the live link).
+- The stage server stays up (M74): a fixed pool of 32 workers instead of a thread per request (Python 3.11 kept every
+  finished request thread, and the page polls 2.5 times a second: the old server died of a MemoryError after about
+  40,500 threads), long-polls capped per client, `GET /health` (shown by `stage_status`). A full disk no longer
+  stops the live link (state and events stay in memory) or the headset's boot (the last good bundle is served).
 - The Blender bridge and the Quest diet (`ismail/stage/bridge`: merged groups, triangle and texture budgets,
   MakeHuman skin and mask-map fixes) ship with it. three.js r180 is vendored (MIT).
 
