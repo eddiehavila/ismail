@@ -47,6 +47,7 @@ import os
 import re
 import shutil
 import ssl
+import subprocess
 import threading
 import time
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -466,10 +467,20 @@ class Handler(SimpleHTTPRequestHandler):
         host = self.headers.get('Host', '')
         if not self.server.host_ok(host):
             return self._refused(421, 'unknown Host name', f'this stage answers to its own names, not {host!r}')
-        origin = self.headers.get('Origin')
-        writes = self.command not in ('GET', 'HEAD') or urlparse(self.path).path.startswith('/live')
-        if origin is not None and writes and not self.server.origin_ok(origin, host, self.headers.get('X-Forwarded-Host')):
+        origin, path = self.headers.get('Origin'), urlparse(self.path).path
+        writes = self.command not in ('GET', 'HEAD') or path.startswith('/live')
+        # X-Forwarded-Host only from the proxy on this PC (tailscale serve), and only a name we answer to
+        fwd = self.headers.get('X-Forwarded-Host')
+        if fwd and not (self.client_address[0] in ('127.0.0.1', '::1') and self.server.host_ok(fwd)):
+            fwd = None
+        if origin is not None and writes and not self.server.origin_ok(origin, host, fwd):
             return self._refused(403, 'cross-origin request', f'a page on {origin} may not write to this stage')
+        # a page elsewhere can still make a browser GET these by embedding them (an audio element: no Origin); each
+        # new /voice/say text runs speech synthesis and writes a cached file. Browsers say where a fetch comes from
+        # (Sec-Fetch-Site); agents send nothing
+        site = self.headers.get('Sec-Fetch-Site')
+        if path in ('/voice/say', '/livestream') and site not in (None, 'same-origin', 'none'):
+            return self._refused(403, 'cross-site fetch', f"{path} answers this stage's own page only")
         return True
 
     def _refused(self, code, reason, msg):
@@ -1044,6 +1055,7 @@ class Server(ThreadingHTTPServer):
         self.refused = {}
         self.lan_host = None                        # --host (the LAN TLS mode): its address is one of our names
         self._hosts = (0.0, set())
+        self.ts_names = None                        # this PC's own tailnet name(s), read once (tailnet_names)
         super().__init__(*a, **kw)
 
     # ---- who may talk to this server (Handler.parse_request)
@@ -1061,6 +1073,24 @@ class Server(ThreadingHTTPServer):
         self._hosts = (time.time(), names)
         return names
 
+    def tailnet_names(self):
+        """This PC's own MagicDNS name (`tailscale status --json` Self.DNSName), read once. Only this machine's name:
+        every person's stage defaults to 8862 under their own tailnet name, so once tailnets are shared a page from
+        someone else's stage must not pass as this one."""
+        if self.ts_names is None:
+            names = set()
+            exe = shutil.which('tailscale')
+            if exe:
+                try:
+                    r = subprocess.run([exe, 'status', '--json'], capture_output=True, text=True, timeout=5)
+                    d = json.loads(r.stdout or '{}').get('Self', {}).get('DNSName', '')
+                    if d:
+                        names.add(d.rstrip('.').lower())
+                except (OSError, ValueError, subprocess.TimeoutExpired):
+                    pass
+            self.ts_names = names
+        return self.ts_names
+
     def _lan_names(self):
         if not self.lan_host:
             return set()
@@ -1073,18 +1103,18 @@ class Server(ThreadingHTTPServer):
             return set()
 
     def host_ok(self, host):
-        """Loopback with our port, a name under Tailscale's own domain (.ts.net: nobody else can point one at this
-        PC), the --host address, or a listed name. Anything else is a rebinding attempt or a mistake."""
+        """Loopback with our port, this PC's own tailnet name, the --host address, or a listed name. Anything else
+        is a rebinding attempt or a mistake."""
         name, port = split_host(host)
         if not name:
             return False
         if name in ('127.0.0.1', 'localhost', '::1'):
             return port in (None, self.server_address[1])
-        return name.endswith('.ts.net') or name in self._lan_names() or name in self._listed_hosts()
+        return name in self.tailnet_names() or name in self._lan_names() or name in self._listed_hosts()
 
     def origin_ok(self, origin, host, forwarded=None):
         """A browser's Origin must be this stage itself: the Host it asked for, the name tailscale serve forwarded,
-        or (behind tailscale serve on loopback) a .ts.net name on our own port."""
+        or (behind tailscale serve on loopback) this PC's tailnet name on our own port."""
         o = urlparse(origin)
         if o.scheme not in ('http', 'https') or not o.hostname:
             return False                            # "null" (a sandboxed frame, a file) and anything odd
@@ -1094,7 +1124,7 @@ class Server(ThreadingHTTPServer):
             if name and name == o.hostname.lower() and (port or (443 if o.scheme == 'https' else 80)) == oport:
                 return True
         hname, _ = split_host(host)
-        return hname in ('127.0.0.1', 'localhost', '::1') and o.hostname.lower().endswith('.ts.net') \
+        return hname in ('127.0.0.1', 'localhost', '::1') and o.hostname.lower() in self.tailnet_names() \
             and oport == self.server_address[1]
 
     def refuse(self, reason, handler=None):

@@ -60,19 +60,35 @@ def test_a_page_on_another_origin_cannot_write(stage):
     assert _req(p, 'POST', 'live/cmd?scene=room', {'type': 'voice_rec', 'on': True}, {'Origin': other})[0] == 403
     assert _req(p, 'GET', 'live/events?scene=room&since=0', headers={'Origin': 'null'})[0] == 403
     assert _req(p, 'POST', 'live/event?scene=room', {'type': 'gesture'}, {'Origin': 'https://example.com'})[0] == 403
-    # the real page: same origin; through tailscale serve: its .ts.net name on our port, Host as it arrives
-    assert _req(p, 'POST', 'live/event?scene=room', {'type': 'gesture'}, {'Origin': f'http://127.0.0.1:{p}'})[0] == 200
+    # the real page: same origin; through tailscale serve: this PC's tailnet name on our port, Host as it arrives
+    stage['srv'].ts_names = {'box.tail1234.ts.net'}                # as `tailscale status --json` Self.DNSName
+    ev = {'type': 'gesture'}
+    assert _req(p, 'POST', 'live/event?scene=room', ev, {'Origin': f'http://127.0.0.1:{p}'})[0] == 200
     ts = 'https://box.tail1234.ts.net'
-    assert _req(p, 'POST', 'live/event?scene=room', {'type': 'gesture'}, {'Origin': f'{ts}:{p}'})[0] == 200
-    assert _req(p, 'POST', 'live/event?scene=room', {'type': 'gesture'}, {'Origin': ts},
-                host='box.tail1234.ts.net')[0] == 200
-    assert _req(p, 'POST', 'live/event?scene=room', {'type': 'gesture'}, {'Origin': ts},
-                host=f'127.0.0.1:{p}')[0] == 403                    # a .ts.net page on another port
+    assert _req(p, 'POST', 'live/event?scene=room', ev, {'Origin': f'{ts}:{p}'})[0] == 200
+    assert _req(p, 'POST', 'live/event?scene=room', ev, {'Origin': ts}, host='box.tail1234.ts.net')[0] == 200
+    assert _req(p, 'POST', 'live/event?scene=room', ev, {'Origin': ts}, host=f'127.0.0.1:{p}')[0] == 403   # another port
+    # another person's stage on a shared tailnet: same default port, their own name (review R1)
+    assert _req(p, 'POST', 'live/event?scene=room', ev, {'Origin': f'https://their.tailother.ts.net:{p}'})[0] == 403
+    # X-Forwarded-Host counts only as a name we answer to (review R2)
+    assert _req(p, 'POST', 'live/event?scene=room', ev, {'Origin': ts, 'X-Forwarded-Host': 'box.tail1234.ts.net'})[0] == 200
+    assert _req(p, 'POST', 'live/event?scene=room', ev, {'Origin': 'https://evil.example',
+                                                          'X-Forwarded-Host': 'evil.example'})[0] == 403
     # an agent (no Origin)
-    assert _req(p, 'POST', 'live/event?scene=room', {'type': 'gesture'})[0] == 200
+    assert _req(p, 'POST', 'live/event?scene=room', ev)[0] == 200
     # a plain page read: GET with no Origin is not a write
     assert _req(p, 'GET', 'health', host=f'localhost:{p}')[0] == 200
-    assert _refused(p) == {'cross-origin request': 5}
+    assert _refused(p) == {'cross-origin request': 7}
+
+
+def test_a_page_elsewhere_cannot_make_the_stage_speak(stage):
+    # an <audio src> on another site sends no Origin, but the browser says where the fetch came from (review R3)
+    p = stage['port']
+    for site in ('cross-site', 'same-site'):
+        for path in ('voice/say?text=hello', 'livestream?name=master'):
+            code, got = _req(p, 'GET', path, headers={'Sec-Fetch-Site': site})
+            assert code == 403 and got['refused'] == 'cross-site fetch', (site, path)
+    assert _refused(p) == {'cross-site fetch': 4}
 
 
 def test_unknown_host_names_are_refused(stage):
@@ -83,14 +99,16 @@ def test_unknown_host_names_are_refused(stage):
     assert _req(p, 'GET', 'health', host='')[0] == 421
     assert _req(p, 'GET', 'health', host=f'127.0.0.1:{p}')[0] == 200
     assert _req(p, 'GET', 'health', host=f'[::1]:{p}')[0] == 200
+    stage['srv'].ts_names = {'x.tailnet-name.ts.net'}              # this PC's own tailnet name only (review R1)
     assert _req(p, 'GET', 'health', host='x.tailnet-name.ts.net')[0] == 200
     assert _req(p, 'GET', 'health', host='x.tailnet-name.ts.net:8862')[0] == 200
+    assert _req(p, 'GET', 'health', host='someone.tailother.ts.net')[0] == 421
     # a name listed in ~/.ismail/stage.json (beside the registry folder)
     assert _req(p, 'GET', 'health', host='studio.lan')[0] == 421
     (S.registry_dir().parent / 'stage.json').write_text(json.dumps({'hosts': ['studio.lan']}), encoding='utf-8')
     stage['srv']._hosts = (0.0, set())                             # skip the 5 s cache
     assert _req(p, 'GET', 'health', host='studio.lan:8862')[0] == 200
-    assert _refused(p)['unknown Host name'] == 4
+    assert _refused(p)['unknown Host name'] == 5
 
 
 def test_scenes_paths_stay_inside_the_scenes_folder(stage):
