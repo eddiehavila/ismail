@@ -217,6 +217,10 @@ A person in a headset cannot see your terminal. Contact is part of the interface
   motion becomes his foot's), `touch=True` so they start when ready, `pin` to keep a hand on the bar, `hold` to keep
   a part still, `mimic` for a turn (a fingertip into a tail). Seated is a hips pin plus the legs' drives. When a map
   works, save it to the actor (`stage_actor_map_save`); a "default" map is ready every Follow.
+- **Start the person from their own pose.** `stage_actor_start(scene, person, pose)` gives them a start pose (a
+  frame of a take, or a pose exported from Blender: the actor's rest is an A-pose standing at the origin, not the
+  pose the scene shows); every Follow and playback then starts there, and the user's motion plays as changes from
+  their pose at GO. Check it by number with `stage_actor_pose` (the hands on the bar top, the pelvis over the seat).
 - **Set up a moment in one call.** `stage_batch(scene, ops=[...])` runs several stage ops in order (seat a person,
   mark the clip, show a card): the page commands land together, and a failure stops the rest.
 - **Say who you are.** Pass `sender=` (your name as the person knows it, e.g. "crossroads film") on `stage_say` and

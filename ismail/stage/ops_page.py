@@ -359,13 +359,16 @@ def stage_actor_stop(scene: str, person: str, why: str = 'stopped') -> str:
 
 @op(mutates=True)
 def stage_actor_follow(scene: str, person: str, actor: str = None, mode: str = 'place', mirror: bool = False,
-                 assets: str = None) -> str:
+                 assets: str = None, countdown: int = 0) -> str:
     """Make a person move with the person in VR, live, from where they stand (page command: actor_follow). mode:
     place (dances on the spot) | walk (walks as the user walks); mirror reflects left and right. It stops by itself
     when the user goes more than 6 m away. Meant for VR (it reads the live head and hands). Errors: no actor for that
     person, no live body source. Page replies {person, actor, following: true, scale}. Emits: actor_stop (anything
-    already on them), actor_follow; later actor_stop {why: walked_away}."""
-    return page_cmd(scene, 'actor_follow', {'person': person, 'actor': actor, 'mode': mode, 'mirror': mirror, 'assets': assets}, timeout=30)
+    already on them), actor_follow; later actor_stop {why: walked_away}. countdown= seconds counted down in front of
+    the user first (3, 2, 1, GO, with ticks) so they can take the person's pose; the Follow starts from their pose at
+    GO (the menu's Follow and Take count 3). Emits follow_countdown when it begins."""
+    return page_cmd(scene, 'actor_follow', {'person': person, 'actor': actor, 'mode': mode, 'mirror': mirror, 'assets': assets,
+                                            'countdown': countdown or None}, timeout=30 + (countdown or 0))
 
 
 @op(mutates=True)
@@ -620,4 +623,14 @@ def stage_control_map(scene: str, person: str, preset: str = None, drives: list 
     return page_cmd(scene, 'control_map', {'person': person, 'preset': preset, 'drives': drives, 'clear': clear or None}, timeout=30)
 
 
-TYPED = {'key_interp': 'stage_key_interp', 'control_set': 'stage_control_set', 'control_map': 'stage_control_map', 'perform': 'stage_perform', 'follow_anchor': 'stage_follow_anchor', 'take_keep_last': 'stage_take_keep_last', 'ack': 'stage_voice_ack', 'actor_follow': 'stage_actor_follow', 'actor_play': 'stage_actor_play', 'actor_stop': 'stage_actor_stop', 'anchor': 'stage_anchor_set', 'anchor_release': 'stage_anchor_release', 'anim_clear': 'stage_anim_clear', 'anim_save': 'stage_anim_save', 'ask': 'stage_ask', 'clear_markers': 'stage_markers_clear', 'clock': 'stage_clock_set', 'cue': 'stage_cue_set', 'cue_remove': 'stage_cue_remove', 'cues_clear': 'stage_cues_clear', 'cues_list': 'stage_cues_list', 'deselect': 'stage_object_deselect', 'drop': 'stage_object_drop', 'eyecam': 'stage_view_eyecam', 'focus': 'stage_view_focus', 'gallery_add': 'stage_gallery_add', 'goto': 'stage_person_goto', 'goto_camera': 'stage_camera_goto', 'growth': 'stage_growth_set', 'highlight': 'stage_object_highlight', 'key': 'stage_key_set', 'key_delete': 'stage_key_delete', 'light': 'stage_light_set', 'look_through': 'stage_view_look_through', 'marker': 'stage_marker_set', 'music': 'stage_music', 'panel': 'stage_panel_show', 'panel_close': 'stage_panel_close', 'reload': 'stage_scene_reload', 'say': 'stage_say', 'scene_go': 'stage_scene_go', 'scene_list': 'stage_scene_list', 'select': 'stage_object_select', 'set': 'stage_object_set', 'sky': 'stage_sky_set', 'snapshot': 'stage_view_snapshot', 'stream': 'stage_stream', 'take_start': 'stage_take_start', 'take_stop': 'stage_take_stop', 'take_view': 'stage_take_view', 'take_view_clear': 'stage_take_view_clear', 'timeline': 'stage_timeline_show', 'trees_reload': 'stage_trees_reload', 'undo': 'stage_edit_undo', 'voice_rec': 'stage_voice_note', 'walk': 'stage_view_walk', 'waypoint': 'stage_waypoint_set', 'waypoint_go': 'stage_waypoint_go', 'waypoint_remove': 'stage_waypoint_remove', 'waypoints_clear': 'stage_waypoints_clear', 'waypoints_list': 'stage_waypoints_list'}
+@op()
+def stage_actor_pose(scene: str, person: str, t: float = None) -> str:
+    """Where a person's joints are, in Blender metres (page command: actor_pose): pelvis, spine_03, head, lowerarm_l/r,
+    hand_l/r, calf_l/r, foot_l/r. While the user follows them: now. While a take plays on them: at t seconds of the
+    take (default: the frame playing). Otherwise: their start pose (stage_actor_start; 'rest' when none), i.e. frame 0
+    of the next Follow. Check contact numerically: the pelvis over the seat top, the hands on the bar top. Page
+    replies {person, joints, start, take, t}."""
+    return page_cmd(scene, 'actor_pose', {'person': person, 't': t}, timeout=30)
+
+
+TYPED = {'actor_pose': 'stage_actor_pose', 'key_interp': 'stage_key_interp', 'control_set': 'stage_control_set', 'control_map': 'stage_control_map', 'perform': 'stage_perform', 'follow_anchor': 'stage_follow_anchor', 'take_keep_last': 'stage_take_keep_last', 'ack': 'stage_voice_ack', 'actor_follow': 'stage_actor_follow', 'actor_play': 'stage_actor_play', 'actor_stop': 'stage_actor_stop', 'anchor': 'stage_anchor_set', 'anchor_release': 'stage_anchor_release', 'anim_clear': 'stage_anim_clear', 'anim_save': 'stage_anim_save', 'ask': 'stage_ask', 'clear_markers': 'stage_markers_clear', 'clock': 'stage_clock_set', 'cue': 'stage_cue_set', 'cue_remove': 'stage_cue_remove', 'cues_clear': 'stage_cues_clear', 'cues_list': 'stage_cues_list', 'deselect': 'stage_object_deselect', 'drop': 'stage_object_drop', 'eyecam': 'stage_view_eyecam', 'focus': 'stage_view_focus', 'gallery_add': 'stage_gallery_add', 'goto': 'stage_person_goto', 'goto_camera': 'stage_camera_goto', 'growth': 'stage_growth_set', 'highlight': 'stage_object_highlight', 'key': 'stage_key_set', 'key_delete': 'stage_key_delete', 'light': 'stage_light_set', 'look_through': 'stage_view_look_through', 'marker': 'stage_marker_set', 'music': 'stage_music', 'panel': 'stage_panel_show', 'panel_close': 'stage_panel_close', 'reload': 'stage_scene_reload', 'say': 'stage_say', 'scene_go': 'stage_scene_go', 'scene_list': 'stage_scene_list', 'select': 'stage_object_select', 'set': 'stage_object_set', 'sky': 'stage_sky_set', 'snapshot': 'stage_view_snapshot', 'stream': 'stage_stream', 'take_start': 'stage_take_start', 'take_stop': 'stage_take_stop', 'take_view': 'stage_take_view', 'take_view_clear': 'stage_take_view_clear', 'timeline': 'stage_timeline_show', 'trees_reload': 'stage_trees_reload', 'undo': 'stage_edit_undo', 'voice_rec': 'stage_voice_note', 'walk': 'stage_view_walk', 'waypoint': 'stage_waypoint_set', 'waypoint_go': 'stage_waypoint_go', 'waypoint_remove': 'stage_waypoint_remove', 'waypoints_clear': 'stage_waypoints_clear', 'waypoints_list': 'stage_waypoints_list'}
