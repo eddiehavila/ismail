@@ -1,0 +1,12 @@
+{
+  "name": "ismail live",
+  "short_name": "ismail",
+  "description": "The live set in your pocket: listen, talk back, answer the DJ.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0b0b0e",
+  "theme_color": "#0b0b0e",
+  "icons": [{"src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable"}]
+}

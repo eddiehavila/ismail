@@ -59,6 +59,20 @@
   knees, feet): now while following, at `t` of a playing take, otherwise the start pose (frame 0 of the next
   Follow), so contact can be checked by number.
 
+### The phone page: a live set in your pocket
+
+- `phone_start` serves a page over the tailnet that plays the live engine's master as an mp3 stream, which keeps
+  going with the phone's screen off. The lock screen and earbuds work too: next = change it up, previous = love
+  this. It has 30 s rewind and jump to live, reconnects by itself, keeps taps made offline, and has 64 or 128 kbps.
+- Talking back: hold to talk, or tap once to talk hands-free. Notes are transcribed on this machine, waiting while
+  the CPU is over the governor's limit. Taps on the page: love, change it up, calmer or more energy, quieter or
+  louder, pause or resume the set, start a set. A mood hint: calm, steady, lift, peak. Every line is stamped with
+  the bar the person actually heard and how far behind the room they are, and lands in an inbox the agent reads
+  (`phone_listen`), in the song's `notes/phone_inbox.jsonl`, and in hooks.
+- Agents drive the page: `phone_now` (now playing, next up, why recording is on or off), `phone_say` (a caption, a
+  pinned "since you left", or a line spoken into the stream when answering), `phone_ask`, `phone_panel_show`,
+  `phone_exam` (blind exams with Submit, answers written to the exam's file), `phone_offer` (downloads),
+  `phone_buttons` (their own buttons as data), `phone_buzz`, `phone_status`. Reference: `references/phone.md`.
 ### voices_list names each voice's function (from the e002 pilots)
 
 - `voices_list` shows `fn=perform` or `fn=voice` on every code voice; it used to say `'fn': 'voice'` for all of
