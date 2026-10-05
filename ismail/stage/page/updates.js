@@ -160,7 +160,7 @@ export function initUpdates(ed, live, hands, voice) {
     if (!card.visible) { st.thumbSince = 0; return; }
     card.position.copy(h.f.wrist).addScaledVector(up, 0.2);
     const now = performance.now();
-    if (h.g === 'thumbs_up') {
+    if (h.g === 'thumbs_up' && !hands.performing) {          // perform.js: gestures off while performing
       if (!st.thumbSince) st.thumbSince = now;
       const k = Math.min(1, (now - st.thumbSince) / THUMB_HOLD_MS);
       drawCard(k);

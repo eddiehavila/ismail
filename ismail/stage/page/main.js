@@ -26,6 +26,7 @@ import { initScenes } from './scenes.js';
 import { initWaypoints } from './waypoints.js';
 import { initCues } from './cues.js';
 import { initAnchors } from './anchor.js';
+import { initPerform } from './perform.js';
 import { loadWorld } from './world.js';
 
 // the scene: ?scene=, else the server's default (scenes/stage.json "default", else its first scene)
@@ -72,6 +73,9 @@ live.handlers.take_view_clear = () => takes4d.clear();
 const actors = initActors(ed, live);
 actors.setSource(() => hands.frameNow());   // live follow: the user's body this moment
 live.handlers.actor_follow = (c) => actors.follow(c);
+const perform = initPerform(ed, hands, voice, live, () => actors);   // a Follow is a performance (perform.js)
+window.VR_perform = perform;
+xr.setPerforming(() => hands.performing);
 initMusic(ed, live);
 initStream(ed, live);
 // a re-exported room comes in without the grown trees (they hang under the old scene's tree_k items): grow them again
@@ -93,18 +97,31 @@ ed.addEventListener('switched', () => fetch(`scenes/${encodeURIComponent(ed.scen
 panels.registerPokeable(xr.panelMesh, (uv) => xr.pressUV(uv), (uv) => xr.hoverUV(uv));   // the colour panel takes a fingertip too
 live.handlers.panel = (c) => panels.show(c);
 live.handlers.panel_close = (c) => panels.close(c.panel_id, 'closed by Claude');
-const startTake = (name) => { const r = hands.startTake(name); if (r && !r.already) voice.takeAudioStart(r.id); return r; };
+// a take during a performance takes its voice from the performance (its clips, linked in the take's meta);
+// otherwise the mic records the whole take
+const startTake = (name) => {
+  const r = hands.startTake(name);
+  if (r && !r.already) {
+    const link = perform.attachTake(r.id, hands.rec.t0);
+    if (link) fetch(`take/meta?scene=${encodeURIComponent(ed.sceneName)}&take=${encodeURIComponent(r.id)}`, { method: 'POST',
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(link) }).catch(() => {});
+    else voice.takeAudioStart(r.id);
+  }
+  return r;
+};
 const stopTake = async () => { const r = await hands.stopTake(); if (r && r.id) voice.takeAudioStop(); return r; };
 live.handlers.take_start = (c) => startTake(c.name || '');
 xr.setHandState(hands.state);
-// every Follow is buffered in memory (hands.js); after it stops the user (actions.js) or an agent can keep it as a take
+// every Follow is a performance (perform.js) and is buffered in memory on the performance's clock (hands.js); after
+// it stops the user (actions.js) or an agent can keep it as a take
 live.onEmit((type, d) => {
-  if (type === 'actor_follow' && d) hands.shadowStart(d.person);
-  else if (type === 'actor_stop' && d && d.live) hands.shadowStop();
+  if (type === 'actor_follow' && d) { const p = perform.start(d.person); hands.shadowStart(d.person, p.t0, p); }
+  else if (type === 'actor_stop' && d && d.live) { hands.shadowStop(); perform.stop(); }
 });
 live.handlers.take_keep_last = (c) => hands.keepLast(c.name || null);
 const actions = initActions(ed, hands, panels, live, { start: (n) => startTake(n), stop: () => stopTake(), recording: () => hands.rec.on,
   keepLast: (n) => hands.keepLast(n), discardLast: () => hands.discardLast(), lastFollow: () => hands.lastFollowInfo(),
+  lastFollowData: () => hands.lastFollowData(), perform,
   get actors() { return actors; }, get view() { return takes4d; }, get ear() { return voice.EAR; }, get clock() { return stageClock; } });   // defined below; used on a menu press
 live.handlers.take_stop = () => stopTake();
 const sayText = live.handlers.say;                 // in VR there is no caption to read: speak it (or with --voice)
@@ -113,7 +130,9 @@ const sayText = live.handlers.say;                 // in VR there is no caption 
 live.handlers.say = async (c) => {
   const r = sayText(c);
   const age = c.ts ? Date.now() - Date.parse(c.ts) : 0;
-  if ((ed.renderer.xr.isPresenting || c.voice) && age < 20000) voice.speak(c.text, c.voice_name);
+  // performing: the line would be in the recording, so it is shown and not spoken unless said aloud on purpose
+  const held = hands.performing && !c.aloud;
+  if ((ed.renderer.xr.isPresenting || c.voice) && age < 20000 && !held) voice.speak(c.text, c.voice_name);
   // in VR the line is also shown, for a few seconds, as a caption panel: speech can take 30 s or more to render when
   // the machine is busy, and the user, 2026-10-03: "I still can't hear you, you haven't told me anything yet"
   if (ed.renderer.xr.isPresenting && age < 60000) {
@@ -124,6 +143,7 @@ live.handlers.say = async (c) => {
     panels.show({ panel_id: 'caption_' + Date.now(), title: c.from ? '' : 'Claude', from: c.from, text: String(c.text),
       seconds: Math.min(120, 25 + words * 0.8), quiet: true, wait: false, anchor: 'body', side: c.side });
   }
+  if (held) return { ...r, spoken: false, held: 'performing: shown, not spoken (aloud=True speaks it into the recording)' };
   return age >= 20000 ? { ...r, spoken: false, stale_s: Math.round(age / 1000) } : r;
 };
 // Claude moves the user in VR too: stand at `position` (Blender xyz, on the floor below it), facing `target`, with a
