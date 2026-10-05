@@ -4,6 +4,26 @@ The person listens to a live set on their phone, away from the computer, with th
 way they do in VR, tap feedback without unlocking, and answer what you put on the page: questions, blind exams,
 downloads, buttons. It runs over the tailnet; nothing is public.
 
+## When to offer it
+
+Offer it when a live set plays and the person is about to step away from the computer: a walk, bed, the kitchen, a
+drive as a passenger. Offer it too when they say they want to listen elsewhere, or when the set should keep taking
+their feedback while they are away. One line is enough: "Want it on your phone? You can talk to me from the earbuds
+and tap feedback without unlocking." Don't offer it when they are at the computer and the room speakers serve them.
+
+## Hosting
+
+The phone reaches the page over a private network, never the open internet.
+- **Tailscale (today).** Tailscale must be on the computer and the phone, signed in to the same tailnet: that is the
+  person's to install and sign in to, so say what they will see. `phone_start` gives the https address
+  (`https://<computer>.<tailnet>.ts.net:8870/`) when `tailscale serve` proxies the port, or the one line that sets it
+  up (ask the person first; it stays, tailnet only). It works from anywhere the phone has internet: home wifi, mobile
+  data, a cafe.
+- **The home network (later).** A plain LAN address (`http://192.168.x.x:8870/`) would play the set, but phones only
+  allow the microphone on https pages, so talking back would not work without a certificate. It is not built yet:
+  say so if someone asks, and use Tailscale.
+- **Other ways** (a cloud relay, a public link) are not built, and a set is never published without the person's yes.
+
 ## Start it
 
 1. `phone_start()`. It relays the newest live engine's master as an mp3 stream and never starts a set or plays sound

@@ -141,6 +141,7 @@ nudges you, follow it.
 | a recording, video or score comes in | a `ref/SOURCES.md` row before you use it; `credits` when the piece goes public |
 | a version of another piece | `project_new(derived_from=)`, and the objective in their words |
 | a job over a minute | `machine_status` first; `python -m ismail.machine run` for anything outside ismail |
+| a live set plays and the person steps away (a walk, bed, another room) | offer the phone page: `phone_start`, then give them its address (`references/phone.md`) |
 | a live set | a runway queued ahead; a guard on `live_status` (`SILENT ON AIR`, `RUNWAY ENDED`, `THIN`) |
 | a song sounds different live | `live_parity`, then the song's `HANDOFF.md` |
 | something you built would help others | the inclusion review (`references/development.md`), then a fork and a pull request |

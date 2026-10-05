@@ -120,7 +120,12 @@ function wav(parts) {                       // [[freq, ms], ...] -> a data: URI 
 }
 const CUES = { start: wav([[660, 90], [0, 30], [990, 120]]), end: wav([[990, 90], [0, 30], [660, 120]]),
   sent: wav([[1320, 60], [0, 50], [1320, 60]]), error: wav([[220, 260]]) };
-function cue(name) { try { const a = new Audio(CUES[name]); a.volume = 0.7; a.play().catch(() => {}); } catch (e) {} }
+// the tones are made with ismail (its measured grand piano: songs/_phone_cues/make_cues.py); the synthesized ones
+// above stand in until the files load, or if they cannot
+const MADE = {};
+['start', 'end', 'sent', 'error'].forEach((n) => { const a = new Audio('cues/' + n + '.mp3'); a.preload = 'auto';
+  a.addEventListener('canplaythrough', () => { MADE[n] = a.src; }, { once: true }); });
+function cue(name) { try { const a = new Audio(MADE[name] || CUES[name]); a.volume = 0.8; a.play().catch(() => {}); } catch (e) {} }
 async function armMic() {
   if (talk.stream && talk.stream.active) return true;
   try {

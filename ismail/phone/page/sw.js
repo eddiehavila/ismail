@@ -1,6 +1,6 @@
 // The page installs as an app; only its shell is cached. The stream, the api and offered files always go to the server.
-const SHELL = 'ismail-phone-v1';
-self.addEventListener('install', (e) => { e.waitUntil(caches.open(SHELL).then((c) => c.addAll(['./', 'app.js', 'icon.svg', 'manifest.webmanifest']))); self.skipWaiting(); });
+const SHELL = 'ismail-phone-v2';
+self.addEventListener('install', (e) => { e.waitUntil(caches.open(SHELL).then((c) => c.addAll(['./', 'app.js', 'icon.svg', 'manifest.webmanifest', 'cues/start.mp3', 'cues/end.mp3', 'cues/sent.mp3', 'cues/error.mp3']))); self.skipWaiting(); });
 self.addEventListener('activate', (e) => { e.waitUntil(caches.keys().then((ks) => Promise.all(ks.filter((k) => k !== SHELL).map((k) => caches.delete(k))))); self.clients.claim(); });
 self.addEventListener('fetch', (e) => {
   const u = new URL(e.request.url);
