@@ -22,6 +22,7 @@ def cool(tmp_path, monkeypatch):
     monkeypatch.setattr(machine, 'gpu', lambda: None)
     monkeypatch.setattr(machine, 'memory', lambda: (40.0, 70.0, 30.0))
     monkeypatch.setattr(machine, 'cpu_load', lambda: (12.0, []))
+    monkeypatch.setattr(machine, 'disks', lambda *a: [])
 
 
 def proj(root, inst='preset:pluck', bars=4):

@@ -5,13 +5,19 @@ jobs on a laptop GTX 1080 until it sat at 92 C pinned at 139 MHz and the user st
     python -m ismail.machine                              # the board: GPU, CPU, memory, every heavy job running
     python -m ismail.machine run --gpu -- <command ...>   # run a command in the GPU slot (Blender, whisper, demucs)
     python -m ismail.machine run --cpu --mem 6 -- <cmd>   # a CPU-heavy command expected to need ~6 GB
+    python -m ismail.machine run --cpu --disk 3 -- <cmd>  # ... that writes ~3 GB
+    python -m ismail.machine disk                         # where the disk went: songs, _reclaim, the pagefile
     with machine.slot('cpu', 'render song bars 1-64', mem_gb=3): ...     # from Python
 
 Rules (the slots): one GPU-heavy job machine-wide, two CPU-heavy jobs (a live engine on air holds one). No new heavy
 job while the GPU is in thermal or hardware slowdown or above GPU_HOT_C: CPU and GPU share one cooler, so a hot GPU
 is not a free CPU. No new CPU job while the CPU is CPU_BUSY % busy or more, whoever is using it: most of the load on
 this machine is not on the board (the desktop app, servers, other tools), and the refusal names the top processes. A job whose memory estimate does not fit the free commit (minus a reserve) is refused instead of
-dying with a MemoryError. A refused job says what is running, whose it is and when to retry; force=True (only when
+dying with a MemoryError. Disk and commit hold for everyone: no new heavy job while a drive jobs write to (the
+songs folder's, the working directory's) has less than DISK_FLOOR_GB free, or while less than COMMIT_FLOOR_GB of
+commit is free (on Windows a job past its memory grows the pagefile, and the pagefile takes the disk: 2026-10-05 a
+job that declared 7 GB took 10.7 GB and D: went from 9 GB to 0.2 GB in nine minutes). A running job past its
+declared memory by MEM_OVER is flagged on the board and in its own output. A refused job says what is running, whose it is and when to retry; force=True (only when
 the user says so) runs it anyway. Jobs of processes that died are cleared on the next look.
 
 Waiting and priority: a job may wait for its slot (`run --wait 30m`, `slot(..., wait=1800)`) instead of being
@@ -26,6 +32,7 @@ import contextlib
 import ctypes
 import json
 import os
+import shutil
 import subprocess
 import sys
 import threading
@@ -45,6 +52,11 @@ CPU_SAMPLE_S = 2.0
 RESERVE_GB = 4.0                   # commit kept free for the desktop, the sessions and the live engine
 WAIT_POLL_S = 5.0                  # a waiting job looks again this often
 THREADS = 2                        # numeric threads per heavy job
+DISK_FLOOR_GB = 15.0               # no new heavy job while a drive jobs write to has less free than this
+DISK_WARN_GB = 30.0                # the board warns below this
+COMMIT_FLOOR_GB = 6.0              # no new heavy job while less commit than this is free (the pagefile would grow)
+MEM_OVER = 1.25                    # a running job past its declared memory by this much is flagged
+JOB_NOTE_S = 15.0                  # a running job writes its memory to its board file this often
 
 
 class MachineBusy(RuntimeError):
@@ -140,6 +152,69 @@ def memory():
     return (vm.available + sw.free) / 2 ** 30, (vm.total + sw.total) / 2 ** 30, vm.available / 2 ** 30
 
 
+def _label(path):
+    d = os.path.splitdrive(os.path.abspath(path))[0]
+    return d or path
+
+
+def disks(*paths):
+    """-> [(drive, free GB)] for the drives heavy jobs write to: the songs folder's, the working directory's, and
+    any path given (a render's project). One entry per filesystem."""
+    out, seen = [], set()
+    for p in (SONGS, os.getcwd()) + tuple(x for x in paths if x):
+        p = os.path.abspath(p)
+        while not os.path.exists(p) and os.path.dirname(p) != p:
+            p = os.path.dirname(p)
+        try:
+            dev = os.stat(p).st_dev
+            free = shutil.disk_usage(p).free / 2 ** 30
+        except OSError:
+            continue
+        if dev in seen:
+            continue
+        seen.add(dev)
+        out.append((_label(p), free))
+    return out
+
+
+def pagefiles():
+    """-> [(drive, GB)] of the Windows pagefiles (each grows into its drive when commit runs out)."""
+    out = []
+    if sys.platform != 'win32':
+        return out
+    for part in psutil.disk_partitions(all=False):
+        f = os.path.join(part.mountpoint, 'pagefile.sys')
+        try:
+            out.append((_label(f), os.stat(f).st_size / 2 ** 30))
+        except OSError:
+            pass
+    return out
+
+
+def _disk_why(disk_gb=0.0, disk_path=None, disk_hint=''):
+    low = [(d, f) for d, f in disks(disk_path) if f - disk_gb < DISK_FLOOR_GB]
+    if not low:
+        return ''
+    where = ', '.join(f"{d} has {f:.1f} GB free" for d, f in low)
+    need = f"it writes about {disk_gb:.1f} GB and " if disk_gb else ''
+    return (f"disk: {need}{where} (heavy jobs wait below {DISK_FLOOR_GB:.0f} GB free): "
+            + (disk_hint + '; ' if disk_hint else '')
+            + "`python -m ismail.machine disk` shows where the space went; move finished intermediates (caches, old "
+              "renders, uncut takes) into the project's _reclaim/ folder (never delete: the user clears _reclaim), "
+              "and tell the user")
+
+
+def _memory_why(js):
+    free, limit, _ = memory()
+    if free >= COMMIT_FLOOR_GB:
+        return ''
+    over = [j for j in js if j.get('over')]
+    return (f"memory: {free:.1f} GB of commit free (heavy jobs wait below {COMMIT_FLOOR_GB:.0f} GB; past it Windows "
+            f"grows the pagefile into the disk)" + (": " + '; '.join(_describe(j) for j in over) if over else
+                                                  ": the board shows each job's memory") +
+            ": wait, or ask the user what can close")
+
+
 # ------------------------------------------------------------------ the job board
 
 def _alive(job):
@@ -157,6 +232,8 @@ def jobs():
     if not os.path.isdir(d):
         return out
     for f in sorted(os.listdir(d)):
+        if not f.endswith('.json'):
+            continue
         p = os.path.join(d, f)
         try:
             with open(p, encoding='utf8') as fh:
@@ -316,7 +393,12 @@ def _describe(job):
         eta = f", expected done in {left / 60:.0f} min" if left > 0 else f", {-left / 60:.0f} min past its estimate"
     what = str(job['what']).strip().splitlines() or ['']
     what = what[0] + (' ...' if len(what) > 1 else '')          # a `python -c` job shows its first line
-    return f"{job['kind']} '{what}' ({job['who']}, pid {job['pid']}, {_ago(job['started'])}{eta})"
+    mem = ''
+    if job.get('mem_now_gb') is not None:
+        mem = f", using {job['mem_now_gb']:.1f} GB" + (f" of {job['mem_gb']:g} declared" if job.get('mem_gb') else '')
+    if job.get('over'):
+        mem += f", OVER: peaked at {job['over']:.1f} GB"
+    return f"{job['kind']} '{what}' ({job['who']}, pid {job['pid']}, {_ago(job['started'])}{eta}{mem})"
 
 
 def duration_s(text):
@@ -334,11 +416,12 @@ def duration_s(text):
     return v * (unit or 60)
 
 
-def check(kind, mem_gb=0.0, _jobs=None, who=None, since=None, me=None):
+def check(kind, mem_gb=0.0, _jobs=None, who=None, since=None, me=None, disk_gb=0.0, disk_path=None, disk_hint=''):
     """-> '' when a `kind` job ('gpu' or 'cpu') of mem_gb may start now, else why not and what to do. who/since:
-    the asking job's place in the line (a job that is not waiting stands at the back of it, now)."""
+    the asking job's place in the line (a job that is not waiting stands at the back of it, now). disk_gb: what it
+    writes, on disk_path's drive (and the songs folder's and the working directory's)."""
     js = jobs() if _jobs is None else _jobs
-    why = []
+    why = [w for w in (_disk_why(disk_gb, disk_path, disk_hint), _memory_why(js)) if w]
     hot = gpu_trouble(gpu())
     if hot:
         why.append(f"the GPU is {hot}: the machine is hot (CPU and GPU share one cooler), no new heavy job until it cools")
@@ -413,11 +496,13 @@ class _Meter:
     """While a job holds its slot: the CPU seconds and peak memory of the process that holds it and of every child
     it starts (a `machine run` command, Blender, a render worker), and the GPU's load."""
 
-    def __init__(self, job, gpu_sampler=True):
+    def __init__(self, job, gpu_sampler=True, path=None):
         self.job, self.cpu, self.rss_peak, self.stop_ = job, {}, 0, threading.Event()
+        self.path, self.priv_peak, self.wrote, self.noted = path, 0, {}, 0.0
         me = psutil.Process()
         t = me.cpu_times()
         self.base = (me.pid, t.user + t.system)       # the holder's CPU before the slot is not the job's
+        self.base_w = _write_bytes(me)
         self.gpu = _GpuSampler() if gpu_sampler else None
         self.t = threading.Thread(target=self._loop, daemon=True)
         self.t.start()
@@ -428,32 +513,99 @@ class _Meter:
             procs = [me] + me.children(recursive=True)
         except psutil.Error:
             return
-        rss = 0
+        rss = priv = 0
         for p in procs:
             try:
+                key = (p.pid, p.create_time())
                 t = p.cpu_times()
-                self.cpu[(p.pid, p.create_time())] = t.user + t.system
-                rss += p.memory_info().rss
+                self.cpu[key] = t.user + t.system
+                mi = p.memory_info()
+                rss += mi.rss
+                priv += getattr(mi, 'private', mi.rss)  # Windows: private bytes, what the commit charge counts
+                w = _write_bytes(p)
+                if w is not None:
+                    self.wrote[key] = w
             except psutil.Error:
                 pass
         self.rss_peak = max(self.rss_peak, rss)
+        self.priv_peak = max(self.priv_peak, priv)
+        self._note(priv / 2 ** 30)
+
+    def _note(self, now_gb):
+        """Past its declared memory by MEM_OVER: say so once in the job's own output and on the board. Every
+        JOB_NOTE_S: the memory it uses now, on its board file."""
+        decl = self.job.get('mem_gb') or 0
+        over = bool(decl) and now_gb > decl * MEM_OVER
+        if over and not self.job.get('over'):
+            free = memory()[0]
+            print(f"[ismail.machine] OVER MEMORY: '{str(self.job['what'])[:60]}' uses {now_gb:.1f} GB, declared "
+                  f"{decl:g} GB (--mem); {free:.1f} GB of commit is free. Past the commit limit Windows grows the "
+                  f"pagefile into the disk. Stop it if it keeps growing; next time declare what it needs or work in "
+                  f"smaller pieces.", file=sys.stderr, flush=True)
+        if over:
+            self.job['over'] = round(max(self.job.get('over') or 0, now_gb), 2)
+        if self.path and (over or time.time() - self.noted >= JOB_NOTE_S):
+            self.noted = time.time()
+            self.job['mem_now_gb'] = round(now_gb, 2)
+            _write_job(self.path, self.job)
 
     def _loop(self):
         while not self.stop_.wait(METER_S):
             self._sample()
 
     def stop(self):
-        self._sample()
         self.stop_.set()
+        self.t.join(5)
+        self._sample()
         for pid, secs in (self.job.get('exited_cpu') or {}).items():   # a child that ended between two samples
             self.cpu = {k: v for k, v in self.cpu.items() if k[0] != pid}
             self.cpu[(pid, 'exited')] = secs
         cpu = sum(v for (pid, _), v in self.cpu.items() if pid != self.base[0])
         cpu += max(0.0, max((v for (pid, _), v in self.cpu.items() if pid == self.base[0]), default=0.0) - self.base[1])
-        out = {'cpu_s': round(cpu, 1), 'rss_peak_gb': round(self.rss_peak / 2 ** 30, 2)}
+        for pid, b in (self.job.get('exited_write') or {}).items():
+            self.wrote = {k: v for k, v in self.wrote.items() if k[0] != pid}
+            self.wrote[(pid, 'exited')] = b
+        w = sum(v for (pid, _), v in self.wrote.items() if pid != self.base[0])
+        if self.base_w is not None:
+            w += max(0, max((v for (pid, _), v in self.wrote.items() if pid == self.base[0]), default=0) - self.base_w)
+        out = {'cpu_s': round(cpu, 1), 'rss_peak_gb': round(self.rss_peak / 2 ** 30, 2),
+               'mem_peak_gb': round(self.priv_peak / 2 ** 30, 2), 'write_gb': round(w / 2 ** 30, 3)}
+        if self.job.get('over'):
+            out['over_gb'] = self.job['over']
         if self.gpu is not None:
             out.update(self.gpu.stop())
         return out
+
+
+def _write_bytes(p):
+    """Bytes a process has written (files, and on Windows pipes and devices too), or None where it cannot be read."""
+    try:
+        return p.io_counters().write_bytes
+    except (psutil.Error, AttributeError, NotImplementedError):
+        return None
+
+
+def _child_written(p):
+    """Bytes a finished child wrote (Windows: from the handle Popen still holds), or None."""
+    if sys.platform != 'win32':
+        return None
+    class IO(ctypes.Structure):
+        _fields_ = [(n, ctypes.c_ulonglong) for n in ('ReadOps', 'WriteOps', 'OtherOps', 'Read', 'Write', 'Other')]
+    io = IO()
+    if ctypes.windll.kernel32.GetProcessIoCounters(int(p._handle), ctypes.byref(io)):
+        return io.Write
+    return None
+
+
+def _write_job(path, job):
+    """Rewrite a running job's board file whole (a reader never sees half of it)."""
+    tmp = path[:-5] + '.tmp'
+    try:
+        with open(tmp, 'w', encoding='utf8') as f:
+            json.dump(job, f)
+        os.replace(tmp, path)
+    except OSError:
+        pass                                           # a reader holds it open: the next note writes it
 
 
 def _child_cpu_s(p, before=None):
@@ -498,6 +650,9 @@ def _record(job, wait_s, state, meter, outcome):
             'ended': round(ended, 2), 'seconds': round(ended - job['started'], 1), 'waited_s': round(wait_s, 1),
             'exit': job.get('exit', outcome), 'forced': job['forced'], 'at_start': state}
     line.update(meter)
+    d = disks()
+    if d:
+        line['disk_free_end_gb'] = round(d[-1][1], 2)
     try:
         with _board_lock():
             with open(os.path.join(board_dir(), 'history.jsonl'), 'a', encoding='utf8') as f:
@@ -507,10 +662,12 @@ def _record(job, wait_s, state, meter, outcome):
 
 
 @contextlib.contextmanager
-def slot(kind, what, est_s=None, mem_gb=0.0, who=None, force=False, threads=THREADS, wait=None):
+def slot(kind, what, est_s=None, mem_gb=0.0, who=None, force=False, threads=THREADS, wait=None, disk_gb=0.0,
+         disk_path=None, disk_hint=''):
     """Hold a heavy-job slot while the block runs. Re-entrant: a job inside a job of this thread (a fit that
     renders) runs in the slot it already holds. Raises MachineBusy with what to do when it may not start; with
-    wait (seconds) it stands in line until it may, then raises only if the wait runs out."""
+    wait (seconds) it stands in line until it may, then raises only if the wait runs out. disk_gb: about what it
+    writes on disk_path's drive; disk_hint: how to write less, said when the disk refuses it."""
     if getattr(_held, 'depth', 0):
         _held.depth += 1
         try:
@@ -529,7 +686,9 @@ def slot(kind, what, est_s=None, mem_gb=0.0, who=None, force=False, threads=THRE
             if kind == 'cpu' and not force:
                 cpu_load()             # sample outside the board's lock (it takes CPU_SAMPLE_S); check() reuses it
             with _board_lock():
-                why = '' if force or kind == 'live' else check(kind, mem_gb, who=who, since=since, me=wid)
+                why = '' if force or kind == 'live' else check(kind, mem_gb, who=who, since=since, me=wid,
+                                                               disk_gb=disk_gb, disk_path=disk_path,
+                                                               disk_hint=disk_hint)
                 if not why or not deadline or time.time() >= deadline:
                     if why:
                         raise MachineBusy(f"not starting {kind} job '{what}': {why}. Retry when that clears (the "
@@ -555,16 +714,21 @@ def slot(kind, what, est_s=None, mem_gb=0.0, who=None, force=False, threads=THRE
              'gpu_trouble': gpu_trouble(g) or None} if g else {}
     if _cpu_cache[1] is not None:
         state['cpu_busy'] = round(_cpu_cache[1][0])
+    d = disks(disk_path)
+    if d:
+        state['disk'] = d[-1][0]
+        state['disk_free_gb'] = round(d[-1][1], 2)
+    state['commit_free_gb'] = round(memory()[0], 2)
     with _board_lock():
         job = {'kind': kind, 'what': what, 'who': who, 'pid': me.pid, 'pid_start': me.create_time(),
-               'started': time.time(), 'est_s': est_s, 'mem_gb': mem_gb, 'forced': bool(force)}
+               'started': time.time(), 'est_s': est_s, 'mem_gb': mem_gb, 'disk_gb': disk_gb, 'forced': bool(force)}
         # unique per slot: two slots taken in the same millisecond by one process overwrote each other
         path = os.path.join(board_dir(), 'jobs', f"{me.pid}_{int(job['started'] * 1000)}_{os.urandom(3).hex()}.json")
         with open(path, 'w', encoding='utf8') as f:
             json.dump(job, f)
     _held.depth = 1
     limits = None
-    meter = _Meter(job, gpu_sampler=g is not None)
+    meter = _Meter(job, gpu_sampler=g is not None, path=path)
     outcome = 'ok'
     try:
         if threads:
@@ -581,11 +745,13 @@ def slot(kind, what, est_s=None, mem_gb=0.0, who=None, force=False, threads=THRE
         _held.depth = 0
         if limits is not None:
             limits.unregister()
-        try:
-            os.remove(path)
-        except OSError:
-            pass
-        _record(job, job['started'] - since, state, meter.stop(), outcome)
+        used = meter.stop()
+        for f in (path, path[:-5] + '.tmp'):
+            try:
+                os.remove(f)
+            except OSError:
+                pass
+        _record(job, job['started'] - since, state, used, outcome)
 
 
 def _who():
@@ -615,7 +781,9 @@ def board():
     busy, top = cpu_load()
     L.append(f"CPU: {busy:.0f}% busy over {CPU_SAMPLE_S:.0f} s, {psutil.cpu_count()} threads; top: {_top_text(top)}"
              + (f"  BUSY (limit {CPU_BUSY:.0f}%)" if busy >= CPU_BUSY else ''))
-    L.append(f"memory: {free:.1f} GB of {limit:.0f} GB commit free, {ram:.1f} GB RAM free")
+    L.append(f"memory: {free:.1f} GB of {limit:.0f} GB commit free, {ram:.1f} GB RAM free"
+             + (f"  LOW (heavy jobs wait below {COMMIT_FLOOR_GB:.0f} GB)" if free < COMMIT_FLOOR_GB else ''))
+    L.append(disk_line())
     js = jobs()
     L.append(f"heavy jobs ({len(js)}; slots: gpu {SLOTS['gpu']}, cpu {SLOTS['cpu']}, a live engine holds a cpu slot):")
     L += [f"  {_describe(j)}" for j in js] or ["  none"]
@@ -630,6 +798,121 @@ def board():
     for kind in ('gpu', 'cpu'):
         why = check(kind, _jobs=js)
         L.append(f"a new {kind} job: " + ('go' if not why else f"WAIT: {why}"))
+    return '\n'.join(L)
+
+
+def disk_line():
+    """'disk: D: 3.7 GB free LOW ...; pagefile D: 33.6 GB' for the board and live_status."""
+    ds = disks()
+    worst = min((f for _, f in ds), default=None)
+    pf = pagefiles()
+    flag = ''
+    if worst is not None and worst < DISK_FLOOR_GB:
+        flag = f"  LOW (heavy jobs wait below {DISK_FLOOR_GB:.0f} GB; `machine disk` shows where it went)"
+    elif worst is not None and worst < DISK_WARN_GB:
+        flag = f"  getting low (heavy jobs wait below {DISK_FLOOR_GB:.0f} GB)"
+    return ("disk: " + ', '.join(f"{d} {f:.1f} GB free" for d, f in ds)
+            + (f"; pagefile " + ', '.join(f"{d} {gb:.1f} GB" for d, gb in pf) if pf else '') + flag)
+
+
+def pressure_line():
+    """'machine: commit 14.1 GB free; D: 3.7 GB free ... LOW' for live_status: a set on air writes takes to disk."""
+    free = memory()[0]
+    return (f"machine: commit {free:.1f} GB free" + (f" LOW (under {COMMIT_FLOOR_GB:.0f} GB)" if free < COMMIT_FLOOR_GB
+                                                      else '') + "; " + disk_line()[len('disk: '):])
+
+
+def _tree_bytes(path):
+    total = 0
+    stack = [path]
+    while stack:
+        d = stack.pop()
+        try:
+            it = os.scandir(d)
+        except OSError:
+            continue
+        with it:
+            for e in it:
+                try:
+                    if e.is_dir(follow_symlinks=False):
+                        stack.append(e.path)
+                    else:
+                        total += e.stat(follow_symlinks=False).st_size
+                except OSError:
+                    pass
+    return total
+
+
+def disk_sizes(root=None):
+    """-> ({folder under songs/: bytes}, {path of each _reclaim folder: bytes})."""
+    root = root or SONGS
+    sizes, reclaim = {}, {}
+    try:
+        entries = [e for e in os.scandir(root) if e.is_dir(follow_symlinks=False)]
+    except OSError:
+        return sizes, reclaim
+    for e in entries:
+        sizes[e.name] = _tree_bytes(e.path)
+        stack = [e.path]
+        while stack:                                   # _reclaim folders sit a few levels down at most
+            d = stack.pop()
+            try:
+                subs = [x for x in os.scandir(d) if x.is_dir(follow_symlinks=False)]
+            except OSError:
+                continue
+            for x in subs:
+                if x.name == '_reclaim':
+                    reclaim[os.path.relpath(x.path, root)] = _tree_bytes(x.path)
+                elif x.path.count(os.sep) - root.count(os.sep) < 4 and x.name not in ('cache', 'renders', 'sounds'):
+                    stack.append(x.path)
+    return sizes, reclaim
+
+
+def disk_text(top=12, root=None):
+    """Where the disk went: each drive's free space and pagefile, the biggest folders under songs/ with their growth
+    since the last day a snapshot was kept (<board>/disk/<date>.json), and every _reclaim folder."""
+    sizes, reclaim = disk_sizes(root)
+    sd = os.path.join(board_dir(), 'disk')
+    today = time.strftime('%Y-%m-%d')
+    before, day = {}, None
+    try:
+        days = sorted(f[:-5] for f in os.listdir(sd) if f.endswith('.json') and f[:-5] < today)
+    except OSError:
+        days = []
+    if days:
+        day = days[-1]
+        try:
+            with open(os.path.join(sd, day + '.json'), encoding='utf8') as f:
+                before = json.load(f)
+        except (OSError, ValueError):
+            day = None
+    snap = os.path.join(sd, today + '.json')
+    if not os.path.exists(snap):
+        try:
+            os.makedirs(sd, exist_ok=True)
+            with open(snap, 'w', encoding='utf8') as f:
+                json.dump(sizes, f)
+        except OSError:
+            pass
+    G = 2 ** 30
+    L = [disk_line(), f"songs/ ({root or SONGS}): {sum(sizes.values()) / G:.1f} GB in {len(sizes)} folders"
+         + (f"; growth since {day}" if day else "; first snapshot kept today, growth shows from tomorrow")]
+    for name, b in sorted(sizes.items(), key=lambda kv: -kv[1])[:top]:
+        grow = ''
+        if day:
+            d = b - before.get(name, 0)
+            grow = f"  {'+' if d >= 0 else '-'}{abs(d) / G:.2f} GB" if abs(d) >= 0.01 * G else '  same'
+        L.append(f"  {b / G:7.2f} GB  {name}{grow}")
+    if day:
+        grown = sorted(((b - before.get(n, 0), n) for n, b in sizes.items()), reverse=True)
+        fast = [f"{n} +{d / G:.1f} GB" for d, n in grown[:5] if d >= 0.5 * G]
+        if fast:
+            L.append("grew most since " + day + ": " + ', '.join(fast))
+    if reclaim:
+        L.append(f"_reclaim (moved out, waiting for the user to clear): {sum(reclaim.values()) / G:.1f} GB")
+        L += [f"  {b / G:7.2f} GB  {p}" for p, b in sorted(reclaim.items(), key=lambda kv: -kv[1])]
+    else:
+        L.append("_reclaim: none")
     return '\n'.join(L)
 
 
@@ -670,8 +953,11 @@ def history_text(song=None, since=None, n_jobs=0):
     first = time.strftime('%Y-%m-%d %H:%M', time.localtime(js[0]['started']))
     by = {}
     for j in js:
-        s = by.setdefault(j.get('song') or '(no song)', {'jobs': 0, 'wall': 0.0, 'cpu': 0.0, 'gpu': 0.0, 'failed': 0})
+        s = by.setdefault(j.get('song') or '(no song)', {'jobs': 0, 'wall': 0.0, 'cpu': 0.0, 'gpu': 0.0, 'failed': 0,
+                                                       'write': 0.0, 'over': 0})
         s['jobs'] += 1
+        s['write'] += j.get('write_gb', 0)
+        s['over'] += bool(j.get('over_gb'))
         s['wall'] += j.get('seconds', 0)
         s['cpu'] += j.get('cpu_s', 0)
         s['gpu'] += j.get('gpu_busy_s', 0)
@@ -680,13 +966,17 @@ def history_text(song=None, since=None, n_jobs=0):
          f"busy seconds while the job held its slot; the GPU is shared)"]
     for name, s in sorted(by.items(), key=lambda kv: -kv[1]['wall']):
         L.append(f"  {name}: {s['jobs']} jobs, {s['wall'] / 3600:.2f} h wall, {s['cpu'] / 3600:.2f} h CPU, "
-                 f"{s['gpu'] / 3600:.2f} h GPU busy" + (f", {s['failed']} did not end well" if s['failed'] else ''))
+                 f"{s['gpu'] / 3600:.2f} h GPU busy, {s['write']:.1f} GB written"
+                 + (f", {s['failed']} did not end well" if s['failed'] else '')
+                 + (f", {s['over']} went past their declared memory" if s['over'] else ''))
     if n_jobs:
         L.append(f"last {min(n_jobs, len(js))} jobs:")
         for j in js[-n_jobs:]:
             L.append(f"  {time.strftime('%m-%d %H:%M', time.localtime(j['started']))} {j['kind']} '{j['what'][:60]}' "
                      f"({j.get('song') or '-'}) {j.get('seconds', 0) / 60:.1f} min, waited {j.get('waited_s', 0):.0f} s,"
-                     f" CPU {j.get('cpu_s', 0):.0f} s, exit {j.get('exit')}")
+                     f" CPU {j.get('cpu_s', 0):.0f} s, peak {j.get('mem_peak_gb', j.get('rss_peak_gb', 0)):.1f} GB"
+                     + (f" (declared {j['mem_gb']:g})" if j.get('mem_gb') else '')
+                     + f", wrote {j.get('write_gb', 0):.2f} GB, exit {j.get('exit')}")
     return '\n'.join(L)
 
 
@@ -698,6 +988,8 @@ def main(argv=None):
     k.add_argument('--gpu', action='store_true')
     k.add_argument('--cpu', action='store_true')
     r.add_argument('--mem', type=float, default=0.0, help='expected peak memory, GB')
+    r.add_argument('--disk', type=float, default=0.0, help='expected disk written, GB (refused if it would leave the '
+                   'drive under the floor)')
     r.add_argument('--est', default=None, help='expected duration: 10m, 600s, 1.5h (a bare number is minutes)')
     r.add_argument('--what', default=None, help='what it is, for the board')
     r.add_argument('--force', action='store_true', help='only when the user says so')
@@ -714,6 +1006,8 @@ def main(argv=None):
     h.add_argument('--song', default=None)
     h.add_argument('--since', default=None, help='a date (2026-10-04) or a span back from now (7d, 12h)')
     h.add_argument('--jobs', type=int, default=0, help='also list the last N jobs')
+    dk = sub.add_parser('disk', help='where the disk went: songs folders and their growth, _reclaim, the pagefile')
+    dk.add_argument('--top', type=int, default=12, help='how many songs folders to list')
     a = ap.parse_args(argv)
     if hasattr(sys.stdout, 'reconfigure'):
         sys.stdout.reconfigure(errors='replace')
@@ -740,6 +1034,9 @@ def main(argv=None):
         except ValueError as e:
             ap.error(str(e))
         return 0
+    if a.cmd == 'disk':
+        print(disk_text(a.top))
+        return 0
     if a.cmd != 'run':
         print(board())
         return 0
@@ -757,7 +1054,7 @@ def main(argv=None):
         ap.error(str(e))
     try:
         with slot(kind, a.what or ' '.join(cmd)[:80], est_s=est_s, mem_gb=a.mem,
-                  force=a.force, threads=None, wait=wait_s) as job:
+                  force=a.force, threads=None, wait=wait_s, disk_gb=a.disk) as job:
             before = _children_cpu_now()
             p = subprocess.Popen(cmd)
             try:
@@ -769,6 +1066,9 @@ def main(argv=None):
                 secs = _child_cpu_s(p, before)
                 if secs is not None:
                     job['exited_cpu'] = {p.pid: secs}
+                b = _child_written(p)
+                if b is not None:
+                    job['exited_write'] = {p.pid: b}
             except (OSError, AttributeError, ValueError):
                 pass
             return job['exit']
