@@ -591,6 +591,10 @@ def sketch(project: str, brief: str, base: str = None, n: int = None, styles: li
                 if t:
                     ops.append({'op': 'notes_write', 'track': role, 'bar': b + 1, 'notes': t, 'mode': 'add'})
         batch(sp, ops)
+        for role, part in pl['parts'].items():                # a sketch states its sounds: no "unstated" nag
+            v = sc[part['voice']]
+            track_model(sp, role, on='designed' if not v.get('needs') and v['name'] in ('sub_bass', 'crackle')
+                        else f"showcase voice {v['name']} ({v['why']})", by='sketch')
         with open(os.path.join(sp, 'sketch.json'), 'w', encoding='utf8') as f:
             json.dump({'brief': brief, 'label': label, 'spec': spec, 'key': pl['key'], 'bpm': pl['bpm'],
                        'form': pl['form'], 'progression': pl['progression']}, f, indent=1)
@@ -609,7 +613,9 @@ def sketch(project: str, brief: str, base: str = None, n: int = None, styles: li
               f"   {lufs:.1f} LUFS, peak {peak:.1f} dBFS; listen: {f}"]
     L.append("NEXT: play them to the person one at a time (open each file), ask which is closest or what each is "
              "missing. Their correction is the next round: sketch(project, '<their words>', base='<letter>'). "
-             "sketch_keep(project, '<letter>') makes the pick the song (it is the song's example).")
+             f"sketch_keep(project, '<letter>') makes the pick the song (it is the song's example); until then "
+             f"{root} holds only sketches/, each its own project. These are sketches: do not polish one (no "
+             f"Listening Report, no section fixes) before the person picks.")
     return '\n'.join(L)
 
 
