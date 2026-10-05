@@ -239,26 +239,69 @@ def _ahead(kind, who, since, me=None):
             and _rank(w['who'], w['since'], pr) < mine]
 
 
+STALE_LOCK_S = 30.0    # a board lock older than this was left by a holder that died mid-update
+
+
+def _read(path):
+    try:
+        with open(path, encoding='utf8') as f:
+            return f.read()
+    except OSError:
+        return None
+
+
+def _break_stale(lock):
+    """Take a dead holder's lock away. Renaming it is atomic, so of several waiters that all judged it stale only
+    one moves it; a waiter that moved a lock someone took meanwhile (fresh again) puts it back."""
+    moved = f"{lock}.stale.{os.getpid()}.{threading.get_ident()}"
+    try:
+        os.rename(lock, moved)
+    except OSError:                                    # gone already, or another waiter moved it
+        return
+    try:
+        if time.time() - os.path.getmtime(moved) < STALE_LOCK_S:
+            os.link(moved, lock)                       # never over a lock that exists (FileExistsError)
+    except OSError:
+        pass
+    try:
+        os.remove(moved)
+    except OSError:
+        pass
+
+
 @contextlib.contextmanager
 def _board_lock(timeout=10.0):
+    """One writer at a time on the shared board, across every session's processes. A waiter retries while the lock
+    changes hands under it (a holder can let go between our failed create and our look at the lock: that race once
+    killed a job waiting in line), and a holder removes only its own lock."""
     os.makedirs(os.path.join(board_dir(), 'jobs'), exist_ok=True)
     lock = os.path.join(board_dir(), 'lock')
+    token = f"{os.getpid()} {threading.get_ident()} {time.time()!r}"
     t0 = time.time()
     while True:
         try:
             fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.write(fd, token.encode())
             break
-        except FileExistsError:
-            if time.time() - os.path.getmtime(lock) > 30:      # a holder that died mid-update
-                os.remove(lock)
-            elif time.time() - t0 > timeout:
+        except (FileExistsError, PermissionError):     # PermissionError: Windows, a lock being deleted
+            try:
+                age = time.time() - os.path.getmtime(lock)
+            except OSError:                            # its holder let go just now: try again
+                age = 0.0
+            if age > STALE_LOCK_S:
+                _break_stale(lock)
+            if time.time() - t0 > timeout:
                 raise MachineBusy(f"the job board {lock} stayed locked for {timeout:.0f} s; try again")
-            time.sleep(0.05)
+            time.sleep(0.02 + 0.03 * (threading.get_ident() % 7) / 7)
     try:
         yield
     finally:
         os.close(fd)
-        os.remove(lock)
+        if _read(lock) == token:                       # never remove a lock another holder took
+            try:
+                os.remove(lock)
+            except OSError:
+                pass
 
 
 def _ago(t):
