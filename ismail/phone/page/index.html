@@ -3,101 +3,168 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#0b0b0e">
+<meta name="theme-color" content="#0e0d0b">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..800&family=JetBrains+Mono:wght@400;600&display=swap">
 <title>ismail live</title>
+<!--
+TASTE CONTRACT: ismail live (phone page)
+Map:       Pocket Receiver (a field radio for one hand at night: Instrument's honesty, hardware keys)
+Type:      Archivo, condensed width for key caps / JetBrains Mono for the counter, the log and chrome; tabular numerals
+Ground:    #0e0d0b warm black, panel #171612, hairline #2c2a25; ink #efe9dd, dim #a8a194
+Accent:    hsl(293 68% 66%) (djb2 "ismail live" = 293); on-air red #ff4b3e, warn #e2a93b
+Density:   4px base; keys 56px and up; chrome labels 11px mono caps, tracking .12em
+Shape:     3px radius, 1px hairlines, no shadows; pressed = 2px inset + ground shift
+Motion:    90ms ease-out on press only; lit lamps steady; no entrance animations
+Signature: the HEARD counter (the bar reaching your ears) and the ON AIR lamp
+Bespoke:   the talk key is a walkie-talkie PTT that draws your mic level while it records
+Copy:      key caps in capitals and terse; sentences only in the DJ log; quiet; no em dashes
+Never:     gradients, glass, emoji or symbol-glyph icons, purple-tinted ground, uniform rounded grey cards, glows except a lit lamp
+-->
 <style>
-:root{--bg:#0b0b0e;--card:#16161c;--line:#26262f;--fg:#ececf1;--dim:#9a9aa8;--acc:#7dd3a8;--love:#ff6b8b;--rec:#ff4d4d;--warn:#f5c060}
+:root{
+  --ground:#0e0d0b; --panel:#171612; --panel-2:#1f1d19; --line:#2c2a25; --ink:#efe9dd; --dim:#a8a194;
+  --accent:hsl(293 68% 66%); --accent-deep:hsl(293 40% 18%); --air:#ff4b3e; --air-off:#3a1e1b; --warn:#e2a93b;
+  --u:4px; --r:3px; --press:90ms;
+  --display:'Archivo','Arial Narrow',system-ui,sans-serif; --mono:'JetBrains Mono',ui-monospace,Consolas,monospace;
+}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-html,body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.35 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
-body{padding:calc(env(safe-area-inset-top) + 10px) 16px calc(env(safe-area-inset-bottom) + 18px);max-width:520px;margin:0 auto;user-select:none}
-button{font:inherit;color:inherit;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px 10px;min-height:52px;cursor:pointer;touch-action:manipulation}
-button:active{transform:scale(.97)}
-.row{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:10px 0}
-.row3{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:10px 0}
-.top{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:13px;color:var(--dim)}
-.dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:#555;margin-right:6px;vertical-align:1px}
-.live .dot{background:var(--acc)}
-.chip{padding:3px 9px;border-radius:99px;border:1px solid var(--line);font-size:12px;white-space:nowrap}
-.chip.rec{border-color:var(--rec);color:var(--rec)}
-.now{font-size:20px;font-weight:600;margin:12px 0 2px;min-height:26px}
-.next{color:var(--dim);font-size:14px;min-height:19px}
-.last{font-size:15px;margin:8px 0;padding-left:10px;border-left:3px solid var(--acc)}
-.last small{color:var(--dim)}
-#startset{width:100%;margin:8px 0;border-color:#2f5444}
-.pinned{background:#1b2420;border:1px solid #2d4a3c;border-radius:12px;padding:10px 12px;margin:10px 0;font-size:14px}
-.play{display:flex;gap:10px;align-items:center;margin:14px 0}
-#play{flex:1;min-height:64px;font-size:20px;font-weight:600;background:#1d2a24;border-color:#2f5444}
-#back,#golive{min-width:74px;font-size:14px;color:var(--dim)}
-#talk{width:100%;min-height:120px;border-radius:24px;font-size:22px;font-weight:700;background:#1e1c2c;border-color:#3b3560;margin:4px 0 2px}
-#talk.on{background:#4a1520;border-color:var(--rec);animation:pulse 1.2s infinite}
-@keyframes pulse{50%{box-shadow:0 0 0 10px rgba(255,77,77,.15)}}
-.hint{font-size:12px;color:var(--dim);text-align:center;min-height:16px}
-#love{border-color:#5a2a38;color:var(--love);font-weight:600}
-#change{font-weight:600}
-.mood button{min-height:44px;font-size:14px;padding:8px 4px}
-.mood button.sel{border-color:var(--acc);color:var(--acc)}
+html,body{margin:0;background:var(--ground);color:var(--ink);font:400 16px/1.4 var(--display)}
+body{padding:calc(env(safe-area-inset-top) + calc(var(--u)*3)) calc(var(--u)*4) calc(env(safe-area-inset-bottom) + calc(var(--u)*6));max-width:520px;margin:0 auto;user-select:none}
+.cap{font:600 11px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--dim)}
+button{font:700 15px/1.1 var(--display);font-stretch:75%;letter-spacing:.06em;text-transform:uppercase;color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:var(--r);min-height:56px;padding:calc(var(--u)*3) calc(var(--u)*2);cursor:pointer;touch-action:manipulation;transition:background var(--press) ease-out,box-shadow var(--press) ease-out}
+button:active,button.down{background:var(--panel-2);box-shadow:inset 0 2px 0 rgba(0,0,0,.65)}
+/* the strip: lamp, live state, latency */
+.strip{display:flex;align-items:center;justify-content:space-between;gap:calc(var(--u)*2);padding-bottom:calc(var(--u)*3);border-bottom:1px solid var(--line)}
+.lamp{display:inline-flex;align-items:center;gap:calc(var(--u)*2);padding:calc(var(--u)*1.5) calc(var(--u)*2.5);border:1px solid var(--air-off);border-radius:var(--r);font:700 12px/1 var(--display);font-stretch:62%;letter-spacing:.18em;color:#7a4a45;max-width:62%;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.lamp i{width:9px;height:9px;border-radius:50%;background:var(--air-off);flex:none}
+.lamp.on{border-color:var(--air);color:var(--air)}
+.lamp.on i{background:var(--air);box-shadow:0 0 8px var(--air)}
+.lamp small{font:600 11px/1 var(--mono);letter-spacing:.04em;text-transform:none;color:var(--dim)}
+#livestate{display:flex;align-items:center;gap:calc(var(--u)*2)}
+#livestate i{width:7px;height:7px;border-radius:50%;background:var(--line)}
+.live #livestate i{background:var(--accent)}
+/* the counter */
+.counter{display:flex;align-items:flex-end;justify-content:space-between;padding:calc(var(--u)*4) 0 calc(var(--u)*2)}
+.counter .num{font:600 44px/1 var(--mono);font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+.counter .num span{color:var(--dim)}
+.counter .side{text-align:right}
+#behind{font:600 18px/1 var(--mono);font-variant-numeric:tabular-nums;margin-top:calc(var(--u)*1.5)}
+.dial{border-top:1px solid var(--line);border-bottom:1px solid var(--line);padding:calc(var(--u)*3) 0}
+.dial .row{display:grid;grid-template-columns:44px 1fr;gap:calc(var(--u)*2);align-items:baseline}
+.dial .row+.row{margin-top:calc(var(--u)*2)}
+#now{font:700 21px/1.2 var(--display);font-stretch:85%}
+#next{font-size:15px;color:var(--dim)}
+.note{margin:calc(var(--u)*3) 0 0;padding-left:calc(var(--u)*3);border-left:2px solid var(--accent);font-size:15px}
+.note .cap{display:block;margin-bottom:var(--u)}
+#startset{width:100%;margin-top:calc(var(--u)*3);border-color:var(--accent);color:var(--accent)}
+/* transport */
+.transport{display:grid;grid-template-columns:76px 1fr 76px;gap:calc(var(--u)*2);margin:calc(var(--u)*4) 0 calc(var(--u)*2)}
+#play{min-height:64px;font-size:18px;border-color:var(--accent);color:var(--accent)}
+#play.on{background:var(--accent-deep)}
+#back,#golive{font-size:13px;color:var(--dim)}
+/* push to talk */
+#talk{position:relative;width:100%;min-height:128px;font-size:24px;font-stretch:62%;letter-spacing:.14em;border:1px solid var(--line);border-top:3px solid var(--accent);overflow:hidden}
+#talk.on{background:#24140f;border-top-color:var(--air);color:var(--air)}
+#meter{position:absolute;left:0;right:0;bottom:0;height:10px;display:flex;gap:2px;padding:0 calc(var(--u)*3) calc(var(--u)*2)}
+#meter b{flex:1;background:var(--line);transition:background 60ms linear}
+#meter b.lit{background:var(--air)}
+.hint{text-align:center;margin:calc(var(--u)*2) 0 calc(var(--u)*4)}
+/* keypad */
+.keys2{display:grid;grid-template-columns:1fr 1fr;gap:calc(var(--u)*2)}
+#love,#change{min-height:72px;font-size:19px}
+#love{color:var(--accent);border-color:var(--accent)}
+.pad{display:grid;grid-template-columns:1fr 1fr;gap:calc(var(--u)*2);margin-top:calc(var(--u)*2)}
+.pad button{min-height:52px;font-size:13px;color:#d9d2c4}
+.section{margin-top:calc(var(--u)*6)}
+.section>.cap{display:block;margin-bottom:calc(var(--u)*2)}
+/* mood: a four-detent selector */
+.detents{display:grid;grid-template-columns:repeat(4,1fr);border:1px solid var(--line);border-radius:var(--r)}
+.detents button{border:0;border-radius:0;min-height:48px;font-size:12px;background:transparent;color:var(--dim);position:relative}
+.detents button+button{border-left:1px solid var(--line)}
+.detents button.sel{color:var(--ink);background:var(--panel)}
+.detents button.sel::after{content:'';position:absolute;left:25%;right:25%;bottom:6px;height:2px;background:var(--accent)}
+#agentbtns{display:grid;grid-template-columns:1fr 1fr;gap:calc(var(--u)*2)}
 #agentbtns:empty{display:none}
-#agentbtns{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0}
-#agentbtns button{flex:1 1 40%}
-h3{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--dim);margin:18px 0 6px;font-weight:600}
-.feed div{padding:8px 0;border-bottom:1px solid var(--line);font-size:15px}
-.feed small{color:var(--dim)}
-.offer{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--line)}
-.offer a{color:var(--acc);text-decoration:none;font-weight:600;padding:8px 12px;border:1px solid var(--line);border-radius:10px}
-.foot{display:flex;flex-wrap:wrap;gap:8px;justify-content:space-between;margin-top:18px;font-size:12px;color:var(--dim)}
-.foot button{min-height:36px;padding:6px 10px;font-size:12px;border-radius:10px}
-#toast{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom) + 24px);transform:translateX(-50%);background:#22222b;border:1px solid var(--line);padding:10px 16px;border-radius:12px;opacity:0;transition:opacity .25s;pointer-events:none;max-width:90vw;font-size:14px;z-index:9}
-#toast.show{opacity:1}
-#sheet{position:fixed;inset:0;background:rgba(0,0,0,.72);display:none;align-items:flex-end;z-index:8}
-#sheet.show{display:flex}
-#panel{background:#15151b;border-top:1px solid var(--line);border-radius:20px 20px 0 0;width:100%;max-width:520px;margin:0 auto;padding:18px 16px calc(env(safe-area-inset-bottom) + 18px);max-height:88vh;overflow:auto}
-#panel h2{margin:0 0 6px;font-size:19px}
-#panel p{margin:0 0 12px;color:#cfcfda;white-space:pre-wrap}
-#panel img{max-width:100%;border-radius:10px;margin-bottom:10px}
-.btns{display:grid;gap:10px}
-.clip{border:1px solid var(--line);border-radius:14px;padding:10px;margin:0 0 10px}
-.clip .playclip{width:100%;font-size:18px;font-weight:700}
-.clip.playing .playclip{border-color:var(--acc);color:var(--acc)}
-.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
-.chips button{min-height:36px;padding:6px 10px;font-size:13px;border-radius:99px}
-.chips button.sel,.choice.sel{border-color:var(--acc);color:var(--acc);background:#18251f}
-textarea{width:100%;background:var(--card);color:var(--fg);border:1px solid var(--line);border-radius:12px;padding:10px;font:inherit;min-height:64px;margin:6px 0 12px}
+#agentbtns button{border-style:dashed;min-height:52px;font-size:13px}
+/* the log */
+.log div{display:grid;grid-template-columns:42px 1fr;gap:calc(var(--u)*2);padding:calc(var(--u)*2) 0;border-bottom:1px solid var(--line);font-size:15px}
+.log time{font:600 11px/1.6 var(--mono);color:var(--dim)}
+.log .me{color:var(--dim)}
+.offer{display:flex;justify-content:space-between;align-items:center;gap:calc(var(--u)*2);padding:calc(var(--u)*2) 0;border-bottom:1px solid var(--line)}
+.offer a{font:700 13px/1 var(--display);font-stretch:75%;letter-spacing:.08em;text-transform:uppercase;color:var(--accent);text-decoration:none;border:1px solid var(--accent);border-radius:var(--r);padding:calc(var(--u)*3)}
+.foot{display:flex;flex-wrap:wrap;gap:calc(var(--u)*2);justify-content:space-between;align-items:center;margin-top:calc(var(--u)*6);padding-top:calc(var(--u)*3);border-top:1px solid var(--line)}
+.foot button{min-height:40px;padding:calc(var(--u)*2) calc(var(--u)*3);font-size:11px;color:var(--dim)}
 .warn{color:var(--warn)}
+#toast{position:fixed;left:calc(var(--u)*4);right:calc(var(--u)*4);bottom:calc(env(safe-area-inset-bottom) + calc(var(--u)*5));max-width:488px;margin:0 auto;background:var(--panel-2);border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:var(--r);padding:calc(var(--u)*3) calc(var(--u)*4);font:600 13px/1.35 var(--mono);opacity:0;pointer-events:none;z-index:9}
+#toast.show{opacity:1}
+/* the sheet: questions and exams */
+#sheet{position:fixed;inset:0;background:rgba(8,7,6,.86);display:none;align-items:flex-end;z-index:8}
+#sheet.show{display:flex}
+#panel{background:var(--ground);border-top:3px solid var(--accent);width:100%;max-width:520px;margin:0 auto;padding:calc(var(--u)*5) calc(var(--u)*4) calc(env(safe-area-inset-bottom) + calc(var(--u)*5));max-height:90vh;overflow:auto}
+#panel h2{margin:0 0 calc(var(--u)*2);font:700 22px/1.15 var(--display);font-stretch:85%}
+#panel p{margin:0 0 calc(var(--u)*4);color:#d9d2c4;white-space:pre-wrap}
+#panel img{max-width:100%;border-radius:var(--r);margin-bottom:calc(var(--u)*3)}
+.btns{display:grid;gap:calc(var(--u)*2)}
+.clip{border:1px solid var(--line);border-radius:var(--r);padding:calc(var(--u)*3);margin:0 0 calc(var(--u)*3)}
+.clip .playclip{width:100%;min-height:64px;font-size:22px;font-stretch:62%;letter-spacing:.2em}
+.clip.playing .playclip{border-color:var(--accent);color:var(--accent);background:var(--accent-deep)}
+.chips{display:flex;flex-wrap:wrap;gap:calc(var(--u)*2);margin-top:calc(var(--u)*3)}
+.chips button{min-height:40px;padding:calc(var(--u)*2) calc(var(--u)*3);font-size:12px;text-transform:none;letter-spacing:.02em;font-stretch:100%;font-weight:600}
+.chips button.sel,.choice.sel{border-color:var(--accent);color:var(--accent);background:var(--accent-deep)}
+textarea{width:100%;background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:var(--r);padding:calc(var(--u)*3);font:400 15px/1.4 var(--display);min-height:64px;margin:calc(var(--u)*2) 0 calc(var(--u)*3)}
+#submit{border-color:var(--accent);color:var(--accent)}
 </style>
 </head>
 <body>
-<div class="top" id="top"><span id="livestate"><span class="dot"></span><span id="livetext">connecting</span></span><span class="chip" id="rec">rec ?</span></div>
-<div class="now" id="now">&nbsp;</div>
-<div class="next" id="next"></div>
-<div class="pinned" id="pinned" hidden></div>
-<div class="last" id="last" hidden></div>
-<button id="startset" hidden>Ask the DJ to start a set</button>
+<div class="strip" id="top">
+  <span class="lamp" id="rec"><i></i><span id="rectext">ON AIR</span></span>
+  <span id="livestate" class="cap"><i></i><span id="livetext">connecting</span></span>
+</div>
 
-<div class="play">
-  <button id="back" aria-label="back 30 seconds">&#8634; 30s</button>
-  <button id="play">&#9654; Listen</button>
+<div class="counter">
+  <div><div class="cap">Heard</div><div class="num" id="bar">BAR <span>---</span></div></div>
+  <div class="side"><div class="cap">Behind the room</div><div id="behind">--</div></div>
+</div>
+
+<div class="dial">
+  <div class="row"><span class="cap">Now</span><span id="now">nothing playing</span></div>
+  <div class="row"><span class="cap">Next</span><span id="next">--</span></div>
+</div>
+<div class="note" id="pinned" hidden></div>
+<div class="note" id="last" hidden></div>
+<button id="startset" hidden>Ask the DJ for a set</button>
+
+<div class="transport">
+  <button id="back" aria-label="back 30 seconds">-30 s</button>
+  <button id="play">Listen</button>
   <button id="golive">Live</button>
 </div>
 
-<button id="talk">Hold to talk</button>
-<div class="hint" id="talkhint">tap once to talk hands-free, tap again to send</div>
+<button id="talk">Hold to talk<span id="meter"></span></button>
+<div class="hint cap" id="talkhint">tap once for hands-free, tap again to send</div>
 
-<div class="row"><button id="love">&#9829; Love this</button><button id="change">&#10227; Change it up</button></div>
-<div class="row"><button data-tap="energy_down">&minus; Calmer</button><button data-tap="energy_up">More energy +</button></div>
-<div class="row"><button data-tap="quieter">Quieter</button><button data-tap="louder">Louder</button></div>
-<div class="row"><button data-tap="pause">&#10073;&#10073; Pause set</button><button data-tap="resume">&#9654; Resume set</button></div>
-<div class="row3 mood" id="mood"><button data-mood="calm">calm</button><button data-mood="steady">steady</button><button data-mood="lift">lift</button><button data-mood="peak">peak</button></div>
-<div id="agentbtns"></div>
+<div class="keys2"><button id="love">Love this</button><button id="change">Change it up</button></div>
+<div class="pad">
+  <button data-tap="energy_down">Calmer</button><button data-tap="energy_up">More energy</button>
+  <button data-tap="quieter">Quieter</button><button data-tap="louder">Louder</button>
+  <button data-tap="pause">Pause set</button><button data-tap="resume">Resume set</button>
+</div>
 
-<div id="offerbox" hidden><h3>Downloads</h3><div id="offers"></div></div>
-<h3>From the DJ</h3>
-<div class="feed" id="feed"><div><small>nothing yet</small></div></div>
+<div class="section"><span class="cap">Mood for the next chapter</span>
+  <div class="detents" id="mood"><button data-mood="calm">Calm</button><button data-mood="steady">Steady</button><button data-mood="lift">Lift</button><button data-mood="peak">Peak</button></div>
+</div>
+<div class="section" id="agentwrap" hidden><span class="cap">From the DJ, right now</span><div id="agentbtns"></div></div>
+
+<div class="section" id="offerbox" hidden><span class="cap">Downloads</span><div id="offers"></div></div>
+<div class="section"><span class="cap">DJ log</span><div class="log" id="feed"></div></div>
 
 <div class="foot">
-  <span id="listening">no agent listening</span>
-  <span><button id="quality">64 kbps</button> <button id="buzzset">buzz on</button></span>
+  <span class="cap" id="listening">no agent listening</span>
+  <span><button id="keysset">Earbud: talk</button> <button id="quality">64 kbps</button> <button id="buzzset">Buzz on</button></span>
 </div>
 
 <div id="sheet"><div id="panel"></div></div>

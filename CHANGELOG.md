@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### The phone page from the earbuds (Nate: "control everything through voice ... without taking the phone out")
+
+- While a set plays, the earbud's press takes a voice note and the next press sends it, with tones you hear in your
+  pocket (start, end, arrived, blocked). Short notes that are only a command act as one: "stop listening" stops the
+  stream, "love this", "change it up", "calmer" and the rest arrive as taps with `via: 'voice'`. The microphone is
+  held from Listen so a press works with the screen off. A note stops itself after 60 s.
+- When the server does not answer, the page backs off to one try every 30 s instead of every 4 s.
+
+### The phone page, designed (Nate: "check the style" with the taste skill)
+
+- A deliberate look instead of the dark default: a field radio for one hand at night. The bar you hear is a tape
+  counter, recording is an ON AIR lamp, the keys are labelled hardware keys (Archivo condensed, JetBrains Mono for the
+  counter and the log, one accent derived from the name), and nothing is a symbol glyph Android could draw as emoji.
+- The talk key shows your microphone's level while it records, so you can see it hears you. The DJ log has a time
+  column. The mood control is a four-step selector, and the DJ's own buttons sit in their own section.
+
 ### A mirrored take plays back mirrored; the gallery stays put
 
 - A take made while the Follow mirrors keeps `mirror` in its meta (at the start, on every change while it records, and
