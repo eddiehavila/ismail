@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### sketch honours the brief's words (M021 run 1b)
+
+- Hats play in the groove (16ths when crisp); a named ride rides the groove's second phrase and is the whole
+  breakdown (no snare, no fill out of it); "fades out", "fade-out" and "fading out" make an outro that fades.
+- "sparser" is sparser (the tune's passing notes out) and every chord loop starts on the tonic (i iv VII III read as
+  G major); the reply says when no instrument was named for the melody, that the sketches are their own projects,
+  and not to polish one before the person picks. Each sketch states its sounds (track_model), so renders stop
+  flagging the sub as unstated.
+- `ismail.machine`: the CPU reading is shared between processes on the board for 10 s; each CLI call used to
+  sample the CPU for 2 s on its own (7 to 9 s of queue wait per heavy op on an empty board).
+
 ### Sampled voices: a Rhodes, a real kit, a clean guitar, vinyl crackle (from udio_ab_01)
 
 - `rhodes` (keys): jRhodes3d by Jeff Learman, a 1977 Rhodes Mark I DI, 5 velocity layers. `rusty` (drums): Big

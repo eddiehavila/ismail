@@ -143,3 +143,20 @@ def test_with_its_samples_here_the_brief_gets_the_real_voices(monkeypatch):
     assert s['parts'] == {'drums': 'rusty', 'sub': 'sub_bass', 'keys': 'rhodes', 'melody': 'emily', 'fx': 'crackle'}
     assert s['said'] == []
 
+
+def test_run_1b_words_are_honoured():
+    """M021 run 1b: no hats in the groove, a snare in 'just Rhodes and ride', 'fades out' dropped, 'sparser' the
+    same notes and in G major."""
+    b = ('trip-hop, 90 BPM, A minor. Dusty breakbeat with crisp hats and a ride, a deep sub, warm Rhodes chords and '
+         'a clean guitar bluesy melody. Intro, groove, a breakdown with just Rhodes and ride, the return, then it '
+         'fades out.')
+    todo, said = SK.specs_for(b)
+    a, sp = [SK.plan_spec(s, b, 0, i) for i, (_, s) in enumerate(todo[:2])]
+    assert a['form'] == ['intro', 'groove', 'breakdown', 'groove', 'outro']
+    drums = a['parts']['drums']['notes']
+    assert any(n[2] == 42 for n in drums if 4 <= n[0] < 8)                          # hats in the groove
+    assert {n[2] for n in drums if 8 <= n[0] < 12} == {51}                          # the breakdown: ride alone
+    assert a['parts']['melody']['voice'] == 'strat70_clean' and 'fx' in a['parts']  # the guitar has the tune; dust
+    assert len(sp['parts']['melody']['notes']) < len(a['parts']['melody']['notes'])
+    assert all(p[0] in ('i', 'I') for p in (x['progression'] for x in (a, sp)))
+
