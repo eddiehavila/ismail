@@ -160,3 +160,27 @@ def test_run_1b_words_are_honoured():
     assert len(sp['parts']['melody']['notes']) < len(a['parts']['melody']['notes'])
     assert all(p[0] in ('i', 'I') for p in (x['progression'] for x in (a, sp)))
 
+
+
+def test_a_gentle_church_prelude_is_classical_soft_and_closes_home():
+    """M118, the organist's dress rehearsal: 'strings' became one cello unsaid, 'gentle', 'quiet', 'prelude' and
+    'church' set no tempo, dynamics or form, the cello sat 17 to 22 dB over the piano tune, and the pop loops ended
+    on Em in C."""
+    b = 'something gentle for piano and strings, like a quiet prelude I might play in church'
+    todo, said = SK.specs_for(b)
+    s = todo[0][1]
+    assert s['feel'] == 'classical' and s['soft']
+    assert s['parts'] == {'harmony': 'grand_piano', 'pad': 'violin', 'counter': 'cello', 'bass': 'contrabass',
+                          'melody': 'grand_piano'}
+    assert any('violin and cello' in x for x in said) and any('melody (grand_piano)' in x for x in said)
+    pls = [SK.plan_spec(sp, b, 0, i, label=label) for i, (label, sp) in enumerate(todo)]
+    assert all(pl['bpm'] <= 76 for pl in pls) and pls[1]['bpm'] < pls[0]['bpm'] < pls[2]['bpm']   # sparser slowest
+    assert all(pl['form'] == ['groove', 'outro'] for pl in pls)
+    assert [pl['cadence'] for pl in pls] == ['V I', 'IV I', 'V I']
+    for pl in pls:
+        assert pl['progression'][0] == 'I'
+        mel = pl['parts']['melody']
+        assert all(p['level'] <= mel['level'] - 9 for r, p in pl['parts'].items() if r != 'melody')
+        assert max(n[4] for n in mel['notes']) < 76                                  # played softly
+    assert SK.read_brief('a hymn in D minor')['feel'] == 'classical'
+    assert SK.read_brief('rock band with strings')['parts']['bass'] == 'pbass70'        # a named bass stays

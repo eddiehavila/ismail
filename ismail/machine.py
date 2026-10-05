@@ -50,6 +50,8 @@ GPU_BAD = {0x8: 'hardware slowdown', 0x20: 'thermal slowdown (driver)', 0x40: 't
 CPU_BUSY = 80.0                    # % of all cores, averaged over CPU_SAMPLE_S
 CPU_SAMPLE_S = 2.0
 RESERVE_GB = 4.0                   # commit kept free for the desktop, the sessions and the live engine
+NOVICE = ('someone new to computers is never asked to close things (they may not be able to, and it alarms '
+          'them): wait quietly and say "the computer is busy, one moment"')
 WAIT_POLL_S = 5.0                  # a waiting job looks again this often
 THREADS = 2                        # numeric threads per heavy job
 DISK_FLOOR_GB = 15.0               # no new heavy job while a drive jobs write to has less free than this
@@ -231,7 +233,7 @@ def _memory_why(js):
     return (f"memory: {free:.1f} GB of commit free (heavy jobs wait below {COMMIT_FLOOR_GB:.0f} GB; past it Windows "
             f"grows the pagefile into the disk)" + (": " + '; '.join(_describe(j) for j in over) if over else
                                                   ": the board shows each job's memory") +
-            ": wait, or ask the user what can close")
+            ": wait; a user who runs other work on this machine can be asked what can close, but " + NOVICE)
 
 
 # ------------------------------------------------------------------ the job board
@@ -448,7 +450,8 @@ def check(kind, mem_gb=0.0, _jobs=None, who=None, since=None, me=None, disk_gb=0
         busy, top = cpu_load()
         if busy >= CPU_BUSY:
             why.append(f"the CPU is {busy:.0f}% busy (limit {CPU_BUSY:.0f}%), mostly load that is not on the board "
-                       f"({_top_text(top)}): wait for it to settle, or ask the user whether something can close")
+                       f"({_top_text(top)}): wait for it to settle; a user who runs other work on this machine can be "
+                       f"asked whether something can close, but " + NOVICE)
     same = [j for j in js if j['kind'] == kind or (kind == 'cpu' and j['kind'] == 'live')]
     if len(same) >= SLOTS[kind]:
         why.append(f"the {kind} slots are full ({SLOTS[kind]}): " + '; '.join(_describe(j) for j in same))

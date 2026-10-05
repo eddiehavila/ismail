@@ -519,9 +519,9 @@ def sketch(project: str, brief: str, base: str = None, n: int = None, styles: li
            bpm: float = None, bars: int = None, progression: str | list = None, seed: int = 0) -> str:
     """First sound for a new song, in one call: short sketches on the showcase voices, each a project in
     <project>/sketches/<letter>-<label>/, rendered to mp3 (wav without ffmpeg). brief: the person's words. The brief
-    is read: a tempo ('90 BPM'), a key ('A minor'), a genre (trip-hop, house, jazz, rock, ambient ...), instruments
-    and a form (intro, groove, breakdown, return, fade) shape the sketch; three readings come back (as asked,
-    sparser, busier). Whatever has no voice yet is named first in the reply ("asked for Rhodes: ... grand_piano plays
+    is read: a tempo ('90 BPM'), a key ('A minor'), a genre (trip-hop, house, jazz, rock, ambient, a church prelude or
+    hymn ...), gentle or soft words, instruments and a form (intro, groove, breakdown, return, fade) shape the
+    sketch; three readings come back (as asked, sparser, busier). Whatever has no voice yet is named first in the reply ("asked for Rhodes: ... grand_piano plays
     its part"): tell the person. A brief naming no genre or instrument gets three contrasting styles (piano,
     chamber, band). base='<letter>': the next round, that sketch changed by the brief's words ("slower, no guitar,
     add a pad"); n: how many (default 3, or 2 with base). styles: force the fixed styles. key, bpm, bars,
@@ -609,7 +609,8 @@ def sketch(project: str, brief: str, base: str = None, n: int = None, styles: li
         form = f"; form {' > '.join(pl['form'])} (4 bars each)" if pl['form'] else ''
         L += [f"{letter}) {pl['what']}",
               f"   {pl['key']}, {pl['bpm']:g} BPM, {pl['bars']} bars (~{sec:.0f} s){form}; chords "
-              f"{' '.join(pl['progression'])}" + (f"; feel {pl['feel']}" if pl['feel'] else ''),
+              f"{' '.join(pl['progression'])}" + (f", closing {pl['cadence']}" if pl.get('cadence') else '') +
+              (f"; feel {pl['feel']}" if pl['feel'] else '') + ('; soft' if pl.get('soft') else ''),
               f"   {lufs:.1f} LUFS, peak {peak:.1f} dBFS; listen: {f}"]
     L.append("NEXT: play them to the person one at a time (open each file), ask which is closest or what each is "
              "missing. Their correction is the next round: sketch(project, '<their words>', base='<letter>'). "

@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+### Setup a novice can sit through (M119, the dress rehearsal)
+
+- `references/setup.md`: say the install takes about five minutes and looks frozen; prefer `uv pip install`
+  (faster, shows progress); warm up the plugin's uvx command before the plugin lines (a first start that builds
+  for minutes can time out); the app restart said once beforehand and done once; what the Allow prompts look like;
+  winget lines runnable as written; reloading PATH inside a desktop app; the play command per OS; and
+  `ISMAIL_SONGS` set to their music home so `guide`'s first-session check and the machine board see their songs.
+- Whether they play or read music rides on the first session's first question: two questions, not three
+  (`AGENTS.md`, `guide`).
+- `machine`'s WAIT text no longer tells an agent to ask someone new to close things: wait quietly and say "the
+  computer is busy, one moment" (a person who runs other work on the machine can still be asked).
+
+### sketch hears a gentle classical or church brief (M118, the organist's dress rehearsal)
+
+- A classical feel: "prelude", "hymn", "chorale", "church", "sacred", "baroque", "classical", "chamber", "adagio" and
+  the like give a slow piece (56 to 72 BPM) of piano broken chords, a piano tune, cello and contrabass, in two
+  phrases and a fading close; its chords move by function and every reading closes on a cadence (V I, or IV I for
+  the second), so the chord readout ends on the tonic.
+- "Gentle", "soft", "quiet", "calm", "slow" and the like play every part lighter and keep the tempo at 76 or under.
+- "Strings" is a section (violin and cello, and contrabass when no other bass plays), and the reply says so; parts
+  a classical brief fills in are named in the reply.
+- In a classical or soft sketch the tune sits on top: every other part is at least 9 dB under it (the rehearsal's
+  cello read 17 to 22 dB over the piano melody; now each part measures 4 to 6 LUFS under it).
+- The readings sit in order inside the tempo range: sparser the slowest, busier the fastest. The reply names the
+  closing cadence and a soft reading.
+
 ### Point an agent at the repository and it knows what to do (family first sessions)
 
 - `AGENTS.md` (and `CLAUDE.md`, which loads it): a person says "set me up with ismail" and a link; the agent reads

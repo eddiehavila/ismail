@@ -116,7 +116,8 @@ FIRST_SESSION = """FIRST SESSION: this person has made nothing with ismail yet (
 Their first try decides whether they come back. Run it this way, then the normal loop:
 1. Two sentences on what this is: you write the music as notes and instruments, render it and read it back as
    numbers, and they judge it by ear; everything stays as editable files on their machine.
-2. At most two questions: what it is for, and a mood or a reference if they have one. A recording is welcome,
+2. At most two questions in all: what it is for (with whether they play or read music, if you don't know), and a
+   mood or a reference if they have one. A recording is welcome,
    never required: the sketch they pick is the song's example (loop step 0).
 3. Sound within about five minutes: sketch(project, brief=<their words>) reads their tempo, key, genre,
    instruments and form, writes three readings on the measured voices below and renders them. Tell them first
