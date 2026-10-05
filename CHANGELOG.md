@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Provenance: the string profiles credit their real sources (M73)
+
+- `voices/strings/{violin,contrabass}.mimic.json` were measured from VSCO 2 Community Edition (Versilian Studios,
+  CC0) and `cello.mimic.json` from "real cello notes" by flcellogrl (Freesound pack 12408, CC BY 4.0), both via
+  tonejs-instruments; their `source` fields said Philharmonia Orchestra, which tonejs-instruments' own source list
+  does not support. instruments.md says the same, and that the cello needs credit.
+
 ### Live tests: notes go straight to the stage dev, and updates come back (S31)
 
 - stage.md and stage-dev.md: during a live test the studio agent in the room sends the person's stage notes directly
