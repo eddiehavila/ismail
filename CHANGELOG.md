@@ -8,6 +8,12 @@
   (`{"hand_l": 0.066}`: the left hand stopped 6.6 cm short of where it was sent, at full reach). A hand that cannot
   reach the bar from a start pose is a number for the agent, not something found in the headset.
 
+### A brief for a take helper agent
+
+- `references/stage-takes.md`: when the person wants a fast take loop and the scene's agent is busy, a helper agent
+  runs it from a brief (scene, who, goal, setup, takes, the stage tools it may use, trial moves only, when to stop,
+  what to hand back). The person asked for it so the loop never waits on a busy agent.
+
 ### A set on air comes first, for now (ledger:M127, hq:D-11)
 
 - While a live engine is on the board, the governor holds GPU jobs and Blender renders (also those registered as
