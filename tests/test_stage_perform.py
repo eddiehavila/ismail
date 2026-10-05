@@ -110,6 +110,8 @@ def test_perform_op_and_aloud(stage):
         assert page.seen[-1]['type'] == 'perform' and page.seen[-1]['action'] == 'next_clip' and 'perform' in out
         OPS['stage_perform'](scene='room', action='mark', label='he reaches for the glass')
         assert page.seen[-1]['label'] == 'he reaches for the glass'
+        OPS['stage_perform'](scene='room', action='stop')
+        assert page.seen[-1]['action'] == 'stop'
         with pytest.raises(OpError, match='label'):
             OPS['stage_perform'](scene='room', action='mark')
         with pytest.raises(OpError, match="'state'"):
@@ -222,3 +224,44 @@ def test_without_ffmpeg_a_webm_clip_keeps_its_text(stage, monkeypatch):
         time.sleep(0.05)
     ev = got[-1]
     assert ev['text'] == 'cut' and 'words' not in ev and ev['words_missing'].startswith('ffmpeg not found')
+
+
+def test_saying_stop_ends_the_performance_and_its_words_reach_the_listeners(stage, monkeypatch, tmp_path):
+    port, perf = stage['port'], '20261005_190000_person_couple_3_m'
+    wav = tmp_path / 'v.wav'
+    _voice_wav(wav)
+    asked = []
+
+    def fake_stt(audio, filename):
+        asked.append(filename)
+        return {'text': 'yo, you need to stop the recording', 'words': [{'word': 'yo,', 'start': 0.8, 'end': 1.0}]}
+    monkeypatch.setattr(S, 'stt_words', fake_stt)
+    since = _get(port, 'live/inbox?who=film')[1]['last']
+    cmd0 = _get(port, 'live/cmd?scene=room&since=0')[1]['last']
+    _raw(port, f'voice/perf?scene=room&perf={perf}&clip=3&seq=0', wav.read_bytes(), 'audio/wav')
+    _raw(port, f'voice/perf?scene=room&perf={perf}&clip=3&end=1&at=40&seconds=1.8&by=auto:%20pause', b'')
+    for _ in range(100):
+        cmds = [c for c in _get(port, f'live/cmd?scene=room&since={cmd0}')[1]['cmds'] if c['type'] == 'perform']
+        if cmds:
+            break
+        time.sleep(0.05)
+    assert cmds[-1]['action'] == 'stop' and cmds[-1]['by'] == 'voice: "stop the recording"' and cmds[-1]['perf'] == perf
+    got = [e for e in _get(port, f'live/inbox?who=film&since={since}')[1]['events'] if e['type'] == 'perform_clip']
+    assert got and got[-1]['text'] == 'yo, you need to stop the recording' and 'words' not in got[-1]
+    # a clip the page heard nothing in is not sent to the speech server, and is not in the inbox
+    _raw(port, f'voice/perf?scene=room&perf={perf}&clip=4&seq=0', wav.read_bytes(), 'audio/wav')
+    _raw(port, f'voice/perf?scene=room&perf={perf}&clip=4&end=1&at=42&seconds=25&by=auto:%2025%20s&quiet=1', b'')
+    for _ in range(100):
+        if [e for e in _events(port, {'perform_clip'}) if e['clip'] == 4]:
+            break
+        time.sleep(0.05)
+    assert asked == ['clip_3.wav']
+    last = _get(port, f'live/inbox?who=film&since={since}')[1]['events']
+    assert not [e for e in last if e['type'] == 'perform_clip' and e['clip'] == 4]
+
+
+def test_stop_words():
+    assert P.asks_stop('Okay. Stop the performance now') == 'Stop the performance'
+    assert P.asks_stop('end performance') == 'end performance'
+    assert P.asks_stop("all right, I'm done. I'm done") is None
+    assert P.asks_stop('stop it, stop') is None and P.asks_stop(None) is None

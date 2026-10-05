@@ -7,13 +7,22 @@
 //   - an agent drops markers at the moment (stage_perform), and its speech waits (it would be in the recording)
 //     unless it is said aloud on purpose
 // A played take whose meta names a performance plays its voice with it, on the take's own clock (update below).
-// Events: perform_start, perform_clip_start, perform_clip_stop, perform_mark, perform_mic, perform_stop; the server
-// adds perform_clip_in and perform_clip (the words, snapped onto the voice).
+// Events: perform_start, perform_clip_start, perform_clip_stop, perform_mark, perform_mic, perform_stop_asked,
+// perform_stop; the server adds perform_clip_in and perform_clip (the words, snapped onto the voice).
+//
+// The user, 2026-10-05, seven minutes inside a performance an agent started: "right now I'm basically just stuck in a
+// performance". So a clip cuts itself at a pause (it is transcribed and reaches the listening agents while he goes on),
+// and a performance always has a way out: both thumbs down held, saying "stop the performance" (server: perform.py),
+// stage_perform(action="stop"), and the Follow panel, which now opens however the Follow began.
 
 const MIME = () => ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg', 'audio/mp4'].find((m) => window.MediaRecorder && MediaRecorder.isTypeSupported(m)) || '';
 const pad = (x) => String(x).padStart(2, '0');
 const stamp = (d) => `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
 const r2 = (x) => Math.round(x * 100) / 100;
+// a clip cuts itself so its words arrive while the performance goes on: at the first pause after CHUNK_MIN_S of it,
+// or at CHUNK_MAX_S whatever is happening (the next clip starts before this one stops: no gap)
+const CHUNK_MIN_S = 6, CHUNK_MAX_S = 25, PAUSE_S = 0.7;
+const STOP_HOLD_MS = 1500;    // both thumbs down this long ends the performance (gestures are otherwise off in one)
 // the level a recorded voice plays back at: RMS about -30 dBFS, a person talking a step or two away, under the agents'
 // speech (the user, 2026-10-05: his voice came out of Sam "super loud", the raw mic level with its auto gain)
 const VOICE_RMS = 0.03;
@@ -63,7 +72,9 @@ export function initPerform(ed, hands, voice, live, getActors) {
     p.starting = false;
     if (p !== perf || p.cur) return { error: 'the performance changed meanwhile' };
     const mime = MIME(), r = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
-    const c = { n: p.clips.length + 1, r, at: r2(clock()), t0: performance.now(), seq: 0, chain: Promise.resolve(), by, parts: [] };
+    const c = { n: p.clips.length + 1, r, at: r2(clock()), t0: performance.now(), seq: 0, chain: Promise.resolve(), by, parts: [],
+      voiced: false, lastVoice: 0 };
+    listenTo(p, stream);
     const type = (mime || 'audio/webm').split(';')[0];
     c.type = type;
     r.ondataavailable = (e) => {
@@ -86,6 +97,19 @@ export function initPerform(ed, hands, voice, live, getActors) {
     const p = perf, c = p.cur;
     if (!c) return { recording: false };
     p.cur = null;
+    return finish(p, c, by);
+  }
+  // the next clip starts before this one stops (the same mic stream): nothing he says falls between them
+  async function nextClip(by = 'agent') {
+    if (!perf) throw new Error('no performance: nobody is following the user');
+    const p = perf, c = p.cur;
+    if (!c) return { stopped: { recording: false }, started: await clipStart(by) };
+    p.cur = null;
+    const b = await clipStart(by);
+    if (b.error) { p.cur = c; return { error: b.error }; }
+    return { stopped: await finish(p, c, by), started: b };
+  }
+  async function finish(p, c, by) {
     c.r.stop();
     await c.done;
     const seconds = r2((performance.now() - c.t0) / 1000);
@@ -94,7 +118,8 @@ export function initPerform(ed, hands, voice, live, getActors) {
     p.local.push(new Blob(c.parts, { type: c.type }).arrayBuffer().then((ab) => voice.ctx().decodeAudioData(ab))
       .then((buf) => ({ n: c.n, start: c.at, buf, gain: levelOf(buf) })).catch(() => null));
     await c.chain;
-    fetch(url('voice/perf', p, `&clip=${c.n}&end=1&at=${c.at}&seconds=${seconds}&by=${encodeURIComponent(by)}`), { method: 'POST' })
+    const quiet = c.voiced ? '' : '&quiet=1';              // nothing said: not sent to the speech server
+    fetch(url('voice/perf', p, `&clip=${c.n}&end=1&at=${c.at}&seconds=${seconds}&by=${encodeURIComponent(by)}${quiet}`), { method: 'POST' })
       .catch(() => {});
     live.emit('perform_clip_stop', { perf: p.id, clip: c.n, at: c.at, seconds, by });
     return { clip: c.n, at: c.at, seconds };
@@ -117,12 +142,58 @@ export function initPerform(ed, hands, voice, live, getActors) {
     return r;
   }
 
+  // ---- the voice level of the clip recording (one analyser on the mic stream per performance): pauses cut clips
+  function listenTo(p, stream) {
+    if (p.an && p.anStream === stream) return;
+    try {
+      const a = voice.ctx(), src = a.createMediaStreamSource(stream), an = a.createAnalyser();
+      an.fftSize = 1024;
+      src.connect(an);
+      p.an = an; p.anStream = stream; p.anBuf = new Float32Array(an.fftSize); p.floor = 0.01;
+    } catch (_) { p.an = null; }                           // no level: clips still cut at CHUNK_MAX_S
+  }
+  function level(p) {
+    if (!p.an) return null;
+    p.an.getFloatTimeDomainData(p.anBuf);
+    let s = 0;
+    for (let i = 0; i < p.anBuf.length; i++) s += p.anBuf[i] * p.anBuf[i];
+    const rms = Math.sqrt(s / p.anBuf.length);
+    p.floor = rms < p.floor ? rms : p.floor * 1.002;        // the room's own level: drops at once, rises slowly
+    return rms > Math.max(0.006, p.floor * 3);
+  }
+  let stopSince = 0, stopFn = null;
+  const setStopAll = (fn) => { stopFn = fn; };
+  // the whole performance ends (the Follow, a take recording with it): agents, the gesture and the voice command
+  async function stopAll(by = 'agent') {
+    if (!perf) return { performing: false };
+    live.emit('perform_stop_asked', { perf: perf.id, person: perf.person, by });
+    if (stopFn) return stopFn(perf.person, by);
+    return stop();
+  }
+  setInterval(() => {
+    const p = perf;
+    if (!p) { stopSince = 0; return; }
+    const now = performance.now(), c = p.cur;
+    if (c && !p.rotating) {
+      if (level(p)) { c.voiced = true; c.lastVoice = now; }
+      const age = (now - c.t0) / 1000;
+      const why = age >= CHUNK_MAX_S ? `auto: ${CHUNK_MAX_S} s` : age >= CHUNK_MIN_S && c.voiced && now - c.lastVoice >= PAUSE_S * 1000 ? 'auto: pause' : null;
+      if (why) { p.rotating = true; nextClip(why).finally(() => { p.rotating = false; }); }
+    }
+    const H = hands.state || {}, down = (s) => H[s] && H[s].g === 'thumbs_down' && !H[s].resting;
+    if (down('left') && down('right')) {
+      if (!stopSince) stopSince = now;
+      else if (now - stopSince >= STOP_HOLD_MS) { stopSince = 0; stopAll('both thumbs down'); }
+    } else stopSince = 0;
+  }, 50);
+
   async function stop() {
     if (!perf) return null;
     const p = perf;
     let fin;
     const finished = new Promise((res) => { fin = res; });
     perfs.set(p.scene + '/' + p.id, finished.then(() => Promise.all(p.local)).then((l) => l.filter(Boolean)));
+    owners.set(p.scene + '/' + p.id, p.person);
     if (p.cur) await clipStop('follow end');
     perf = null;
     hands.performing = false;
@@ -156,10 +227,11 @@ export function initPerform(ed, hands, voice, live, getActors) {
       case 'state': return state();
       case 'stop_clip': return { ...(await clipStop(by)), state: state() };
       case 'start_clip': { const r = await clipStart(by); if (r.error) throw new Error(r.error); return { ...r, state: state() }; }
-      case 'next_clip': { const a = await clipStop(by), b = await clipStart(by); if (b.error) throw new Error(b.error); return { stopped: a, started: b }; }
+      case 'next_clip': { const r = await nextClip(by); if (r.error) throw new Error(r.error); return r; }
+      case 'stop': return stopAll(by);
       case 'mic_off': return { ...(await micOff(by)), state: state() };
       case 'mark': return mark(c.label, by);
-      default: throw new Error("action is state, stop_clip, start_clip, next_clip, mic_off or mark");
+      default: throw new Error("action is state, stop, stop_clip, start_clip, next_clip, mic_off or mark");
     }
   };
 
@@ -167,11 +239,13 @@ export function initPerform(ed, hands, voice, live, getActors) {
   voice.perfHud = () => {
     if (!perf) return null;
     const t = clock(), mm = Math.floor(t / 60), ss = pad(Math.floor(t % 60));
-    return perf.cur ? `● PERFORMING  ${mm}:${ss}  voice clip ${perf.cur.n}` : `PERFORMING  ${mm}:${ss}  mic off`;
+    if (stopSince) return `■ STOPPING: keep both thumbs down`;
+    return (perf.cur ? `● PERFORMING  ${mm}:${ss}  voice clip ${perf.cur.n}` : `PERFORMING  ${mm}:${ss}  mic off`) + '  ·  both thumbs down: stop';
   };
 
   // ---- the voice of a played take: clips of its performance, started where the take's clock reaches them
   const perfs = new Map();    // "scene/id" -> Promise<[{n, start (Follow clock), buf}]>
+  const owners = new Map();   // "scene/id" -> the person the performance was recorded for
   function clipsOf(scene, id) {
     const key = scene + '/' + id;
     if (!perfs.has(key)) {
@@ -179,13 +253,17 @@ export function initPerform(ed, hands, voice, live, getActors) {
       const one = (c) => fetch(base + c.file).then((r) => r.arrayBuffer()).then((ab) => voice.ctx().decodeAudioData(ab))
         .then((buf) => ({ n: c.n, start: c.at, buf, gain: levelOf(buf) })).catch(() => null);
       perfs.set(key, fetch(base + 'perf.json', { cache: 'no-store' }).then((r) => r.json())
+        .then((m) => { if (m.person) owners.set(key, m.person); return m; })
         .then((m) => Promise.all((m.clips || []).filter((c) => c.file).map(one)))
         .then((l) => l.filter(Boolean))
-        .catch(() => { perfs.delete(key); return []; }));
+        .catch(() => { setTimeout(() => perfs.delete(key), 10000); return []; }));   // tried again later, not every frame
     }
     return perfs.get(key);
   }
   const voices = new Map();   // person -> { key, clips, lastT, played: Set, src: Map }
+  // one sound per clip of a performance, however many bodies play its take and however often it is re-played: a
+  // dance take on six dancers, played twice, built up "a din of just me" (the user, 2026-10-05)
+  const sounding = new Map(); // "scene/perf|clip" -> { src, person }
   function hush(person) {
     const v = voices.get(person);
     if (v) for (const s of v.src.values()) try { s.stop(); } catch (_) { /* ended */ }
@@ -198,7 +276,12 @@ export function initPerform(ed, hands, voice, live, getActors) {
     for (const [person, st] of actors.playing) {
       const m = st.meta;
       if (st.live || !m || !m.performance || !st.frames) continue;
-      const key = (m.perf_scene || scn()) + '/' + m.performance + '/' + (st.take || '');
+      // the voice is the performer's: a take borrowed onto another body plays silent (actor_play voice= decides)
+      const pk = (m.perf_scene || scn()) + '/' + m.performance;
+      clipsOf(m.perf_scene || scn(), m.performance);          // loads once: perf.json names whose voice it is
+      const owner = owners.get(pk) || m.for || m.name;
+      if (st.voice === false || (st.voice !== true && owner && owner !== person)) { if (voices.has(person)) hush(person); continue; }
+      const key = pk + '/' + (st.take || '');
       let v = voices.get(person);
       if (!v || v.key !== key) {
         hush(person);
@@ -219,12 +302,15 @@ export function initPerform(ed, hands, voice, live, getActors) {
         const g = a.createGain();
         g.gain.value = c.gain || 1;
         src.connect(g).connect(a.destination);
+        const one = pk + '|' + c.n, was = sounding.get(one);
+        if (was) try { was.src.stop(); } catch (_) { /* ended */ }
         src.start(0, t - s0);
-        src.onended = () => v.src.delete(c.n);
+        sounding.set(one, { src, person });
+        src.onended = () => { v.src.delete(c.n); if (sounding.get(one)?.src === src) sounding.delete(one); };
         v.src.set(c.n, src);
       }
     }
   });
 
-  return { start, stop, clipStart, clipStop, micOff, mark, attachTake, state, get active() { return !!perf; }, hush };
+  return { start, stop, stopAll, setStopAll, clipStart, clipStop, nextClip, micOff, mark, attachTake, state, get active() { return !!perf; }, hush };
 }
