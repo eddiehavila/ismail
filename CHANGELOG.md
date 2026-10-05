@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Point an agent at the repository and it knows what to do (family first sessions)
+
+- `AGENTS.md` (and `CLAUDE.md`, which loads it): a person says "set me up with ismail" and a link; the agent reads
+  the playbook, sets it up itself, calls `guide` (the first session for someone new), learns whether the person
+  plays or reads music, and knows where contributing and changing ismail are described.
+- `references/setup.md`: setup done by the agent: look before installing, the package-manager commands per OS, the
+  one-line warning before any prompt only the person can answer, the plugin / MCP / pip routes, proof by a sound
+  they hear, and errors that are the agent's to solve (and to write down for the maintainer).
+- `references/contributing.md`: contributing for someone who has never used git: in the studio (review, ask,
+  HANDOFF.md, one sentence to start a new conversation), through GitHub (signup, `gh auth login --web` with the
+  code read to them, fork and pull request done for them, their no-reply address) or without it (a bundle).
+- README's agent steps start from AGENTS.md and set-up-yourself; the first questions are `guide`'s.
+
 ### sketch honours the brief's words (M021 run 1b)
 
 - Hats play in the groove (16ths when crisp); a named ride rides the groove's second phrase and is the whole
