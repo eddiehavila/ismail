@@ -340,17 +340,19 @@ def stage_take_view_clear(scene: str) -> str:
 
 @op(mutates=True)
 def stage_actor_play(scene: str, person: str, take: str, actor: str = None, loop: bool = True, rate: float = 1,
-               trim: list = None, in_place: bool = False, assets: str = None, takes: str = None, voice: bool = None) -> str:
+               trim: list = None, in_place: bool = False, assets: str = None, takes: str = None, voice: bool = None,
+               mirror: bool = None) -> str:
     """Play a take on a person: their skinned body replaces the statue and is driven by the take's head and hands,
     scaled to their height (page command: actor_play). actor defaults from the person (a fixed table in actors.js);
     trim [t0, t1] in the take's seconds defaults to the take's saved trim (the page treats an explicit null as "no
     trim", which a None default here cannot express); in_place plays it where it was recorded instead of where the
     person stands; assets / takes read the body / take from another scene. voice: a take made in a performance plays
     its recorded voice only on the person it was recorded for (None, the default); True plays it on this body too,
-    False keeps it silent. One clip sounds once however many bodies play the take. Errors: no actor for that person,
+    False keeps it silent. One clip sounds once however many bodies play the take. mirror: a take plays mirrored as it
+    was recorded (meta.mirror, from the Follow's mirror; None, the default); True or False overrides. Errors: no actor for that person,
     no take, no frames. Page replies {person, actor, frames, scale}. Emits: actor_stop (a take already on them),
     actor_play."""
-    return page_cmd(scene, 'actor_play', {'person': person, 'take': take, 'actor': actor, 'loop': loop, 'rate': rate, 'trim': trim, 'in_place': in_place, 'assets': assets, 'takes': takes, 'voice': voice}, timeout=30)
+    return page_cmd(scene, 'actor_play', {'person': person, 'take': take, 'actor': actor, 'loop': loop, 'rate': rate, 'trim': trim, 'in_place': in_place, 'assets': assets, 'takes': takes, 'voice': voice, 'mirror': mirror}, timeout=30)
 
 
 @op(mutates=True)

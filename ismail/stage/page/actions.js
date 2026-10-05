@@ -220,7 +220,7 @@ export function initActions(ed, hands, panels, live, takes) {
     // it plays back first, with the voice (the user, 2026-10-04: after a Follow the performance plays back before
     // anything else), and loops while the user decides
     const lfd = takes.lastFollowData && takes.lastFollowData();
-    const back = !!(lfd && canAct(it)) && await takes.actors.play({ person, frames: lfd.frames, meta: lfd.perf || {}, take: 'last follow', loop: true })
+    const back = !!(lfd && canAct(it)) && await takes.actors.play({ person, frames: lfd.frames, meta: { ...(lfd.perf || {}), mirror: takes.actors.mirrorOf(person) }, take: 'last follow', loop: true })
       .then(() => true).catch((e) => { live.emit('voice_error', { where: 'follow playback', error: String(e.message || e) }); return false; });
     const a = await panels.show({ panel_id: pid, title: `Keep that follow of ${ed.label(it)}?`,
       text: `${lf.seconds.toFixed(0)} s${back ? ', playing back on them now' : ''}. Keep it as a take to trim it, or discard it.`,

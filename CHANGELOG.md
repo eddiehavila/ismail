@@ -10,6 +10,18 @@
 - The talk key shows your microphone's level while it records, so you can see it hears you. The DJ log has a time
   column. The mood control is a four-step selector, and the DJ's own buttons sit in their own section.
 
+### A mirrored take plays back mirrored; the gallery stays put
+
+- A take made while the Follow mirrors keeps `mirror` in its meta (at the start, on every change while it records, and
+  when the last Follow is kept), and plays back mirrored, as does the playback right after the Follow.
+  `stage_actor_play(mirror=)` overrides. The user, 2026-10-05: a take recorded with Follow's mirror played back the other
+  way.
+- The gallery's back and next change the picture on one panel where it is. Each answer used to fade the panel out
+  while a new one opened 30 cm aside ("closes the whole gallery and opens it again"). Panels gain `stay` and
+  `rewrite(id, {title, text, image})` for this.
+- A start pose of 'rest' on a take played in place (or before the stand-in has loaded) stands at the take's anchor
+  instead of failing.
+
 ### Loading without the long stalls (the "parallelograms" on the Quest)
 
 - The Quest has no parallel shader compile, so the room's one precompile (`compileAsync`) stalled a frame for about a
