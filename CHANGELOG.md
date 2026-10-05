@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+### The governor guards the disk and the commit (M72)
+
+- `ismail.machine`: no new heavy job while a drive jobs write to (the songs folder's, the working directory's, a
+  render's project) has under 15 GB free, or while under 6 GB of commit is free. The refusal gives the numbers and
+  what to do. A live set on air is never held. D: filled four times in five days: render caches, takes, a game
+  unpack, and the Windows pagefile, which grows into the disk when commit runs out.
+- `run --disk <GB>` and `slot(..., disk_gb=)` declare what a job writes, and the check counts it. `render` declares
+  its track cache and wavs itself, and a refusal says `cache=False` skips the cache.
+- A running job's memory (private bytes, what the commit counts) is on the board every 15 s. Past its `--mem` by
+  25% it shows OVER there, and its own output says so once (2026-10-05: a Blender job declared 7 GB, took
+  10.7 GB, and the pagefile took D: to 0.2 GB in nine minutes).
+- The board's new disk line shows each drive's free space and the pagefile's size. `live_status` ends with the
+  machine's free commit and disk.
+- History: each job's peak memory, its bytes written and the drive's free space at start and end. `history` sums
+  the writes per song and counts the jobs that went past their memory.
+- `machine_disk` (op) and `python -m ismail.machine disk`: the biggest folders under songs/ with their growth since
+  the last day's snapshot, and every `_reclaim` folder. Freeing space means moving a project's finished
+  intermediates into its `_reclaim/`; nobody deletes, the user clears it. 179 tools.
+
 ### Provenance: the string profiles credit their real sources (M73)
 
 - `voices/strings/{violin,contrabass}.mimic.json` were measured from VSCO 2 Community Edition (Versilian Studios,
