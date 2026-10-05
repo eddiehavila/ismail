@@ -11,14 +11,17 @@ from .link import page_cmd
 
 @op(mutates=True)
 def stage_object_set(scene: str, object: str, location: list = None, offset: list = None, quaternion: list = None,
-               scale: list = None) -> str:
+               scale: list = None, trial: bool = False) -> str:
     """Move, turn or scale one object as one undoable edit (page command: set). location is the new Blender world
     position; offset is added to location (or to where the object is now when location is not given); quaternion is
     [w, x, y, z]; scale is ignored for aimed objects (cameras and lights that track a target). At least one of
     location, offset, quaternion, scale is required. Errors: no object of that name (matched by exact name, then case
     insensitive). Page replies {object, location, quaternion, scale} (the transform after the edit). Emits:
-    transform_end (via claude)."""
-    return page_cmd(scene, 'set', {'object': object, 'location': location, 'offset': offset, 'quaternion': quaternion, 'scale': scale}, timeout=30)
+    transform_end (via claude). trial=True: a test move that never saves (edits.json, which the build reads, keeps
+    where it was before the first trial move) until the thing is edited for real (by hand, or a set without
+    trial); the reply then says trial: true."""
+    return page_cmd(scene, 'set', {'object': object, 'location': location, 'offset': offset, 'quaternion': quaternion, 'scale': scale,
+                                   'trial': trial or None}, timeout=30)
 
 
 @op(mutates=True)
@@ -540,4 +543,15 @@ def stage_follow_anchor(scene: str, person: str, joint: str = 'hips', to: str | 
 
 
 # page command type -> its typed op (stage_cmd refuses these and names the op)
-TYPED = {'follow_anchor': 'stage_follow_anchor', 'take_keep_last': 'stage_take_keep_last', 'ack': 'stage_voice_ack', 'actor_follow': 'stage_actor_follow', 'actor_play': 'stage_actor_play', 'actor_stop': 'stage_actor_stop', 'anchor': 'stage_anchor_set', 'anchor_release': 'stage_anchor_release', 'anim_clear': 'stage_anim_clear', 'anim_save': 'stage_anim_save', 'ask': 'stage_ask', 'clear_markers': 'stage_markers_clear', 'clock': 'stage_clock_set', 'cue': 'stage_cue_set', 'cue_remove': 'stage_cue_remove', 'cues_clear': 'stage_cues_clear', 'cues_list': 'stage_cues_list', 'deselect': 'stage_object_deselect', 'drop': 'stage_object_drop', 'eyecam': 'stage_view_eyecam', 'focus': 'stage_view_focus', 'gallery_add': 'stage_gallery_add', 'goto': 'stage_person_goto', 'goto_camera': 'stage_camera_goto', 'growth': 'stage_growth_set', 'highlight': 'stage_object_highlight', 'key': 'stage_key_set', 'key_delete': 'stage_key_delete', 'light': 'stage_light_set', 'look_through': 'stage_view_look_through', 'marker': 'stage_marker_set', 'music': 'stage_music', 'panel': 'stage_panel_show', 'panel_close': 'stage_panel_close', 'reload': 'stage_scene_reload', 'say': 'stage_say', 'scene_go': 'stage_scene_go', 'scene_list': 'stage_scene_list', 'select': 'stage_object_select', 'set': 'stage_object_set', 'sky': 'stage_sky_set', 'snapshot': 'stage_view_snapshot', 'stream': 'stage_stream', 'take_start': 'stage_take_start', 'take_stop': 'stage_take_stop', 'take_view': 'stage_take_view', 'take_view_clear': 'stage_take_view_clear', 'timeline': 'stage_timeline_show', 'trees_reload': 'stage_trees_reload', 'undo': 'stage_edit_undo', 'voice_rec': 'stage_voice_note', 'walk': 'stage_view_walk', 'waypoint': 'stage_waypoint_set', 'waypoint_go': 'stage_waypoint_go', 'waypoint_remove': 'stage_waypoint_remove', 'waypoints_clear': 'stage_waypoints_clear', 'waypoints_list': 'stage_waypoints_list'}
+@op(mutates=True)
+def stage_key_interp(scene: str, object: str, mode: str = 'smooth') -> str:
+    """How a keyed object moves between its keys (page command: key_interp): 'stop' (the default: it eases into and
+    out of every key, so it stops at each) or 'smooth' (it glides through them: a camera move). Saved in anim.json
+    "interp" with stage_anim_save; the exact curves are in ismail/stage/page/interp.js, for a render to match. Errors:
+    the object has no keys. Page replies {name, mode, keys}."""
+    if mode not in ('stop', 'smooth'):
+        raise OpError("mode is 'stop' or 'smooth'")
+    return page_cmd(scene, 'key_interp', {'name': object, 'mode': mode}, timeout=30)
+
+
+TYPED = {'key_interp': 'stage_key_interp', 'follow_anchor': 'stage_follow_anchor', 'take_keep_last': 'stage_take_keep_last', 'ack': 'stage_voice_ack', 'actor_follow': 'stage_actor_follow', 'actor_play': 'stage_actor_play', 'actor_stop': 'stage_actor_stop', 'anchor': 'stage_anchor_set', 'anchor_release': 'stage_anchor_release', 'anim_clear': 'stage_anim_clear', 'anim_save': 'stage_anim_save', 'ask': 'stage_ask', 'clear_markers': 'stage_markers_clear', 'clock': 'stage_clock_set', 'cue': 'stage_cue_set', 'cue_remove': 'stage_cue_remove', 'cues_clear': 'stage_cues_clear', 'cues_list': 'stage_cues_list', 'deselect': 'stage_object_deselect', 'drop': 'stage_object_drop', 'eyecam': 'stage_view_eyecam', 'focus': 'stage_view_focus', 'gallery_add': 'stage_gallery_add', 'goto': 'stage_person_goto', 'goto_camera': 'stage_camera_goto', 'growth': 'stage_growth_set', 'highlight': 'stage_object_highlight', 'key': 'stage_key_set', 'key_delete': 'stage_key_delete', 'light': 'stage_light_set', 'look_through': 'stage_view_look_through', 'marker': 'stage_marker_set', 'music': 'stage_music', 'panel': 'stage_panel_show', 'panel_close': 'stage_panel_close', 'reload': 'stage_scene_reload', 'say': 'stage_say', 'scene_go': 'stage_scene_go', 'scene_list': 'stage_scene_list', 'select': 'stage_object_select', 'set': 'stage_object_set', 'sky': 'stage_sky_set', 'snapshot': 'stage_view_snapshot', 'stream': 'stage_stream', 'take_start': 'stage_take_start', 'take_stop': 'stage_take_stop', 'take_view': 'stage_take_view', 'take_view_clear': 'stage_take_view_clear', 'timeline': 'stage_timeline_show', 'trees_reload': 'stage_trees_reload', 'undo': 'stage_edit_undo', 'voice_rec': 'stage_voice_note', 'walk': 'stage_view_walk', 'waypoint': 'stage_waypoint_set', 'waypoint_go': 'stage_waypoint_go', 'waypoint_remove': 'stage_waypoint_remove', 'waypoints_clear': 'stage_waypoints_clear', 'waypoints_list': 'stage_waypoints_list'}

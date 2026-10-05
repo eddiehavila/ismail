@@ -204,6 +204,8 @@ A person in a headset cannot see your terminal. Contact is part of the interface
 - **Seat a person before they are followed.** `stage_follow_anchor(person, joint="hips", to="<their seat>")` keeps
   them seated while the person drives them sitting or standing; a Follow keeps nothing, so keep a good one with
   `stage_take_keep_last`.
+- **Test on a copy, or move on trial.** A plain `stage_object_set` saves into the scene's edits, which the build
+  reads; `trial=True` moves it without saving. Camera moves keyed on the clock want `stage_key_interp(mode="smooth")`.
 - **Say who you are.** Pass `sender=` (your name as the person knows it, e.g. "crossroads film") on `stage_say` and
   `stage_panel_show`: the card shows it in your colour, on your side. Several agents can be talking to them at once.
 

@@ -349,11 +349,14 @@ export function initLive(ed, desktop, xr) {
       if (c.quaternion) t.quaternion = c.quaternion;
       if (c.scale && !it.aimed) t.scale = c.scale;
       if (!Object.keys(t).length) throw new Error('set needs location, offset, quaternion or scale');
-      ed.beginEdit('claude');
+      // trial: a test move that never reaches edits.json (the film assistant, 2026-10-05: a test camera move autosaved
+      // into the file the build reads). Where it was before the first trial move is what saves, until a real edit
+      if (c.trial && !it.obj.userData.trialHome) it.obj.userData.trialHome = { changed: ed.changed(it), t: ed.blenderTransform(it) };
+      ed.beginEdit(c.trial ? 'claude-trial' : 'claude');
       ed.setBlenderWorld(it, t);
       ed.endEdit();
       if (ed.selected) ed.outline.setFromObject(ed.selected.obj);
-      return { object: it.name, ...tf(ed.blenderTransform(it)) };
+      return { object: it.name, ...tf(ed.blenderTransform(it)), ...(it.obj.userData.trialHome ? { trial: true } : {}) };
     },
     light: (c) => {
       const it = find(c.name || c.light);
@@ -377,6 +380,12 @@ export function initLive(ed, desktop, xr) {
     snapshot: async () => desktop.snapshot(),
     reload: () => hotReload('command'),
   };
+
+  // a real edit of a thing moved on trial (by hand, by an agent's plain set, by undo past it) makes it save again
+  ed.addEventListener('edited', (e) => {
+    if (e.via === 'claude-trial') return;
+    for (const m of e.moved || []) if (m.it && m.it.obj.userData.trialHome) delete m.it.obj.userData.trialHome;
+  });
 
   const queue = [];
   let running = false, since = -1;

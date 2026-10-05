@@ -11,14 +11,14 @@
 // along it to scrub, buttons to play, step, key, toggle AUTO, save. Saved to scenes/<scene>/anim.json (POST /anim),
 // read by blue_front_block.py for renders (BF_ANIM) so the moves made in the headset are the moves in the shot.
 // Live: clock {action: play|pause|seek|rate|span, t, rate, span}, key {name, t?}, key_delete {name, t?},
-// anim_save, anim_clear {name?}, timeline {show}, growth {name, t0, t1}. Events: clock {t, playing}, keyed, anim_saved.
+// anim_save, anim_clear {name?}, key_interp {name, mode}, timeline {show}, growth {name, t0, t1}. Events: clock {t, playing}, keyed, anim_saved.
 import * as THREE from 'three';
 import { GIZMO } from './editor.js';
 import { world } from './world.js';
 
 const W = 0.9, H = 0.16, CW = 1800, CH = 320;                  // the bar in metres and its canvas
 const BTN = [['play', '▶'], ['back', '⏮'], ['step-', '◀'], ['step+', '▶▶'], ['key', '◆'], ['auto', 'AUTO'], ['save', 'SAVE']];
-const ease = (k) => k * k * (3 - 2 * k);
+import { vec, segment, slerpK } from './interp.js';
 
 export function initClock(ed, live, xrApi, panels) {
   const scn = () => ed.sceneName;                      // live: scenes.js can switch it
@@ -51,25 +51,23 @@ export function initClock(ed, live, xrApi, panels) {
     return { deleted: before - (anim.objects[name] || []).length };
   }
   const qa = new THREE.Quaternion(), qb = new THREE.Quaternion();
-  function sample(ks, t) {
+  // between keys: "stop" eases each segment, "smooth" glides through the keys (interp.js has the exact math)
+  function sample(ks, t, mode = 'stop') {
     if (t <= ks[0].t) return ks[0];
     if (t >= ks[ks.length - 1].t) return ks[ks.length - 1];
-    let i = 0;
-    while (ks[i + 1].t < t) i++;
-    const a = ks[i], b = ks[i + 1], k = ease((t - a.t) / Math.max(1e-6, b.t - a.t));
-    const L = (u, v) => u.map((x, j) => x + (v[j] - x) * k);
+    const { i, u } = segment(ks, t), a = ks[i], b = ks[i + 1], k = slerpK(u, mode);
     qa.set(a.quaternion[1], a.quaternion[2], a.quaternion[3], a.quaternion[0]);
     qb.set(b.quaternion[1], b.quaternion[2], b.quaternion[3], b.quaternion[0]);
     if (qa.dot(qb) < 0) qb.set(-qb.x, -qb.y, -qb.z, -qb.w);
     qa.slerp(qb, k);
-    return { location: L(a.location, b.location), quaternion: [qa.w, qa.x, qa.y, qa.z], scale: L(a.scale, b.scale) };
+    return { location: vec(ks, t, 'location', mode), quaternion: [qa.w, qa.x, qa.y, qa.z], scale: vec(ks, t, 'scale', mode) };
   }
   function apply() {
     for (const [name, ks] of Object.entries(anim.objects)) {
       if (ks.length < 2) continue;                              // one key holds nothing: the object stays where it is
       const it = ed.byName.get(name);
       if (!it || (ed.editing && ed.selected === it)) continue;  // never fight the hand that holds it
-      ed.setBlenderWorld(it, sample(ks, st.t));
+      ed.setBlenderWorld(it, sample(ks, st.t, (anim.interp || {})[name]));
     }
     for (const g of growers) {
       const sp = anim.growth[g.name] || { t0: anim.span[0], t1: anim.span[1] };
@@ -247,7 +245,7 @@ vKoW = (modelMatrix * vec4(transformed, 1.0)).xyz;`);
 
   async function load() {
     const j = await fetch(`scenes/${encodeURIComponent(scn())}/anim.json`, { cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
-    if (j) anim = { span: j.span || [0, 30], objects: j.objects || {}, growth: j.growth || {} };
+    if (j) anim = { span: j.span || [0, 30], objects: j.objects || {}, growth: j.growth || {}, interp: j.interp || {} };
     patchGrowth();
     apply();
     return { keys: Object.keys(anim.objects).length, growers: growers.map((g) => g.name) };
@@ -274,6 +272,15 @@ vKoW = (modelMatrix * vec4(transformed, 1.0)).xyz;`);
   live.handlers.key = (c) => key(c.name, c.t ?? st.t);
   live.handlers.key_delete = (c) => keyDelete(c.name, c.t);
   live.handlers.anim_save = () => save();
+  // key_interp {name, mode}: how this object moves between its keys ("stop" or "smooth"; interp.js), saved with anim_save
+  live.handlers.key_interp = (c) => {
+    if (!['stop', 'smooth'].includes(c.mode)) throw new Error("mode is 'stop' or 'smooth'");
+    if (!anim.objects[c.name]) throw new Error(`${c.name} has no keys`);
+    anim.interp = anim.interp || {};
+    if (c.mode === 'stop') delete anim.interp[c.name]; else anim.interp[c.name] = c.mode;
+    st.dirty = true; apply(); draw();
+    return { name: c.name, mode: c.mode, keys: anim.objects[c.name].length };
+  };
   live.handlers.anim_clear = (c) => { if (c.name) delete anim.objects[c.name]; else anim.objects = {}; st.dirty = true; draw(); return { cleared: c.name || 'all' }; };
   live.handlers.timeline = (c) => show(c.show !== false);
   live.handlers.growth = (c) => { anim.growth[c.name] = { t0: c.t0, t1: c.t1 }; st.dirty = true; apply(); return { name: c.name, ...anim.growth[c.name], growers: patchGrowth() }; };

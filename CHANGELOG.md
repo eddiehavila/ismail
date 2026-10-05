@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Keyed moves that glide; trial moves that never save
+
+- `stage_key_interp(scene, object, mode)`: "smooth" makes a keyed object glide through its keys (a cubic Hermite
+  curve per segment, tangents from the neighbouring keys; the turn slerps without easing) instead of stopping at each
+  ("stop", the default). Saved in anim.json `interp`; the exact math is `ismail/stage/page/interp.js`, so a render
+  can match it (the stage and the Blender render were 74 cm apart between camera keys).
+- `stage_object_set(trial=True)`: a test move that never reaches edits.json, which the build reads; where the thing
+  was before is what saves, until it is edited for real (an agent's test camera move autosaved into the build).
+
 ### Live tests: notes go straight to the stage dev, and updates come back (S31)
 
 - stage.md and stage-dev.md: during a live test the studio agent in the room sends the person's stage notes directly
