@@ -12,6 +12,7 @@ import glob
 import json
 import math
 import os
+import re
 import shutil
 import time
 
@@ -503,9 +504,140 @@ def bus_add(project: str, name: str, fx: list = None, volume_db: float = 0.0) ->
 
 @op()
 def guide(project: str = None) -> str:
-    """Read this first: how to use this DAW as an agent (workflow, conventions, which tool for which question)."""
-    from .guide import GUIDE
+    """Read this first: how to use this DAW as an agent (workflow, conventions, which tool for which question). For
+    a person who has made nothing with ismail yet it opens with how to run their first session."""
+    from .guide import GUIDE, FIRST_SESSION
+    from . import sketch as SK
+    if SK.is_new(project):
+        return FIRST_SESSION.format(marker=SK.marker_path(), showcase=SK.showcase_text()) + '\n\n' + GUIDE
     return GUIDE
+
+
+@op()
+@heavy()
+def sketch(project: str, brief: str, styles: list = None, key: str = None, bpm: float = None, bars: int = None,
+           progression: str | list = None, seed: int = 0) -> str:
+    """First sound for a new song, in one call: two or three short contrasting sketches (about 30 s each) on the
+    showcase voices, each a project in <project>/sketches/<letter>-<style>/, rendered to mp3 (wav without ffmpeg).
+    brief: what the person said they want, in their words. styles: from piano, chamber, band (default all three);
+    key: 'A minor', 'Eb' (default from the brief's mood); progression: roman numerals or chord names, 'i VI III VII'.
+    Another call adds new letters (a second round never overwrites). Play each to the person, ask which is closest
+    or what each is missing, then sketch_keep(project, '<letter>'). Each sketch is a normal project: edit it."""
+    from . import sketch as SK
+    from . import voices as V
+    styles = styles or list(SK.ORDER)
+    if isinstance(styles, str):
+        styles = [x for x in re.split(r'[\s,]+', styles) if x]
+    bad = [x for x in styles if x not in SK.STYLES]
+    if bad or not 1 <= len(styles) <= 4:
+        raise OpError(f"styles: one to four of {', '.join(SK.STYLES)} (got {styles})")
+    sc = {v['name']: v for v in SK.showcase()['voices']}
+    root = os.path.abspath(project)
+    sd = os.path.join(root, 'sketches')
+    used = {f.split('-')[0] for f in os.listdir(sd)} if os.path.isdir(sd) else set()
+    letters = [c for c in 'abcdefghijklmnopqrstuvwxyz' if c not in used]
+    mp3 = 'also' if _ffmpeg_ok() else 'none'
+    L = [f"sketches for: {brief}"]
+    for i, style in enumerate(styles):
+        try:
+            pl = SK.plan(brief, style, key, bpm, bars, progression, seed, variant=i + len(used))
+        except SK.SketchError as e:
+            raise OpError(str(e))
+        letter = letters[i]
+        sp = os.path.join(sd, f"{letter}-{style}")
+        project_new(sp, pl['bpm'], pl['bars'], name=f"sketch {letter} ({style})", objective=brief)
+        ops = []
+        for role, part in pl['parts'].items():
+            v = sc[part['voice']]
+            ops.append({'op': 'track_add', 'name': role, 'instrument': v['instrument'], 'volume_db': part['level']})
+            if v.get('rig'):
+                rig = V.info(v['voice'], None)[2].get('rigs', {}).get(v['rig'])
+                if rig:
+                    ops += [{'op': 'fx_add', 'target': role, 'fx': fx} for fx in rig['fx']]
+            for b in range(pl['bars']):
+                t = SK.note_text(part['notes'], b)
+                if t:
+                    ops.append({'op': 'notes_write', 'track': role, 'bar': b + 1, 'notes': t, 'mode': 'add'})
+        batch(sp, ops)
+        render(sp)
+        _loudness_trim(sp, -16.0)
+        render(sp, out=f"sketch_{letter}", mp3=mp3)
+        f = os.path.join(sp, 'renders', f"sketch_{letter}.{'mp3' if mp3 == 'also' else 'wav'}")
+        sec = pl['bars'] * 4 * 60 / pl['bpm']
+        voices = ', '.join(dict.fromkeys(p['voice'] for p in pl['parts'].values()))
+        L += [f"{letter}) {pl['what']}",
+              f"   {pl['key']}, {pl['bpm']} BPM, {pl['bars']} bars (~{sec:.0f} s); chords {' '.join(pl['progression'])}"
+              f" (a motif, its answer, home on the last bar)",
+              f"   voices: {voices}",
+              f"   listen: {f}"]
+    L.append("NEXT: play them to the person one at a time (open each file), ask which is closest or what each is "
+             "missing. Then sketch_keep(project, '<letter>') makes the pick the song (it is the song's example). "
+             "Another round: sketch again with their words; it adds new letters.")
+    return '\n'.join(L)
+
+
+@op(mutates=True)
+def sketch_keep(project: str, sketch: str, replace: bool = False) -> str:
+    """Make a sketch the song: its project (tempo, tracks, notes, fx) is copied to <project>, with the sketch as its
+    lineage, and the first session is marked done for this person (guide stops opening with it). sketch: its letter
+    ('b') or folder name. replace=True only when the person says to drop what <project> already holds."""
+    from . import sketch as SK
+    root = os.path.abspath(project)
+    sd = os.path.join(root, 'sketches')
+    hits = [f for f in (os.listdir(sd) if os.path.isdir(sd) else []) if f == sketch or f.split('-')[0] == sketch]
+    if len(hits) != 1:
+        have = ', '.join(sorted(os.listdir(sd))) if os.path.isdir(sd) else 'none: run sketch first'
+        raise OpError(f"no single sketch {sketch!r} in {sd} (have: {have})")
+    src = os.path.join(sd, hits[0])
+    dst = os.path.join(root, 'project.json')
+    if os.path.exists(dst) and not replace:
+        with open(dst, encoding='utf8') as f:
+            if json.load(f).get('tracks'):
+                raise OpError(f"{root} already holds a song with tracks; sketch_keep(..., replace=True) only if the "
+                              f"person says to drop it, or keep the sketch into a new folder")
+    with open(os.path.join(src, 'project.json'), encoding='utf8') as f:
+        d = json.load(f)
+    d['lineage'] = [{"project": src, "name": d.get('name'), "objectives": d.get('objectives', []),
+                     "kept": "the person picked this sketch"}] + d.get('lineage', [])
+    d['name'] = os.path.basename(root)
+    for sub in ('sounds', 'voices'):
+        if os.path.isdir(os.path.join(src, sub)):
+            shutil.copytree(os.path.join(src, sub), os.path.join(root, sub), dirs_exist_ok=True)
+    os.makedirs(os.path.join(root, 'sounds'), exist_ok=True)
+    with open(dst, 'w', encoding='utf8') as f:
+        json.dump(d, f, indent=1)
+    SK.mark_done()
+    return (f"kept {hits[0]} as the song in {root} ({d['bpm']} BPM, {d['length_bars']} bars, tracks: "
+            f"{', '.join(d['tracks'])}). First session marked done ({SK.marker_path()}).\n"
+            f"NEXT: offer one deliberate change ('change just one thing': a warmer bass from bar 5, drums out for two "
+            f"bars), make only that, render a window, play before and after. Then the normal loop: extend the form "
+            f"in a Session Sheet, a part at a time.")
+
+
+def _ffmpeg_ok():
+    return bool(os.environ.get('ISMAIL_FFMPEG') or shutil.which('ffmpeg'))
+
+
+def _loudness_trim(project, target):
+    """Set the master limiter's gain so the render sits near `target` LUFS (a first listen should not be quiet);
+    -> the gain change in dB (0 when already close)."""
+    try:
+        import pyloudnorm as pyln
+        import soundfile as sf
+        y, sr = sf.read(os.path.join(os.path.abspath(project), 'renders', 'latest.wav'))
+        lufs = pyln.Meter(sr).integrated_loudness(y)
+    except Exception:
+        return 0.0
+    if not np.isfinite(lufs) or abs(lufs - target) < 1.0:
+        return 0.0
+    P = _load(project)
+    lim = [fx for fx in P.d['master']['fx'] if fx.get('type') == 'limiter']
+    if not lim:
+        return 0.0
+    g = float(np.clip(target - lufs, -6.0, 15.0))
+    lim[0]['gain_db'] = round(lim[0].get('gain_db', 0.0) + g, 1)
+    P.save()
+    return g
 
 
 @op()
@@ -585,12 +717,16 @@ def voices_list(project: str = None) -> str:
     prof = voices.mimic_profiles(_voice_root(project))
     if not rows and not prof:
         return '(no voices)'
-    L = [f"{n:<16} {o:<9} {s}" for n, o, s in rows]
+    from . import sketch as SK
+    sc = {v.get('voice') or v['name'] for v in SK.showcase()['voices']}
+    mark = lambda n: '*' if n in sc else ' '
+    L = [f"{mark(n)}{n:<16} {o:<9} {s}" for n, o, s in rows]
     L.append("use: instrument={'type': 'code', 'voice': '<name>', 'fn': 'voice', 'params': {}, 'tail': <seconds>}")
     if prof:
-        L += [''] + [f"{n:<16} {o:<9} {s}" for n, o, s in prof]
+        L += [''] + [f"{mark(n)}{n:<16} {o:<9} {s}" for n, o, s in prof]
         L.append("use: instrument={'type': 'mimic', 'profile': '<name>', 'params': {}, 'tail': <seconds>} "
                  "(instrument_help(type='mimic') lists the params)")
+    L.append("* showcase: measured voices a first sketch uses (ismail/voices/showcase.json; sketch builds from them)")
     return '\n'.join(L)
 
 

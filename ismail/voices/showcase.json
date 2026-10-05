@@ -1,0 +1,24 @@
+{
+ "about": "The voices a first sketch reaches for: each one measured from real recordings or fitted against a record, so a newcomer's first sound is never a console patch. guide shows this list to a new person, voices_list marks these with *, and sketch builds only from them. Add a voice when it is measured and has passed an ear test.",
+ "voices": [
+  {"name": "grand_piano", "family": "keys", "instrument": "preset:grand_piano", "range": "A0-C8",
+   "roles": ["melody", "chords"], "why": "calibrated from measured piano notes"},
+  {"name": "violin", "family": "strings", "instrument": {"type": "mimic", "profile": "violin", "tail": 1.5},
+   "range": "G3-A6", "roles": ["melody"], "why": "mimic profile, 10 notes measured (VSCO 2 CE, CC0)"},
+  {"name": "cello", "family": "strings", "instrument": {"type": "mimic", "profile": "cello", "tail": 1.5},
+   "range": "C2-C5", "roles": ["counter", "bass"], "why": "mimic profile, 9 notes measured (flcellogrl, CC BY 4.0)"},
+  {"name": "contrabass", "family": "strings", "instrument": {"type": "mimic", "profile": "contrabass", "tail": 1.5},
+   "range": "G1-E3", "roles": ["bass"], "why": "mimic profile, 5 notes measured (VSCO 2 CE, CC0)"},
+  {"name": "kit70", "family": "drums", "instrument": "preset:kit70", "voice": "kit70", "rig": "kit",
+   "range": "GM drum map", "roles": ["drums"], "why": "modal kit fitted against a late-60s record's drum stem"},
+  {"name": "strat70_rhythm", "family": "guitar", "instrument": "preset:strat70_rhythm", "voice": "electric",
+   "rig": "rhythm_vibe", "range": "Eb2-Eb6", "roles": ["chords"],
+   "why": "waveguide guitar fitted to a late-60s record (its lead notes passed a blind exam 20 of 22)"},
+  {"name": "pbass70", "family": "bass", "instrument": "preset:pbass70", "voice": "electric", "rig": "bass",
+   "range": "Eb1-G3", "roles": ["bass"], "why": "waveguide bass fitted to the same record's bass stem"},
+  {"name": "growl", "family": "bass", "instrument": {"type": "code", "voice": "growl"}, "range": "C0-C4",
+   "roles": ["bass"], "why": "designed by ear: electronic (dubstep) only, never in an acoustic sketch"}
+ ],
+ "never_first": "the synth presets (the sprite `synth` type): a first sketch on them sounds like a game console",
+ "gaps": ["a real-sample acoustic kit (brushes, lo-fi)", "a pad or ambient voice"]
+}

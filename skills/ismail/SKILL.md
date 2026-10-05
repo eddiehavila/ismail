@@ -74,9 +74,23 @@ band, spectra, timbre, comparisons). They take a path as a source, not only proj
 own drum scanner and band comparisons had all of them available. A measuring script a song still needs is a
 `HANDOFF.md` item.
 
+## A person's first session
+
+When `guide` opens with FIRST SESSION, the person has made nothing with ismail yet, and this try decides whether
+they come back. Say in two sentences what this is (you write the music as notes and instruments, render it and read
+it back as numbers; they judge by ear; everything stays as editable files on their machine). Ask at most two
+questions: what it is for, and a mood or a reference if they have one. Then give them sound within about five
+minutes: `sketch(project, brief=<their words>)` writes two or three short contrasting sketches on measured voices
+and renders them. Open each for them one at a time and ask which is closest or what each is missing; another round
+is another `sketch` with their words. `sketch_keep` makes the pick the song: the sketch they chose is the song's
+example (step 0 below), so a recording is welcome but never required. Then short rounds of one named change, two
+versions played in turn, and early on one deliberate "change just one thing" edit that changes only that. At the
+end, say where their files are and what it took, and name in one line what else is here (recreate a reference,
+build an instrument from recordings, play live, the VR stage).
+
 ## The loop (every piece, every time)
 
-0. **Examples.** Ask the user for a recording of what they want (a song, a sound, a link), even if they did not offer one. Recall what the genre is played on and find an example of each instrument that matters (`references/instruments.md`). A live set, a jam or a "quick" request starts here too: a quick framing shortens the Session Sheet, never this step or the non-negotiables (a live G-funk beat skipped them and the user called draft 1 "horrible").
+0. **Examples.** Ask the user for a recording of what they want (a song, a sound, a link), even if they did not offer one (in a person's first session, the sketch they keep is the example). Recall what the genre is played on and find an example of each instrument that matters (`references/instruments.md`). A live set, a jam or a "quick" request starts here too: a quick framing shortens the Session Sheet, never this step or the non-negotiables (a live G-funk beat skipped them and the user called draft 1 "horrible").
 1. **Session Sheet** (artifact, write it in your reply before any note): see the template below.
 2. **Build** the skeleton: tracks with instruments from the Sheet, drums first, then bass, then harmony, then lead, then ear candy. Use `batch` for multi-op edits (atomic, one round trip).
 3. **Render a window**, not the song: `render(bars=[a, b], stems=True)` on the section you just changed.
@@ -116,6 +130,7 @@ nudges you, follow it.
 | when | reach for |
 |---|---|
 | a task starts, and after every compaction | `guide`; the song's `PROGRESS.md` and `HANDOFF.md` |
+| a new person, or a new song with no reference | `sketch` (two or three contrasting sketches in minutes), then `sketch_keep` the one they pick |
 | a number that can be measured (grid, swing, kit, key, levels) | the analysis ops, never a guess |
 | an instrument must sound real | an example first (`references/instruments.md`), then `mimic_measure` or a fit; `track_model` names its source |
 | the numbers plateau and you need a direction | an eye exam: lenses that each change one named thing (`references/blind-tests.md`) |
