@@ -276,3 +276,14 @@ def test_voice_families_and_builtin_mimic_strings():
         assert profs[name] == 'built-in/strings'
         y = mimic.render(mimic.load_profile(name), 220.0, np.arange(4410) / 44100, 0.7, 0.08, room=0.0)
         assert y.shape == (2, 4410) and np.isfinite(y).all() and np.abs(y).max() > 1e-4
+
+
+def test_voices_list_names_each_voices_function_and_fn_voice_plays_a_performer(tmp_path):
+    """e002 pilots: voices_list said fn 'voice' for every code voice; electric and emily have only perform, so the
+    agents' first track_add failed."""
+    out = api.voices_list()
+    assert 'electric' in out and [l for l in out.splitlines() if l[1:].startswith('electric')][0].split()[2] == 'fn=perform'
+    assert [l for l in out.splitlines() if l[1:].startswith('grand_piano')][0].split()[2] == 'fn=voice'
+    p = str(tmp_path / 'g')
+    api.project_new(p, 120, 1)
+    api.track_add(p, 'gtr', instrument={'type': 'code', 'voice': 'electric', 'fn': 'voice'})

@@ -59,6 +59,13 @@
   knees, feet): now while following, at `t` of a playing take, otherwise the start pose (frame 0 of the next
   Follow), so contact can be checked by number.
 
+### voices_list names each voice's function (from the e002 pilots)
+
+- `voices_list` shows `fn=perform` or `fn=voice` on every code voice; it used to say `'fn': 'voice'` for all of
+  them, and electric, emily, kit70, rusty, rhodes and crackle only have `perform`, so an agent's first `track_add`
+  failed. A track that names `fn: 'voice'` on a performer voice now plays it with `perform`, as leaving `fn` out
+  already did.
+
 ### Setup a novice can sit through (M119, the dress rehearsal)
 
 - `references/setup.md`: say the install takes about five minutes and looks frozen; prefer `uv pip install`
