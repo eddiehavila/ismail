@@ -8,6 +8,9 @@
   starts following: the person holds their pose while the user takes it, and the Follow (and its performance clock)
   starts from the user's pose at GO. `stage_actor_follow(countdown=)` does the same for an agent. The user's take
   started from his pose when he pressed Follow, hands down while the man's were up ("kind of makes it impossible").
+- A played take honours the pins: the ones it was made with (kept in its meta as `pins`, Blender xyz), else the
+  session's. Sam's take played anchored by the feet though his hips were pinned to the stool.
+- A recorded voice plays back at a conversational level (about -30 dBFS RMS), not the raw mic level ("super loud").
 
 ### Setup a novice can sit through (M119, the dress rehearsal)
 

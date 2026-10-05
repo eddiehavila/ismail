@@ -358,6 +358,10 @@ export function initActors(ed, live) {
     const turn = to && h0.length >= 7 ? turnFor(new THREE.Quaternion(h0[3], h0[4], h0[5], h0[6]), facingOf(ed, person, to)) : null;
     const st = { person, rig, frames, J, s, anchor, to, floor: ground, alignInv: align.clone().invert(), feet: { l: {}, r: {} },
       t0: performance.now(), loop: c.loop !== false, it, take: c.take, i: 0, rate: c.rate || 1, turn, meta };
+    // pinned in playback as while recording (the user, 2026-10-05: Sam's take played anchored by the feet, though
+    // his hips were pinned to the stool): the take's own pins (meta.pins, Blender xyz), else this session's
+    const pins = c.pins || meta.pins ? pinsFromMeta(c.pins || meta.pins) : anchors.get(person);
+    if (pins && (pins.hips || pins.foot_l || pins.foot_r)) usePins(st, pins);
     playing.set(person, st);
     live.emit('actor_play', { person, actor: who, take: c.take, seconds: +(frames[frames.length - 1].t - frames[0].t).toFixed(1), scale: +s.toFixed(2) });
     return { person, actor: who, frames: frames.length, scale: +s.toFixed(2) };
@@ -504,6 +508,20 @@ export function initActors(ed, live) {
     st.pinYaw = fc ? new THREE.Quaternion().setFromUnitVectors(st.rig.fwd, fc.clone().setY(0).normalize()) : (st.lastYaw ? st.lastYaw.clone() : null);
     st.awaySince = 0;
   }
+  // pins as a take keeps them (Blender xyz) and back
+  const t2bPin = (v) => (v ? [+v.x.toFixed(4), +(-v.z).toFixed(4), +v.y.toFixed(4)] : null);
+  function pinsMeta(person) {
+    const a = anchors.get(person);
+    if (!a) return null;
+    const out = { legs: a.legs || 'keep_pose' };
+    for (const k of ['hips', 'foot_l', 'foot_r']) if (a[k]) out[k] = t2bPin(a[k]);
+    return out.hips || out.foot_l || out.foot_r ? out : null;
+  }
+  function pinsFromMeta(m) {
+    const out = { legs: m.legs || 'keep_pose' };
+    for (const k of ['hips', 'foot_l', 'foot_r']) out[k] = Array.isArray(m[k]) ? b2tPos(m[k]) : null;
+    return out;
+  }
   // where a pin goes: an object's top (a seat; the hips sit SEAT_ABOVE over it), or a Blender xyz
   function pinPoint(to, joint) {
     if (Array.isArray(to)) return b2tPos(to);
@@ -545,5 +563,5 @@ export function initActors(ed, live) {
   };
   const control = initControl(ed, live, { rigOf, readProfile, setWorldQ, twoBone, pinPoint, anchor: (c) => anchor(c), pinsOf: (p) => pinsOf(p) });
   const pinsOf = (person) => { const st = playing.get(person); return st ? pinnedNames(st) : Object.keys(anchors.get(person) || {}).filter((k) => k !== 'legs' && anchors.get(person)[k]); };
-  return { play, stop, follow, setSource, playing, load, pose, canPlay, turnBy, setMode, moveTo, at, setMirror, anchor, pinsOf, control, rigOf };
+  return { play, stop, follow, setSource, playing, load, pose, canPlay, turnBy, setMode, moveTo, at, setMirror, anchor, pinsOf, control, rigOf, pinsMeta };
 }

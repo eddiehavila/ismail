@@ -14,6 +14,16 @@ const MIME = () => ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg', 'audio/
 const pad = (x) => String(x).padStart(2, '0');
 const stamp = (d) => `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
 const r2 = (x) => Math.round(x * 100) / 100;
+// the level a recorded voice plays back at: RMS about -30 dBFS, a person talking a step or two away, under the agents'
+// speech (the user, 2026-10-05: his voice came out of Sam "super loud", the raw mic level with its auto gain)
+const VOICE_RMS = 0.03;
+const levelOf = (buf) => {
+  const d = buf.getChannelData(0);
+  let s = 0, n = 0;
+  for (let i = 0; i < d.length; i += 4) { s += d[i] * d[i]; n++; }
+  const rms = Math.sqrt(s / Math.max(1, n));
+  return rms > 1e-5 ? Math.min(1, VOICE_RMS / rms) : 1;
+};
 
 export function initPerform(ed, hands, voice, live, getActors) {
   let perf = null;            // { id, scene, person, t0, started, clips, cur, markers, mic, take, take_shift }
@@ -82,7 +92,7 @@ export function initPerform(ed, hands, voice, live, getActors) {
     Object.assign(p.clips.find((x) => x.n === c.n), { seconds });
     // kept here too: the playback right after the Follow has its voice before the server has it all
     p.local.push(new Blob(c.parts, { type: c.type }).arrayBuffer().then((ab) => voice.ctx().decodeAudioData(ab))
-      .then((buf) => ({ n: c.n, start: c.at, buf })).catch(() => null));
+      .then((buf) => ({ n: c.n, start: c.at, buf, gain: levelOf(buf) })).catch(() => null));
     await c.chain;
     fetch(url('voice/perf', p, `&clip=${c.n}&end=1&at=${c.at}&seconds=${seconds}&by=${encodeURIComponent(by)}`), { method: 'POST' })
       .catch(() => {});
@@ -167,7 +177,7 @@ export function initPerform(ed, hands, voice, live, getActors) {
     if (!perfs.has(key)) {
       const base = `scenes/${encodeURIComponent(scene)}/performances/${encodeURIComponent(id)}/`;
       const one = (c) => fetch(base + c.file).then((r) => r.arrayBuffer()).then((ab) => voice.ctx().decodeAudioData(ab))
-        .then((buf) => ({ n: c.n, start: c.at, buf })).catch(() => null);
+        .then((buf) => ({ n: c.n, start: c.at, buf, gain: levelOf(buf) })).catch(() => null);
       perfs.set(key, fetch(base + 'perf.json', { cache: 'no-store' }).then((r) => r.json())
         .then((m) => Promise.all((m.clips || []).filter((c) => c.file).map(one)))
         .then((l) => l.filter(Boolean))
@@ -206,7 +216,9 @@ export function initPerform(ed, hands, voice, live, getActors) {
         v.played.add(c.n);
         const a = voice.ctx(), src = a.createBufferSource();
         src.buffer = c.buf; src.playbackRate.value = st.rate || 1;
-        src.connect(a.destination);
+        const g = a.createGain();
+        g.gain.value = c.gain || 1;
+        src.connect(g).connect(a.destination);
         src.start(0, t - s0);
         src.onended = () => v.src.delete(c.n);
         v.src.set(c.n, src);
