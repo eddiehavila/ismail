@@ -176,11 +176,24 @@ def phone_ask(text: str, wait: float = 0, sender: str = None) -> str:
 
 @op()
 def phone_exam(title: str, clips: list, question: str = '', chips: list = None, choices: list = None,
-               answers_path: str = None, exam_id: str = None, wait: float = 0, sender: str = None) -> str:
+               answers_path: str = None, exam_id: str = None, wait: float = 0, key: dict = None,
+               secrets: list = None, check: bool = True, sender: str = None) -> str:
     """A blind exam on the phone: clips [{label, path, note?}] each with a play button (the live stream pauses while
     one plays, and rejoins live after), word chips to tick per clip, one choice (e.g. ['A is the record', 'B is the
     record', "can't tell"]), a note, and Submit. The answers arrive as kind 'exam' {id, answers}, and are appended
-    to answers_path when given (the exam's own answers file, so no "done" is needed). Label clips blind (A, B)."""
+    to answers_path when given (the exam's own answers file, so no "done" is needed). Label clips blind (A, B).
+    It runs exam_check first and refuses on NOT READY: give key={label: class} and secrets=[source names] so the
+    blind-leak checks run too. check=False only when the person asked to see it anyway."""
+    if check:
+        from .. import exam_check as EC
+        cl = [c if isinstance(c, dict) else {'path': c} for c in clips or []]
+        texts = {'the page text': ' '.join([title, question] + [str(c.get('note', '')) for c in cl]
+                                           + [str(c.get('label', '')) for c in cl])}
+        ready, lines = EC.run(clips=[{'label': c.get('label') or chr(65 + i), 'path': c.get('path')}
+                                     for i, c in enumerate(cl)], key=key, secrets=secrets,
+                              answers_path=answers_path, texts=texts)
+        if not ready:
+            raise OpError('the exam was not shown, its pre-flight failed:\n' + '\n'.join(lines))
     return _call('exam', timeout=float(wait or 0) + 15, title=title, clips=clips, question=question, chips=chips,
                  choices=choices, answers_path=answers_path, exam_id=exam_id, wait=wait, who=sender)
 

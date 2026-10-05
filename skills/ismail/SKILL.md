@@ -136,7 +136,7 @@ nudges you, follow it.
 | a number that can be measured (grid, swing, kit, key, levels) | the analysis ops, never a guess |
 | an instrument must sound real | an example first (`references/instruments.md`), then `mimic_measure` or a fit; `track_model` names its source |
 | the numbers plateau and you need a direction | an eye exam: lenses that each change one named thing (`references/blind-tests.md`) |
-| you think a sound is done | a blind exam, real vs yours, hidden: one note first, then phrases, then the mix |
+| you think a sound is done | a blind exam, real vs yours, hidden: one note first, then phrases, then the mix; `exam_check` before it reaches the person |
 | the person names a quality ("boxy", "too clean") | `lexicon_note`, verbatim, then map it to what you change |
 | a recording, video or score comes in | a `ref/SOURCES.md` row before you use it; `credits` when the piece goes public |
 | a version of another piece | `project_new(derived_from=)`, and the objective in their words |
