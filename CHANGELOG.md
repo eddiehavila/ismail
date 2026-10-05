@@ -73,6 +73,12 @@
   pinned "since you left", or a line spoken into the stream when answering), `phone_ask`, `phone_panel_show`,
   `phone_exam` (blind exams with Submit, answers written to the exam's file), `phone_offer` (downloads),
   `phone_buttons` (their own buttons as data), `phone_buzz`, `phone_status`. Reference: `references/phone.md`.
+### voices_list names each voice's function (from the e002 pilots)
+
+- `voices_list` shows `fn=perform` or `fn=voice` on every code voice; it used to say `'fn': 'voice'` for all of
+  them, and electric, emily, kit70, rusty, rhodes and crackle only have `perform`, so an agent's first `track_add`
+  failed. A track that names `fn: 'voice'` on a performer voice now plays it with `perform`, as leaving `fn` out
+  already did.
 
 ### Setup a novice can sit through (M119, the dress rehearsal)
 
