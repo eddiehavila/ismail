@@ -9,6 +9,16 @@
   tonejs-instruments; their `source` fields said Philharmonia Orchestra, which tonejs-instruments' own source list
   does not support. instruments.md says the same, and that the cello needs credit.
 
+### The machine board's lock holds under a crowd (M85); one test file is not a heavy run (M86)
+
+- `ismail.machine`: a job waiting in line no longer dies when the board's lock changes hands under it (a holder
+  let go between the waiter's failed create and its look at the lock: FileNotFoundError killed a queued render with
+  three sessions waiting). A dead holder's lock is taken by an atomic rename, so two waiters cannot both take it,
+  and a holder removes only its own lock. Test: eight threads take turns 480 times with no error and no overlap.
+- tests/conftest.py: a run is a heavy job (it waits for a CPU slot) when it spans 4 or more test files, or includes
+  a file that renders whole windows (live parity, live song parity, round trips); one touched file of any size runs
+  without a slot. Before, any run of 30 or more tests counted, so a single 31-test file was refused on a hot machine.
+
 ### Live tests: notes go straight to the stage dev, and updates come back (S31)
 
 - stage.md and stage-dev.md: during a live test the studio agent in the room sends the person's stage notes directly
