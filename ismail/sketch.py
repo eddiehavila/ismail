@@ -17,8 +17,10 @@ NAMES = {'C': 0, 'D': 2, 'E': 4, 'F': 5, 'G': 7, 'A': 9, 'B': 11}
 SCALES = {'major': [0, 2, 4, 5, 7, 9, 11], 'minor': [0, 2, 3, 5, 7, 8, 10],
           'major_pent': [0, 2, 4, 7, 9], 'minor_pent': [0, 3, 5, 7, 10]}
 ROMAN = ['i', 'ii', 'iii', 'iv', 'v', 'vi', 'vii']
-PROGRESSIONS = {'major': [['I', 'V', 'vi', 'IV'], ['I', 'vi', 'IV', 'V'], ['IV', 'I', 'V', 'vi']],
-                'minor': [['i', 'VI', 'III', 'VII'], ['i', 'iv', 'VII', 'III'], ['i', 'VI', 'iv', 'V']]}
+PROGRESSIONS = {'major': [['I', 'V', 'vi', 'IV'], ['I', 'vi', 'IV', 'V'], ['I', 'IV', 'vi', 'V']],
+                'minor': [['i', 'VI', 'III', 'VII'], ['i', 'VI', 'VII', 'i'], ['i', 'iv', 'VI', 'V']]}
+# every loop starts on the tonic and the second and third avoid the relative key's cadence, so a sketch reads in
+# the key asked for (i iv VII III read as G major in a cold-start run)
 DARK = re.compile(r'\b(sad|dark|melanchol\w*|night\w*|lonely|grief|rain\w*|minor|moody|haunt\w*|tense|cold|loss)\b', re.I)
 MOTIF_RHYTHMS = [   # (start beat, length) over two bars of 4/4; none of them only lands on beat 1
     [(0, 1.5), (1.5, 0.5), (2, 1), (3, 1), (4, 3), (7, 1)],
@@ -90,7 +92,8 @@ DEFAULT_VOICE = {'drums': 'kit70', 'bass': 'pbass70', 'keys': 'grand_piano', 'me
 SECTIONS = {'intro': 'intro', 'verse': 'groove', 'groove': 'groove', 'main': 'groove', 'chorus': 'groove',
             'hook': 'groove', 'drop': 'groove', 'breakdown': 'breakdown', 'break down': 'breakdown',
             'bridge': 'breakdown', 'build': 'build', 'buildup': 'build', 'return': 'groove', 'reprise': 'groove',
-            'outro': 'outro', 'fade': 'outro', 'ending': 'outro'}
+            'outro': 'outro', 'fade': 'outro', 'fades': 'outro', 'fade out': 'outro', 'fade-out': 'outro',
+            'fades out': 'outro', 'fading out': 'outro', 'ending': 'outro'}
 ROLE_ORDER = ['drums', 'sub', 'bass', 'chords', 'keys', 'harmony', 'pad', 'counter', 'melody', 'fx']
 
 
@@ -228,6 +231,8 @@ def read_brief(brief):
     spec['asked'] = sorted(spec['parts'])                    # what the words named, before any default fills in
     if spec['parts'] and 'melody' not in spec['parts']:
         spec['parts']['melody'] = 'grand_piano'               # every sketch carries a tune
+        if spec['named'] and len(spec['parts']) > 2:
+            spec['said'].append("no instrument was named for the melody: grand_piano plays it")
     if spec['parts'] and 'drums' not in spec['parts'] and spec['feel'] is None and spec['ride']:
         spec['parts']['drums'] = 'kit70'
     if 'drums' in spec['parts'] and not spec['feel']:
@@ -487,8 +492,10 @@ def drum_bar(feel, bar, sec, rng, spec, fill, crash):
     outro thins out; a fill leads into the next section."""
     ride, dense = spec.get('ride'), spec.get('dense', 0)
     out = []
-    cym = 51 if ride and sec in ('breakdown', 'groove', 'outro') and (sec == 'breakdown' or bar % 8 >= 4) else 42
+    cym = 51 if ride and sec == 'breakdown' else 42
     kick = sec not in ('intro', 'breakdown')
+    if ride and sec in ('groove', 'outro') and bar % 8 >= 4:     # the ride rides over the hats in the second phrase
+        out += [(b, 51, 1, 70 + rng.randint(-4, 4)) for b in range(4)]
     if feel == 'four':
         if kick:
             out += [(b, 36, 0.5, 104) for b in range(4)] + [(b, 38, 0.5, 80) for b in (1, 3)]
@@ -506,13 +513,13 @@ def drum_bar(feel, bar, sec, rng, spec, fill, crash):
                 out += [(0, 36, 0.5, 104), (1.75, 36, 0.25, 84), (2.5, 36, 0.5, 96)]
                 if dense > 0 or bar % 2:
                     out.append((3.25, 36, 0.25, 70))
-            if sec != 'intro':
-                out += [(1, 38, 0.5, 100 if kick else 70), (3, 38, 0.5, 102 if kick else 72)]
+            if sec not in ('intro', 'breakdown'):
+                out += [(1, 38, 0.5, 100), (3, 38, 0.5, 102)]
                 out += [(2.75, 37, 0.25, 42), (3.75, 37, 0.25, 38)] if dense >= 0 else []
         else:
             if kick:
                 out += [(0, 36, 0.5, 100), (2.5, 36, 0.5, 86)] + ([(1.75, 36, 0.25, 72)] if bar % 2 else [])
-            if sec != 'intro':
+            if sec not in ('intro', 'breakdown'):
                 out += [(1, 38, 0.5, 96), (3, 38, 0.5, 98)]
         steps = 16 if (spec.get('crisp') and dense >= 0) or dense > 0 else 8
         for i in range(steps):
@@ -587,6 +594,8 @@ def plan_spec(spec, brief='', seed=0, variant=0, bars=None, progression=None, la
             if voice == 'grand_piano' and len(spec['parts']) > 2:
                 reg = (64, 86)
             notes = melody(chords, tonic, mmode, reg, rng, rhythm, alt)
+            if dense < 0:                                    # sparser: the tune's long notes, the passing ones out
+                notes = [n for n in notes if n[3] >= 1 or n[1] % 1 == 0 and n[1] % 2 == 0]
         elif role == 'harmony':
             notes = broken_chord(chords, reg, rng, '8ths' if len(spec['parts']) <= 2 else 'quarters')
         elif role == 'keys':
@@ -607,7 +616,8 @@ def plan_spec(spec, brief='', seed=0, variant=0, bars=None, progression=None, la
             notes = []
             for b in range(bars):
                 nxt = secs[b + 1] if b + 1 < bars else None
-                fill = nxt is not None and nxt != secs[b] and nxt in ('groove', 'outro')
+                fill = (nxt is not None and nxt != secs[b] and nxt in ('groove', 'outro')
+                        and secs[b] not in ('breakdown', 'intro'))   # a breakdown is the ride alone; the crash marks the return
                 crash = secs[b] in ('groove', 'build', 'outro') and (b == 0 or secs[b - 1] != secs[b])
                 notes += drum_bar(feel or 'rock', b, secs[b], rng, spec, fill or (not form and b == bars - 2), crash)
             if not form:

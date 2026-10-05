@@ -106,9 +106,19 @@ _cpu_cache = [0.0, None]
 
 
 def cpu_load():
-    """-> (% of all cores busy over CPU_SAMPLE_S, [(% of all cores, process name, pid)] for the top 4), cached 10 s."""
+    """-> (% of all cores busy over CPU_SAMPLE_S, [(% of all cores, process name, pid)] for the top 4), cached 10 s
+    in this process and on the board for every process (each CLI call is a new process: each paid 2 s of sampling)."""
     if time.time() - _cpu_cache[0] < 10 and _cpu_cache[1] is not None:
         return _cpu_cache[1]
+    shared = os.path.join(board_dir(), 'cpu.json')
+    try:
+        with open(shared, encoding='utf8') as f:
+            d = json.load(f)
+        if time.time() - d['t'] < 10:
+            _cpu_cache[:] = [d['t'], (d['busy'], [tuple(x) for x in d['top']])]
+            return _cpu_cache[1]
+    except (OSError, ValueError, KeyError):
+        pass
     procs = []
     for p in psutil.process_iter(['name']):
         try:
@@ -128,6 +138,14 @@ def cpu_load():
             top.append((c, p.info.get('name') or '?', p.pid))
     top.sort(reverse=True)
     _cpu_cache[:] = [time.time(), (total, top[:4])]
+    try:
+        os.makedirs(board_dir(), exist_ok=True)
+        tmp = shared + f".{os.getpid()}.tmp"
+        with open(tmp, 'w', encoding='utf8') as f:
+            json.dump({'t': _cpu_cache[0], 'busy': total, 'top': top[:4]}, f)
+        os.replace(tmp, shared)
+    except OSError:
+        pass
     return _cpu_cache[1]
 
 
