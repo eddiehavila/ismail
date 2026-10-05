@@ -194,7 +194,10 @@ export function initActors(ed, live) {
     const A = rig.bones[a], B = rig.bones[bn], C = rig.bones[cn];
     const S = A.getWorldPosition(new THREE.Vector3());
     const la = rig.rest[bn].p.distanceTo(rig.rest[a].p), lb = rig.rest[cn].p.distanceTo(rig.rest[bn].p);
-    const d = Math.min(S.distanceTo(target), la + lb - 1e-4);
+    const want = S.distanceTo(target), d = Math.min(want, la + lb - 1e-4);
+    // a target past the limb's length: the end stops at full reach, and how far short it fell is kept for the read-back
+    // (stage_actor_pose: a hand that cannot reach the bar is a number, not a surprise)
+    if (rig.short) rig.short[cn] = Math.max(0, want - (la + lb));
     const u = target.clone().sub(S).normalize();
     const v = pole.clone().sub(S); v.sub(u.clone().multiplyScalar(v.dot(u))).normalize();
     const ca = THREE.MathUtils.clamp((la * la + d * d - lb * lb) / (2 * la * d), -1, 1);
@@ -211,6 +214,7 @@ export function initActors(ed, live) {
     return f;
   }
   function pose(st, raw) {
+    st.rig.short = {};                                       // twoBone fills it: limb ends that fell short this frame
     const f = prep(st, raw);
     if (st.start) poseRelative(st, f); else poseBase(st, f);
     control.apply(st, f, raw);
@@ -680,14 +684,16 @@ export function initActors(ed, live) {
   const READ = ['pelvis', 'spine_03', 'head', 'lowerarm_l', 'hand_l', 'lowerarm_r', 'hand_r', 'calf_l', 'foot_l', 'calf_r', 'foot_r'];
   const t2bV = (v) => [+v.x.toFixed(4), +(-v.z).toFixed(4), +v.y.toFixed(4)];
   const readJoints = (rig) => Object.fromEntries(READ.filter((n) => rig.bones[n]).map((n) => [n, t2bV(rig.bones[n].getWorldPosition(new THREE.Vector3()))]));
+  // limb ends that could not reach their target in the last pose, metres short (a centimetre or more)
+  const shortOf = (rig) => Object.fromEntries(Object.entries(rig.short || {}).filter(([, v]) => v >= 0.01).map(([k, v]) => [k, +v.toFixed(3)]));
   async function poseOf(c) {
     const person = c.person, st = playing.get(person);
-    if (st && st.live) return { person, following: true, start: st.start ? st.start.spec : null, joints: readJoints(st.rig) };
+    if (st && st.live) return { person, following: true, start: st.start ? st.start.spec : null, joints: readJoints(st.rig), short: shortOf(st.rig) };
     if (st) {
       let fr = st.frames[st.i];
       if (c.t != null) fr = st.frames.reduce((a, b) => (Math.abs(b.t - c.t) < Math.abs(a.t - c.t) ? b : a));
       pose(st, fr);
-      return { person, take: st.take, t: fr.t, start: st.start ? st.start.spec : null, joints: readJoints(st.rig) };
+      return { person, take: st.take, t: fr.t, start: st.start ? st.start.spec : null, joints: readJoints(st.rig), short: shortOf(st.rig) };
     }
     const it = ed.byName.get(person), who = world().actors[person];
     if (!who) throw new Error('no actor for ' + person);
