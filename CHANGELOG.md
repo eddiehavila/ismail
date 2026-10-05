@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### The frame beat says where the head was
+
+- The page's 5 s beat (clientlog.jsonl) carries `head` (position in Blender metres, yaw and pitch in degrees, yaw 0
+  along +Y) and `worstAt`: the head and the triangles and draw calls of the worst frame in those 5 s, so a stall is
+  read against the view it happened in (the frame budget: under 400k triangles and 300 draw calls per view).
+
 ### Pinch again to reach what is behind or inside
 
 - In VR, a second pinch at the same point (within about 6 cm, or 4% of the ray's length, and 6 s) takes the next

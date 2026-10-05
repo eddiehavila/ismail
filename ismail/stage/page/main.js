@@ -285,19 +285,27 @@ document.addEventListener('visibilitychange', () => { if (document.hidden) flush
 // went silent the moment the room was in) leaves its last beat: memory, GPU objects, frames, VR or not
 let beatFrames = 0;
 // frame pacing for the beat: the worst frame and how many ran long in the last 5 s (comfort is measured, not guessed)
-const fp = { last: 0, worst: 0, long: 0, n: 0 };
+// where the head was and what was drawn in the worst frame (a stall is read against the view: what was in it, which
+// way they looked), in Blender coordinates (yaw 0 looks along +Y, 90 along +X); info.render still holds the frame that
+// just ran long
+const fp = { last: 0, worst: 0, long: 0, n: 0, at: null };
+const headAt = () => {
+  const p = ed.camera.getWorldPosition(new THREE.Vector3()), f = ed.camera.getWorldDirection(new THREE.Vector3());
+  return { pos: [+p.x.toFixed(2), +(-p.z).toFixed(2), +p.y.toFixed(2)],
+    yaw: Math.round(THREE.MathUtils.radToDeg(Math.atan2(f.x, -f.z))), pitch: Math.round(THREE.MathUtils.radToDeg(Math.asin(THREE.MathUtils.clamp(f.y, -1, 1)))) };
+};
 ed.preRender.push(function framePace() {
   const t = performance.now(), d = fp.last ? t - fp.last : 0;
   fp.last = t; fp.n++;
-  if (d > fp.worst) fp.worst = d;
+  if (d > fp.worst) { fp.worst = d; fp.at = { ...headAt(), tris: ed.renderer.info.render.triangles, calls: ed.renderer.info.render.calls }; }
   if (d > 20) fp.long++;
 });
 setInterval(() => {
   if (!window.VR_log) return;
   const m = performance.memory, inf = ed.renderer.info;
   const pace = { frames: fp.n, worstMs: Math.round(fp.worst), longFrames: fp.long, programs: inf.programs ? inf.programs.length : null,
-    staging: ed.staging ? ed.staging() : false };
-  fp.worst = 0; fp.long = 0; fp.n = 0;
+    staging: ed.staging ? ed.staging() : false, head: headAt(), worstAt: fp.at };
+  fp.worst = 0; fp.long = 0; fp.n = 0; fp.at = null;
   window.VR_log('beat', JSON.stringify({ heapMB: m ? Math.round(m.usedJSHeapSize / 1e6) : null, limitMB: m ? Math.round(m.jsHeapSizeLimit / 1e6) : null,
     geo: inf.memory.geometries, tex: inf.memory.textures, tris: inf.render.triangles, calls: inf.render.calls,
     xr: ed.renderer.xr.isPresenting, xrFrames, loaded: ed.loaded, construct: construct.active, ...pace }));
