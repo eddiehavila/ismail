@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### A new person's first session: sketches in minutes (M110, S36)
+
+- `guide` opens with a first-session block for a person who has made nothing with ismail yet (no finished render
+  in the songs folder or beside the project, and no `~/.ismail/first_session_done`): two sentences on what this
+  is, at most two questions, sound within about five minutes, short rounds, one "change just one thing" edit.
+- `sketch(project, brief)`: two or three short contrasting sketches (solo piano, string trio and piano, a small
+  band), about 30 s each, on measured voices only, rendered to mp3 in one call (about two minutes for three).
+  Each sketch is a normal project: a motif and its answer in 4-bar phrases that vary and come home, chords that
+  move, parts in their own registers and rhythms, levels trimmed to -16 LUFS. Key from the brief's mood or `key=`,
+  chords from `progression=`.
+- `sketch_keep(project, letter)`: the pick becomes the song (lineage to the sketch, the brief as its objective),
+  and the first session is marked done.
+- `ismail/voices/showcase.json`: the voices a first sketch uses, with ranges and why each is trusted; `guide`
+  shows the list and `voices_list` marks them `*`. Not covered yet: a real-sample acoustic kit, a pad voice.
+- SKILL.md: "A person's first session", and step 0 says the kept sketch is the example. 180 tools.
+
 ### Provenance: the string profiles credit their real sources (M73)
 
 - `voices/strings/{violin,contrabass}.mimic.json` were measured from VSCO 2 Community Edition (Versilian Studios,
