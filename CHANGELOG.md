@@ -12,6 +12,17 @@
 - `python -m ismail.machine history [--song slug] [--since 7d|2026-10-04] [--jobs N]` sums it per song.
 - History starts with this change; jobs before it were never kept.
 
+### Keyed moves that glide; trial moves that never save (M107)
+
+- `stage_key_interp(scene, object, mode)`: "smooth" makes a keyed object glide through its keys (a cubic Hermite
+  curve per segment, tangents from the neighbouring keys; the turn slerps without easing) instead of stopping at each
+  ("stop", what an object with no mode does). Saved in anim.json `interp`. The same curves are in
+  `ismail/stage/page/interp.js` (the page) and `ismail/stage/interp.py` (`sample_anim`, for a render), held within a
+  millimetre by a test (the stage and the Blender render were 74 cm apart between camera keys; the Crossroads
+  render now reads `interp` too).
+- `stage_object_set(trial=True)`: a test move that never reaches edits.json, which the build reads; where the thing
+  was before is what saves, until it is edited for real (an agent's test camera move autosaved into the build).
+
 ### Live control maps and actor profiles (M100)
 
 - An actor's profile lives beside its body: `scenes/<scene>/actors/<who>.json` next to `<who>.glb`, so it goes
