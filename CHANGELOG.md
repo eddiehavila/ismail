@@ -2,12 +2,14 @@
 
 ## Unreleased
 
-### Keyed moves that glide; trial moves that never save
+### Keyed moves that glide; trial moves that never save (M107)
 
 - `stage_key_interp(scene, object, mode)`: "smooth" makes a keyed object glide through its keys (a cubic Hermite
   curve per segment, tangents from the neighbouring keys; the turn slerps without easing) instead of stopping at each
-  ("stop", the default). Saved in anim.json `interp`; the exact math is `ismail/stage/page/interp.js`, so a render
-  can match it (the stage and the Blender render were 74 cm apart between camera keys).
+  ("stop", what an object with no mode does). Saved in anim.json `interp`. The same curves are in
+  `ismail/stage/page/interp.js` (the page) and `ismail/stage/interp.py` (`sample_anim`, for a render), held within a
+  millimetre by a test (the stage and the Blender render were 74 cm apart between camera keys). The Crossroads render
+  does not read `interp` yet.
 - `stage_object_set(trial=True)`: a test move that never reaches edits.json, which the build reads; where the thing
   was before is what saves, until it is edited for real (an agent's test camera move autosaved into the build).
 

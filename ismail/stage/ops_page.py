@@ -544,11 +544,13 @@ def stage_follow_anchor(scene: str, person: str, joint: str = 'hips', to: str | 
 
 # page command type -> its typed op (stage_cmd refuses these and names the op)
 @op(mutates=True)
-def stage_key_interp(scene: str, object: str, mode: str = 'smooth') -> str:
-    """How a keyed object moves between its keys (page command: key_interp): 'stop' (the default: it eases into and
-    out of every key, so it stops at each) or 'smooth' (it glides through them: a camera move). Saved in anim.json
-    "interp" with stage_anim_save; the exact curves are in ismail/stage/page/interp.js, for a render to match. Errors:
-    the object has no keys. Page replies {name, mode, keys}."""
+def stage_key_interp(scene: str, object: str, mode: str) -> str:
+    """How a keyed object moves between its keys (page command: key_interp): mode 'stop' (it eases into and out of
+    every key, so it stops at each; what an object with no mode set does) or 'smooth' (it glides through them: a
+    camera move). Saved in anim.json "interp" with stage_anim_save. The same curves are in ismail/stage/page/interp.js
+    (the page) and ismail/stage/interp.py (sample_anim, for a render), held equal by a test; a render that turns
+    anim.json into keyframes must sample through interp.py or it drifts from the stage again (the Crossroads render,
+    blue_front_block.py, does not read "interp" yet). Errors: the object has no keys. Page replies {name, mode, keys}."""
     if mode not in ('stop', 'smooth'):
         raise OpError("mode is 'stop' or 'smooth'")
     return page_cmd(scene, 'key_interp', {'name': object, 'mode': mode}, timeout=30)

@@ -1,5 +1,6 @@
 """Keyed motion between keys (page/interp.js, run in node) and trial moves (the ops' side)."""
 import json
+import math
 import shutil
 import subprocess
 from pathlib import Path
@@ -7,7 +8,8 @@ from pathlib import Path
 import pytest
 
 from ismail.api import OPS, OpError
-from test_stage import FakePage, stage  # noqa: F401  (the fixture)
+from ismail.stage import interp as PI
+from test_stage import FakePage, stage  # noqa: F401,F811  (the fixture)
 
 INTERP = (Path(__file__).resolve().parents[1] / 'ismail' / 'stage' / 'page' / 'interp.js').as_uri()
 
@@ -46,7 +48,7 @@ def test_slerp_share_follows_the_mode():
 def test_key_interp_and_trial_set_reach_the_page(stage):
     page = FakePage(stage['port'], 'room')
     try:
-        OPS['stage_key_interp'](scene='room', object='cf_hall_wide_cam')
+        OPS['stage_key_interp'](scene='room', object='cf_hall_wide_cam', mode='smooth')
         assert (page.seen[-1]['type'], page.seen[-1]['name'], page.seen[-1]['mode']) == ('key_interp', 'cf_hall_wide_cam', 'smooth')
         with pytest.raises(OpError, match="'stop' or 'smooth'"):
             OPS['stage_key_interp'](scene='room', object='x', mode='bezier')
@@ -58,3 +60,37 @@ def test_key_interp_and_trial_set_reach_the_page(stage):
             OPS['stage_cmd'](scene='room', type='key_interp')
     finally:
         page.stop = True
+
+
+ROT = [{'t': 0, 'location': [0, 0, 0], 'quaternion': [1, 0, 0, 0], 'scale': [1, 1, 1]},
+       {'t': 2.5, 'location': [3, 1, 0.5], 'quaternion': [0.9239, 0, 0, 0.3827], 'scale': [1, 1, 1.2]},
+       {'t': 7, 'location': [3, 6, 1.5], 'quaternion': [-0.7071, 0, 0, -0.7071], 'scale': [1.1, 1, 1]},
+       {'t': 10, 'location': [-2, 8, 1.6], 'quaternion': [0.5, 0, 0, 0.866], 'scale': [1, 1, 1]}]
+
+
+def test_the_page_and_python_sample_the_same_curves():
+    """The stage (interp.js) and a render (interp.py) within a millimetre, in both modes, everywhere along the keys."""
+    ts = [round(0.1 * k, 2) for k in range(-5, 106)]
+    got = _node(f"""(() => {{ const ks = {json.dumps(ROT)}, ts = {json.dumps(ts)};
+      return ['stop', 'smooth'].map((mode) => ts.map((t) => [m.vec(ks, t, 'location', mode), m.vec(ks, t, 'scale', mode),
+        m.segment(ks, t) ? m.slerpK(m.segment(ks, t).u, mode) : null])); }})()""")
+    worst = 0.0
+    for mode, rows in zip(('stop', 'smooth'), got):
+        for t, (loc, scale, k) in zip(ts, rows):
+            py = PI.sample(ROT, t, mode)
+            worst = max(worst, *(abs(a - b) for a, b in zip(loc, py['location'])), *(abs(a - b) for a, b in zip(scale, py['scale'])))
+            seg = PI.segment(ROT, t)
+            assert (k is None) == (seg is None) and (k is None or abs(k - PI.slerp_k(seg[1], mode)) < 1e-9)
+    assert worst < 1e-3
+
+
+def test_python_turns_take_the_short_way_and_read_the_mode_from_anim():
+    anim = {'objects': {'cam': ROT}, 'interp': {'cam': 'smooth'}}
+    q = PI.sample_anim(anim, 'cam', 5.0)['quaternion']
+    assert abs(sum(x * x for x in q) - 1) < 1e-9
+    # keys 2.5 -> 7: 45 deg about z, then the 90 deg turn written with negated signs; the short way passes 67.5 deg
+    # halfway (smooth: u = 0.5 at t = 4.75), not the long way round through 247.5
+    w, x, y, z = PI.sample(ROT, 4.75, 'smooth')['quaternion']
+    assert 2 * math.degrees(math.acos(min(1, abs(w)))) == pytest.approx(67.5, abs=0.2) and abs(x) + abs(y) < 1e-9
+    assert PI.sample_anim(anim, 'cam', 2.5)['location'] == [3, 1, 0.5]
+    assert PI.sample_anim({'objects': {'cam': ROT}}, 'cam', 1.25)['location'] == PI.sample(ROT, 1.25, 'stop')['location']
