@@ -585,6 +585,7 @@ def sketch(project: str, brief: str, base: str = None, n: int = None, styles: li
                 rig = V.info(v['voice'], None)[2].get('rigs', {}).get(v['rig'])
                 if rig:
                     ops += [{'op': 'fx_add', 'target': role, 'fx': fx} for fx in rig['fx']]
+            ops += [{'op': 'fx_add', 'target': role, 'fx': fx} for fx in v.get('fx', [])]
             for b in range(pl['bars']):
                 t = SK.note_text(part['notes'], b)
                 if t:
@@ -610,6 +611,30 @@ def sketch(project: str, brief: str, base: str = None, n: int = None, styles: li
              "missing. Their correction is the next round: sketch(project, '<their words>', base='<letter>'). "
              "sketch_keep(project, '<letter>') makes the pick the song (it is the song's example).")
     return '\n'.join(L)
+
+
+@op()
+def samples_list() -> str:
+    """The sample sets some built-in voices play from (a sampled Rhodes, a sampled kit, a clean guitar): whether each
+    is on this machine, its size and its licence. A voice whose set is missing raises an error that says what to
+    fetch; sketch uses a stand-in and says so."""
+    from . import samples
+    return samples.status() + f"\nstore: {samples.root()}"
+
+
+@op()
+def samples_fetch(name: str, path: str = None) -> str:
+    """Download a sample set into the store (~/.ismail/samples, or $ISMAIL_SAMPLES), only after the person says
+    yes: tell them its size and licence first (samples_list shows both). path=<a folder that already holds the
+    set>: register it instead of downloading (nothing is copied)."""
+    from . import samples
+    try:
+        p = samples.fetch(name, register=path, log=lambda m: None)
+    except samples.SampleError as e:
+        raise OpError(str(e))
+    s = samples.SETS[name]
+    return (f"{name} {'registered' if path else 'fetched'}: {p}\nthe {s['voice']} voice plays it now. Credit: "
+            f"{s['credit']} ({s['licence']})")
 
 
 def _lufs_peak(path):

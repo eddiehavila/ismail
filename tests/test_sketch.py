@@ -19,6 +19,9 @@ def cool(tmp_path, monkeypatch):
     monkeypatch.setattr(machine, 'cpu_load', lambda: (12.0, []))
     monkeypatch.setattr(machine, 'disks', lambda *a: [], raising=False)
     monkeypatch.setenv('ISMAIL_FIRST_SESSION', str(tmp_path / 'home' / 'first_session_done'))
+    monkeypatch.setenv('ISMAIL_SAMPLES', str(tmp_path / 'samples'))     # no sample set is on this machine
+    for v in ('RHODES_SAMPLES', 'RUSTY_SAMPLES', 'EMILY_SAMPLES'):
+        monkeypatch.delenv(v, raising=False)
     monkeypatch.setattr(handoffs, 'SONGS', str(tmp_path / 'songs'))
     (tmp_path / 'songs').mkdir()
 
@@ -91,9 +94,10 @@ def test_the_brief_is_read_and_what_has_no_voice_is_said():
     """M021 run 1: a trip-hop brief got three fixed styles that matched none of it, and nothing said so."""
     s = SK.read_brief(TRIP)
     assert s['bpm'] == 90 and s['key'] == 'A minor' and s['feel'] == 'break' and s['ride'] and s['crisp']
-    assert s['parts'] == {'drums': 'kit70', 'sub': 'sub_bass', 'keys': 'grand_piano', 'melody': 'strat70_clean'}
+    assert s['parts'] == {'drums': 'kit70', 'sub': 'sub_bass', 'keys': 'grand_piano', 'melody': 'strat70_clean',
+                          'fx': 'crackle'}
     assert s['form'] == ['intro', 'groove', 'breakdown', 'groove', 'outro'] and s['blues'] and s['sevenths']
-    assert s['said'] == ['asked for Rhodes: no electric piano (Rhodes) voice yet: grand_piano plays its part']
+    assert len(s['said']) == 3 and "samples_fetch('jrhodes3d')" in s['said'][0] and 'grand_piano plays it' in s['said'][0]
     pl = SK.plan_spec(s, TRIP)
     assert pl['bars'] == 20 and pl['bpm'] == 90 and pl['form'] == s['form']
     by_bar = lambda role: {n[0] for n in pl['parts'][role]['notes']}
@@ -123,11 +127,19 @@ def test_the_next_round_takes_the_persons_words():
 def test_a_brief_sketch_and_a_next_round_from_it(tmp_path):
     song = str(tmp_path / 'songs' / 'trip')
     out = api.sketch(song, 'trip-hop with rhodes and a guitar melody, A minor, 88 BPM', n=1, bars=4)
-    assert 'SAY TO THE PERSON: asked for rhodes' in out and 'a) as asked' in out and 'LUFS' in out
+    assert "SAY TO THE PERSON: the rhodes voice plays real samples" in out and 'a) as asked' in out and 'LUFS' in out
     out = api.sketch(song, 'no guitar, slower', base='a', n=1, bars=4)
     assert 'b) as asked' in out and 'changed from the base' in out and 'no melody' in out
     with open(os.path.join(song, 'sketches', 'b-as-asked', 'sketch.json'), encoding='utf8') as f:
         assert json.load(f)['bpm'] < 88
     with pytest.raises(OpError):
         api.sketch(song, 'x', base='q')
+
+
+def test_with_its_samples_here_the_brief_gets_the_real_voices(monkeypatch):
+    from ismail import samples
+    monkeypatch.setattr(samples, 'path', lambda name: '/somewhere/' + name)
+    s = SK.read_brief(TRIP)
+    assert s['parts'] == {'drums': 'rusty', 'sub': 'sub_bass', 'keys': 'rhodes', 'melody': 'emily', 'fx': 'crackle'}
+    assert s['said'] == []
 
