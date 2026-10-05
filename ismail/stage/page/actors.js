@@ -12,6 +12,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { JOINTS } from './hands.js';
 import { cutout, b2tPos } from './editor.js';
 import { world } from './world.js';
+import { initControl } from './control.js';
 
 // who plays whom, facings, partners and the floor are the scene's (world.json via world.js), not the runtime's
 // where a person stands: the bottom of their stand-in (the band is up on the stage), the room's floor without one
@@ -126,9 +127,17 @@ export function initActors(ed, live) {
         const fwd = rest.ball_l.p.clone().sub(rest.foot_l.p).setY(0).normalize();
         const left = rest.upperarm_l.p.clone().sub(rest.upperarm_r.p).setY(0).normalize();
         return { who, root, bones, rest, fwd, left, cal: handCalibration(bones, rest), local: Object.fromEntries(Object.entries(bones).map(([n, b]) => [n, b.quaternion.clone()])) };
-      }));
+      }).then(async (rig) => { await readProfile(rig); return rig; }));
     }
     return loaded.get(who);
+  }
+
+  // its profile (rigs.py): rig type, named parts, control map presets; a body without one still has its parts. Read
+  // again before a preset is applied (an agent may have just saved it)
+  async function readProfile(rig) {
+    rig.profile = await fetch(`actor/profile?scene=${encodeURIComponent(scn())}&who=${encodeURIComponent(rig.who)}`, { cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : null)).catch(() => null) || rig.profile || { rig: 'unknown', parts: {}, effectors: [], maps: {} };
+    return rig;
   }
 
   // ---- hands: each WebXR joint straight onto its bone, no rest-pose guess. A WebXR joint has -Z along the bone toward
@@ -193,10 +202,15 @@ export function initActors(ed, live) {
     aim(B, C, S.clone().addScaledVector(u, d));
   }
 
-  // ---- one frame of the take onto the rig
-  function pose(st, f) {
+  // ---- one frame of the take onto the rig: the built-in human map, then the control map's drives (control.js)
+  function pose(st, raw) {
+    let f = raw;
     if (st.turn) f = turnFrame(f, st);
     if (st.mirror && st.mirrorN) f = mirrorFrame(f, st);
+    poseBase(st, f);
+    control.apply(st, f, raw);
+  }
+  function poseBase(st, f) {
     const { rig, s, anchor, J } = st, to = st.to || anchor;
     const P = (a) => to.clone().add(new THREE.Vector3(a[0], a[1], a[2]).sub(anchor).multiplyScalar(s));
     for (const [n, q] of Object.entries(rig.local)) rig.bones[n].quaternion.copy(q);   // from rest each frame
@@ -304,10 +318,11 @@ export function initActors(ed, live) {
     if (!who) throw new Error('no actor for ' + person + ' (world.json actors, or pass actor)');
     const base = `scenes/${encodeURIComponent(c.assets || world().assets || scn())}/`;   // a derived scene's bodies: its source's
     const tbase = `scenes/${encodeURIComponent(c.takes || scn())}/takes/${encodeURIComponent(c.take)}/`;
-    const [rig0, meta, txt] = await Promise.all([load(who, base), fetch(tbase + 'meta.json', { cache: 'no-store' }).then((r) => r.json()),
-      fetch(tbase + 'frames.jsonl', { cache: 'no-store' }).then((r) => { if (!r.ok) throw new Error('no take ' + c.take); return r.text(); })]);
+    // c.frames: frames in memory (the last Follow, played back before it is kept: perform.js), with c.meta
+    const [rig0, meta, txt] = await Promise.all([load(who, base), c.frames ? { joints: JOINTS, ...(c.meta || {}) } : fetch(tbase + 'meta.json', { cache: 'no-store' }).then((r) => r.json()),
+      c.frames ? null : fetch(tbase + 'frames.jsonl', { cache: 'no-store' }).then((r) => { if (!r.ok) throw new Error('no take ' + c.take); return r.text(); })]);
     stop({ person });
-    let frames = txt.split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((f) => f.head);
+    let frames = (c.frames || txt.split('\n').filter(Boolean).map((l) => JSON.parse(l))).filter((f) => f.head);
     if (!frames.length) throw new Error('take has no frames');
     // a trimmed take plays only its kept part (actions.js review: Start here / End here; saved in meta.trim)
     const trim = c.trim === null ? null : c.trim || meta.trim;
@@ -342,7 +357,7 @@ export function initActors(ed, live) {
     const h0 = frames[0].head;
     const turn = to && h0.length >= 7 ? turnFor(new THREE.Quaternion(h0[3], h0[4], h0[5], h0[6]), facingOf(ed, person, to)) : null;
     const st = { person, rig, frames, J, s, anchor, to, floor: ground, alignInv: align.clone().invert(), feet: { l: {}, r: {} },
-      t0: performance.now(), loop: c.loop !== false, it, take: c.take, i: 0, rate: c.rate || 1, turn };
+      t0: performance.now(), loop: c.loop !== false, it, take: c.take, i: 0, rate: c.rate || 1, turn, meta };
     playing.set(person, st);
     live.emit('actor_play', { person, actor: who, take: c.take, seconds: +(frames[frames.length - 1].t - frames[0].t).toFixed(1), scale: +s.toFixed(2) });
     return { person, actor: who, frames: frames.length, scale: +s.toFixed(2) };
@@ -376,7 +391,8 @@ export function initActors(ed, live) {
     const pins = anchors.get(person);
     if (pins) usePins(st, pins);
     playing.set(person, st);
-    live.emit('actor_follow', { person, actor: who, scale: +s.toFixed(2), pinned: pinnedNames(st) });
+    await control.onFollow(person);
+    live.emit('actor_follow', { person, actor: who, scale: +s.toFixed(2), pinned: pinnedNames(st), drives: control.state(person) });
     return { person, actor: who, following: true, scale: +s.toFixed(2) };
   }
   async function cloneRig(r) {                              // a second person on the same actor (couple 3)
@@ -521,6 +537,13 @@ export function initActors(ed, live) {
     return r;
   }
   live.handlers.follow_anchor = (c) => anchor(c);
+  // the control map (control.js): drives per part, on top of the built-in map
+  const rigOf = (person) => {
+    const who = world().actors[person];
+    if (!who) return Promise.reject(new Error('no actor for ' + person + ' (world.json actors)'));
+    return load(who, `scenes/${encodeURIComponent(world().assets || scn())}/`);
+  };
+  const control = initControl(ed, live, { rigOf, readProfile, setWorldQ, twoBone, pinPoint, anchor: (c) => anchor(c), pinsOf: (p) => pinsOf(p) });
   const pinsOf = (person) => { const st = playing.get(person); return st ? pinnedNames(st) : Object.keys(anchors.get(person) || {}).filter((k) => k !== 'legs' && anchors.get(person)[k]); };
-  return { play, stop, follow, setSource, playing, load, pose, canPlay, turnBy, setMode, moveTo, at, setMirror, anchor, pinsOf };
+  return { play, stop, follow, setSource, playing, load, pose, canPlay, turnBy, setMode, moveTo, at, setMirror, anchor, pinsOf, control, rigOf };
 }

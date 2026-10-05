@@ -8,10 +8,61 @@
   curve per segment, tangents from the neighbouring keys; the turn slerps without easing) instead of stopping at each
   ("stop", what an object with no mode does). Saved in anim.json `interp`. The same curves are in
   `ismail/stage/page/interp.js` (the page) and `ismail/stage/interp.py` (`sample_anim`, for a render), held within a
-  millimetre by a test (the stage and the Blender render were 74 cm apart between camera keys). The Crossroads render
-  does not read `interp` yet.
+  millimetre by a test (the stage and the Blender render were 74 cm apart between camera keys; the Crossroads
+  render now reads `interp` too).
 - `stage_object_set(trial=True)`: a test move that never reaches edits.json, which the build reads; where the thing
   was before is what saves, until it is edited for real (an agent's test camera move autosaved into the build).
+
+### Live control maps and actor profiles (M100)
+
+- An actor's profile lives beside its body: `scenes/<scene>/actors/<who>.json` next to `<who>.glb`, so it goes
+  where the body goes. `stage_actor_profile(scene, person)` reads it: the rig type (read from the body's bones), its
+  named parts (bone chains, parents first: head, spine, arm_l, leg_r, fingers_l, index_r, ... on people; any other
+  rig gets one part per unbranched chain, so a tail is a part) and its saved control maps.
+  `stage_actor_map_save(scene, person, name, pins, drives)` stores one; a map named "default" applies by itself
+  when a Follow starts. Every control op names the scene's person; world.json actors says which body plays them.
+- The control map: which part of the user drives which part of an actor, changeable at any moment, during a Follow
+  too. The built-in human map stays the base; `stage_control_set(scene, person, part, mode, joint, at, scale,
+  touch)` takes one part over: `hold` (keeps its pose, riding with the body), `effector` (arms and legs reach for a
+  target that moves as a user joint moves, relative to where both were when it bound: the user's hands act out a
+  seated man's feet; `touch=True` shows a ball in front of the user and binds when that hand reaches it), `pin` (reach
+  for a point and stay), `mimic` (copy a joint's turn, spread down the chain or 1:1 per bone with a list of joints),
+  `default`. A hand that drives another part lets go of its own arm and fingers. `stage_control_map` reads the map,
+  applies a preset, a list of drives, or clears it. The Follow panel shows the drives.
+- An anchor partitions control (each part its own source and solver), it does not cut the body.
+
+### A Follow is a performance; stage_batch (S32)
+
+- The Follow button starts a performance and the same button ends it. While someone follows the person, no gesture
+  acts (no travel, menus, phone, thumbs or grabs; a poke still presses a panel), and the Follow panel says so.
+- The mic records from the first moment of every Follow, in clips on the Follow's clock (seconds since it began),
+  uploaded a second at a time so a crash keeps what came in: `<scene>/performances/<id>/clip_<n>.<ext>` and
+  `perf.json` (person, markers, clips with their words). A stopped clip is transcribed with word times, snapped onto
+  the measured voice (whisper starts a phrase's first word up to half a second early, in the silence before it),
+  into a `perform_clip` event with the words on the Follow clock.
+- `stage_perform(scene, action)`: `state`, `stop_clip` (read it while the person goes on), `start_clip`,
+  `next_clip`, `mic_off`, `mark` with a label. The Follow panel has Mic off / Mic on. `stage_performance(scene, perf)`
+  reads a performance as text: markers, clips, each word at its time.
+- While the person performs, `stage_say` shows the line and does not speak it (it would be in the recording);
+  `aloud=True` speaks it. `stage_ask` waits for after the Follow (thumbs are off).
+- After a Follow it plays back on the person first, with the voice, while the card asks Keep / Discard. A take kept
+  from a Follow, or recorded during one, plays its performance's voice with it wherever it plays (meta `performance`,
+  `perf_shift`: where the take's time 0 falls on the Follow clock).
+- `stage_batch(scene, ops)`: many stage ops in one call. The page commands go to the page as one command and run
+  back to back; an op that runs on the server first sends the page commands before it. With `stop_on_error` the
+  first failure stops it and the files changed on the server go back.
+- speakwright (the speech server) answers `response_format=verbose_json` with word times; an older one still gives
+  the text, and the event says the words are missing.
+
+### The machine board's lock holds under a crowd (M85); one test file is not a heavy run (M86)
+
+- `ismail.machine`: a job waiting in line no longer dies when the board's lock changes hands under it (a holder
+  let go between the waiter's failed create and its look at the lock: FileNotFoundError killed a queued render with
+  three sessions waiting). A dead holder's lock is taken by an atomic rename, so two waiters cannot both take it,
+  and a holder removes only its own lock. Test: eight threads take turns 480 times with no error and no overlap.
+- tests/conftest.py: a run is a heavy job (it waits for a CPU slot) when it spans 4 or more test files, or includes
+  a file that renders whole windows (live parity, live song parity, round trips); one touched file of any size runs
+  without a slot. Before, any run of 30 or more tests counted, so a single 31-test file was refused on a hot machine.
 
 ### Live tests: notes go straight to the stage dev, and updates come back (S31)
 

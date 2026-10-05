@@ -143,7 +143,7 @@ def stage_view_eyecam(scene: str, fps: float = 1, seconds: float = 10) -> str:
 
 @op(mutates=True)
 def stage_say(scene: str, text: str, seconds: float = 8, voice: bool = False, voice_name: str = None,
-              sender: str = None) -> str:
+              sender: str = None, aloud: bool = False) -> str:
     """Tell the person something (page command: say). Desktop: a caption, one at a time, queued, shown only while the
     tab is visible. VR (or voice=True on the desktop): also spoken by Kokoro (voice_name picks the voice; the server
     default is af_heart), and in VR shown for min(120, 25 + 0.8 x words) seconds as a caption panel. A line that waited
@@ -151,8 +151,11 @@ def stage_say(scene: str, text: str, seconds: float = 8, voice: bool = False, vo
     {captions_ahead}, plus {spoken: false, stale_s} for a stale line. Emits: voice_spoken, voice_hushed (the person
     started a voice note mid-line), voice_dropped, voice_error, and in VR panel_shown and panel_closed. sender= your
     name as the person should see it (e.g. "crossroads film"): the caption and its VR card say it, in that name's
-    colour, on that name's side of their body."""
-    return page_cmd(scene, 'say', {'text': text, 'seconds': seconds, 'voice': voice, 'voice_name': voice_name, 'from': sender}, timeout=30)
+    colour, on that name's side of their body. While the person performs (someone follows them) the line is shown,
+    not spoken, since it would be in the recording (page replies held: ...); aloud=True speaks it anyway (an answer
+    they asked for)."""
+    return page_cmd(scene, 'say', {'text': text, 'seconds': seconds, 'voice': voice, 'voice_name': voice_name, 'from': sender,
+                                   'aloud': aloud or None}, timeout=30)
 
 
 @op(mutates=True)
@@ -525,6 +528,29 @@ def stage_take_keep_last(scene: str, name: str = None) -> str:
 
 
 @op(mutates=True)
+def stage_perform(scene: str, action: str = 'state', label: str = None) -> str:
+    """Your hand on a performance (page command: perform). A Follow is a performance: while someone follows the person
+    no gesture acts (pokes still press panels), your speech is shown and not spoken (stage_say aloud=True speaks), and
+    the mic records from the first moment in clips on the Follow's clock (seconds since it began). action:
+    'state' (default): {performing, perf, person, seconds, mic, clip, clips, markers, take};
+    'stop_clip': end the clip now so it is transcribed (the person goes on; the mic waits for start_clip);
+    'start_clip': record the next clip (turns the mic back on);
+    'next_clip': stop_clip then start_clip in one step (read one part while recording the next);
+    'mic_off': end the clip and leave the mic off (start_clip turns it on);
+    'mark': a marker with label= at this moment on the Follow clock.
+    A stopped clip arrives as event perform_clip {perf, clip, at, seconds, text, words: [[word, start, end]]} with
+    word times on the Follow clock, snapped onto the measured voice; stage_performance reads a whole performance. The
+    Follow panel has Mic off / Mic on for the person. Errors: nobody follows the person; the mic is not allowed.
+    Emits: perform_clip_start, perform_clip_stop, perform_mic, perform_mark (and from the server perform_clip_in,
+    perform_clip)."""
+    if action not in ('state', 'stop_clip', 'start_clip', 'next_clip', 'mic_off', 'mark'):
+        raise OpError("action is 'state', 'stop_clip', 'start_clip', 'next_clip', 'mic_off' or 'mark'")
+    if action == 'mark' and not label:
+        raise OpError("mark needs label= (what happens at this moment)")
+    return page_cmd(scene, 'perform', {'action': action, 'label': label}, timeout=30)
+
+
+@op(mutates=True)
 def stage_follow_anchor(scene: str, person: str, joint: str = 'hips', to: str | list = None, legs: str = 'keep_pose',
                         clear: bool = False) -> str:
     """Pin a person's joint for when the user follows (animates) them (page command: follow_anchor): joint 'hips'
@@ -549,11 +575,49 @@ def stage_key_interp(scene: str, object: str, mode: str) -> str:
     every key, so it stops at each; what an object with no mode set does) or 'smooth' (it glides through them: a
     camera move). Saved in anim.json "interp" with stage_anim_save. The same curves are in ismail/stage/page/interp.js
     (the page) and ismail/stage/interp.py (sample_anim, for a render), held equal by a test; a render that turns
-    anim.json into keyframes must sample through interp.py or it drifts from the stage again (the Crossroads render,
-    blue_front_block.py, does not read "interp" yet). Errors: the object has no keys. Page replies {name, mode, keys}."""
+    anim.json into keyframes must sample through interp.py or it drifts from the stage again. Errors: the object has
+    no keys. Page replies {name, mode, keys}."""
     if mode not in ('stop', 'smooth'):
         raise OpError("mode is 'stop' or 'smooth'")
     return page_cmd(scene, 'key_interp', {'name': object, 'mode': mode}, timeout=30)
 
 
-TYPED = {'key_interp': 'stage_key_interp', 'follow_anchor': 'stage_follow_anchor', 'take_keep_last': 'stage_take_keep_last', 'ack': 'stage_voice_ack', 'actor_follow': 'stage_actor_follow', 'actor_play': 'stage_actor_play', 'actor_stop': 'stage_actor_stop', 'anchor': 'stage_anchor_set', 'anchor_release': 'stage_anchor_release', 'anim_clear': 'stage_anim_clear', 'anim_save': 'stage_anim_save', 'ask': 'stage_ask', 'clear_markers': 'stage_markers_clear', 'clock': 'stage_clock_set', 'cue': 'stage_cue_set', 'cue_remove': 'stage_cue_remove', 'cues_clear': 'stage_cues_clear', 'cues_list': 'stage_cues_list', 'deselect': 'stage_object_deselect', 'drop': 'stage_object_drop', 'eyecam': 'stage_view_eyecam', 'focus': 'stage_view_focus', 'gallery_add': 'stage_gallery_add', 'goto': 'stage_person_goto', 'goto_camera': 'stage_camera_goto', 'growth': 'stage_growth_set', 'highlight': 'stage_object_highlight', 'key': 'stage_key_set', 'key_delete': 'stage_key_delete', 'light': 'stage_light_set', 'look_through': 'stage_view_look_through', 'marker': 'stage_marker_set', 'music': 'stage_music', 'panel': 'stage_panel_show', 'panel_close': 'stage_panel_close', 'reload': 'stage_scene_reload', 'say': 'stage_say', 'scene_go': 'stage_scene_go', 'scene_list': 'stage_scene_list', 'select': 'stage_object_select', 'set': 'stage_object_set', 'sky': 'stage_sky_set', 'snapshot': 'stage_view_snapshot', 'stream': 'stage_stream', 'take_start': 'stage_take_start', 'take_stop': 'stage_take_stop', 'take_view': 'stage_take_view', 'take_view_clear': 'stage_take_view_clear', 'timeline': 'stage_timeline_show', 'trees_reload': 'stage_trees_reload', 'undo': 'stage_edit_undo', 'voice_rec': 'stage_voice_note', 'walk': 'stage_view_walk', 'waypoint': 'stage_waypoint_set', 'waypoint_go': 'stage_waypoint_go', 'waypoint_remove': 'stage_waypoint_remove', 'waypoints_clear': 'stage_waypoints_clear', 'waypoints_list': 'stage_waypoints_list'}
+@op(mutates=True)
+def stage_control_set(scene: str, person: str, part: str, mode: str = 'default', joint: str | list = None,
+                      at: str | list = None, scale: float = None, touch: bool = False) -> str:
+    """Change what drives one part of a person, now, during a Follow too (page command: control_set). The built-in
+    map stays the base (the user's head drives head and spine, the wrists the arms, the fingers the fingers, legs
+    step or sit); a drive takes one part over. part: a named part of the actor's rig (stage_actor_profile(person) lists
+    them; on people: head, spine, arm_l, arm_r, leg_l, leg_r, fingers_l, fingers_r, thumb_l, index_l, ...). mode:
+    'hold' keeps the pose it has now (riding with the body); 'effector' (arms and legs) reaches for a target that
+    moves as joint= moves, relative to where both were when it bound (his feet acted by the user's hands: part
+    'leg_l', joint 'hand_l'), scale= multiplies the motion, touch=True shows a ball in front of the user and binds
+    when that hand reaches it; 'pin' (arms and legs) reaches for at= (an object, [x, y, z] in Blender metres, or
+    'here') and stays; 'mimic' copies the turn of joint= since it bound, spread down the chain, or 1:1 with a list
+    of joints, one per bone; 'default' gives the part back to the built-in map. joint: 'head', 'hand_l', 'hand_r',
+    or 'hand_r:<webxr joint>' (e.g. hand_r:index-finger-tip). A hand that drives another part lets go of its own
+    arm and fingers (they hold). Drives last for the page's session; stage_control_map applies saved ones. Page
+    replies {person, part, mode, joint, waiting, drives}. Emits: control_set, control_bound."""
+    from .rigs import MODES
+    if mode not in MODES:
+        raise OpError(f"mode is one of {MODES}")
+    if mode in ('effector', 'mimic') and not joint:
+        raise OpError(f"{mode} needs joint= 'head', 'hand_l', 'hand_r' or 'hand_r:<webxr joint>'")
+    if mode == 'pin' and at is None:
+        raise OpError("pin needs at= an object, [x, y, z] in Blender metres, or 'here'")
+    return page_cmd(scene, 'control_set', {'person': person, 'part': part, 'mode': mode, 'joint': joint, 'at': at,
+                                           'scale': scale, 'touch': touch or None}, timeout=30)
+
+
+@op(mutates=True)
+def stage_control_map(scene: str, person: str, preset: str = None, drives: list = None, clear: bool = False) -> str:
+    """Read or set a person's whole control map (page command: control_map). With nothing else: the drives now, the
+    presets saved in the actor's profile, and their pins. preset= applies a saved map from the profile (its pins and
+    drives; a map named "default" applies by itself when a Follow starts and nothing was set); drives= a list of
+    {part, mode, joint, at, scale, touch} applied in order; clear=True first gives every part back to the built-in
+    map. Save a map to the actor with stage_actor_map_save. Page replies {person, drives, presets,
+    pins}. Emits: control_map, control_set, control_bound."""
+    return page_cmd(scene, 'control_map', {'person': person, 'preset': preset, 'drives': drives, 'clear': clear or None}, timeout=30)
+
+
+TYPED = {'key_interp': 'stage_key_interp', 'control_set': 'stage_control_set', 'control_map': 'stage_control_map', 'perform': 'stage_perform', 'follow_anchor': 'stage_follow_anchor', 'take_keep_last': 'stage_take_keep_last', 'ack': 'stage_voice_ack', 'actor_follow': 'stage_actor_follow', 'actor_play': 'stage_actor_play', 'actor_stop': 'stage_actor_stop', 'anchor': 'stage_anchor_set', 'anchor_release': 'stage_anchor_release', 'anim_clear': 'stage_anim_clear', 'anim_save': 'stage_anim_save', 'ask': 'stage_ask', 'clear_markers': 'stage_markers_clear', 'clock': 'stage_clock_set', 'cue': 'stage_cue_set', 'cue_remove': 'stage_cue_remove', 'cues_clear': 'stage_cues_clear', 'cues_list': 'stage_cues_list', 'deselect': 'stage_object_deselect', 'drop': 'stage_object_drop', 'eyecam': 'stage_view_eyecam', 'focus': 'stage_view_focus', 'gallery_add': 'stage_gallery_add', 'goto': 'stage_person_goto', 'goto_camera': 'stage_camera_goto', 'growth': 'stage_growth_set', 'highlight': 'stage_object_highlight', 'key': 'stage_key_set', 'key_delete': 'stage_key_delete', 'light': 'stage_light_set', 'look_through': 'stage_view_look_through', 'marker': 'stage_marker_set', 'music': 'stage_music', 'panel': 'stage_panel_show', 'panel_close': 'stage_panel_close', 'reload': 'stage_scene_reload', 'say': 'stage_say', 'scene_go': 'stage_scene_go', 'scene_list': 'stage_scene_list', 'select': 'stage_object_select', 'set': 'stage_object_set', 'sky': 'stage_sky_set', 'snapshot': 'stage_view_snapshot', 'stream': 'stage_stream', 'take_start': 'stage_take_start', 'take_stop': 'stage_take_stop', 'take_view': 'stage_take_view', 'take_view_clear': 'stage_take_view_clear', 'timeline': 'stage_timeline_show', 'trees_reload': 'stage_trees_reload', 'undo': 'stage_edit_undo', 'voice_rec': 'stage_voice_note', 'walk': 'stage_view_walk', 'waypoint': 'stage_waypoint_set', 'waypoint_go': 'stage_waypoint_go', 'waypoint_remove': 'stage_waypoint_remove', 'waypoints_clear': 'stage_waypoints_clear', 'waypoints_list': 'stage_waypoints_list'}

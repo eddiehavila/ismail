@@ -270,7 +270,8 @@ export function initPanels(ed, xrApi, hands, voice, live, body) {
   let verdict = { g: null, since: 0 };
   const thumbAnswers = (p) => (p.buttons.length ? [p.buttons[0], p.buttons[p.buttons.length - 1]] : ['thumbs up', 'thumbs down']);
   function thumbs(now) {
-    const r = hands.state.right, g = r && r.f && (r.g === 'thumbs_up' || r.g === 'thumbs_down') ? r.g : null;
+    const r = hands.performing ? null : hands.state.right;    // perform.js: no thumbs while performing (pokes still press)
+    const g = r && r.f && (r.g === 'thumbs_up' || r.g === 'thumbs_down') ? r.g : null;
     const forming = r && r.f && (g || r.cand === 'thumbs_up' || r.cand === 'thumbs_down');
     if (g !== verdict.g) verdict = { g, since: now };
     let target = null;

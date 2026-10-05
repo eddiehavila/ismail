@@ -387,6 +387,24 @@ export function initLive(ed, desktop, xr) {
     for (const m of e.moved || []) if (m.it && m.it.obj.userData.trialHome) delete m.it.obj.userData.trialHome;
   });
 
+  // many commands as one (stage_batch): run in order inside one command, so the ones that answer at once land in the
+  // same frame; with stop_on_error the first failure stops the rest. Replies [{type, ok, result | error, ms}].
+  handlers.batch = async (c) => {
+    const out = [];
+    for (const x of Array.isArray(c.cmds) ? c.cmds : []) {
+      const t0 = performance.now();
+      try {
+        const h = x && x.type !== 'batch' ? handlers[x.type] : null;
+        if (!h) throw new Error(`unknown command "${x && x.type}"`);
+        out.push({ type: x.type, ok: true, result: await h(x), ms: Math.round(performance.now() - t0) });
+      } catch (e) {
+        out.push({ type: x && x.type, ok: false, error: e.message || String(e), ms: Math.round(performance.now() - t0) });
+        if (c.stop_on_error !== false) break;
+      }
+    }
+    return out;
+  };
+
   const queue = [];
   let running = false, since = -1;
   async function run() {
