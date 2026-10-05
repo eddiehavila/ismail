@@ -410,6 +410,12 @@ lanes on a performer), tempo changes inside a run, placed audio clips and the ma
 - Mimic profiles come out quiet next to synths and code voices (about 9 dB): check their level in
   `live_status` and raise `volume_db` before judging the balance.
 
+## Other sessions' renders while you play
+
+While your engine is on the board, the governor holds GPU jobs and Blender renders until the set ends (Nate's
+temporary rule after two real dropouts, hq:D-11; `python -m ismail.machine on-air` shows the policy). Audio
+renders and other CPU work still run beside you, so keep your engine at High priority and watch underruns.
+
 ## Away from the computer
 
 When the person listens from their phone, `references/phone.md` covers it: start `phone_start`, read their taps and
