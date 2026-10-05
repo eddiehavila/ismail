@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### A brief for a take helper agent
+
+- `references/stage-takes.md`: when the person wants a fast take loop and the scene's agent is busy, a helper agent
+  runs it from a brief (scene, who, goal, setup, takes, the stage tools it may use, trial moves only, when to stop,
+  what to hand back). The person asked for it so the loop never waits on a busy agent.
+
 ### Setup a novice can sit through (M119, the dress rehearsal)
 
 - `references/setup.md`: say the install takes about five minutes and looks frozen; prefer `uv pip install`
