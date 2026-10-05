@@ -118,9 +118,12 @@ Their first try decides whether they come back. Run it this way, then the normal
    numbers, and they judge it by ear; everything stays as editable files on their machine.
 2. At most two questions: what it is for, and a mood or a reference if they have one. A recording is welcome,
    never required: the sketch they pick is the song's example (loop step 0).
-3. Sound within about five minutes: sketch(project, brief=<their words>) writes two or three short contrasting
-   sketches on the measured voices below and renders them. Open each for them, one at a time, and ask which is
-   closest or what each is missing. Another round: sketch again with their words.
+3. Sound within about five minutes: sketch(project, brief=<their words>) reads their tempo, key, genre,
+   instruments and form, writes three readings on the measured voices below and renders them. Tell them first
+   what the reply says has no voice yet ("asked for Rhodes: grand_piano plays its part"). Open each for them, one
+   at a time, and ask which is closest or what each is missing; their correction is the next round:
+   sketch(project, <their words>, base='<letter>'). An instrument they named that has no voice is a later step:
+   offer to find an example of it and build it (the loop's step 0), never pretend the stand-in is it.
 4. sketch_keep(project, '<letter>') makes the pick the song and ends the first session.
 5. Short rounds: one named change at a time, two versions played in turn, "which one?".
 6. Early on, one deliberate small edit: "change just one thing" (a warmer bass from bar 5, drums out for two

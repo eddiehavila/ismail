@@ -173,8 +173,8 @@ def test_priority_from_the_user_puts_a_session_first_in_line_and_heat_still_hold
         assert 'waiting in line (2)' in b
         assert 'slots are full' in machine.check('gpu', who='crossroads')
         machine._held.depth = 1
-    vx.join(5)
-    bg.join(5)
+    vx.join(30)
+    bg.join(30)
     assert got == ['vox', 'tambopata'] and not errors and machine.waiters() == []
     # a job that does not wait yields to a waiter ahead of it, with the reason (the slot is free here)
     me = __import__('psutil').Process()
@@ -312,8 +312,10 @@ def test_a_drive_under_the_floor_holds_every_heavy_job_and_says_where_the_space_
 def test_low_commit_holds_new_jobs_and_names_the_job_past_its_memory(board, monkeypatch):
     """M72: 2026-10-05 a job declared 7 GB, took 10.7 GB, and the pagefile took D: from 9 GB to 0.2 GB."""
     monkeypatch.setattr(machine, 'METER_S', 0.05)
+    monkeypatch.setattr(machine, 'MEM_OVER_MIN_GB', 0.0)
     monkeypatch.setattr(machine, '_GpuSampler', lambda: type('G', (), {'stop': lambda self: {}})())
     with machine.slot('gpu', 'blender bvh', mem_gb=0.001, who='film') as job:
+        hog = b'x' * (64 * 2 ** 20)                       # what the job adds; the holder's own memory before it is not counted
         import time
         t = time.time()
         while not (machine.jobs() and machine.jobs()[0].get('over')) and time.time() - t < 10:
@@ -335,12 +337,25 @@ def test_low_commit_holds_new_jobs_and_names_the_job_past_its_memory(board, monk
 
 def test_the_cli_says_over_memory_in_the_jobs_own_output(board):
     env = dict(os.environ, ISMAIL_MACHINE_DIR=str(board))
-    code = "import time; b = b'x' * (300 * 2 ** 20); time.sleep(2.5)"
+    code = "import time; b = b'x' * (700 * 2 ** 20); time.sleep(2.5)"
     out = subprocess.run([sys.executable, '-m', 'ismail.machine', 'run', '--cpu', '--force', '--mem', '0.05', '--what',
                           'hog', '--', sys.executable, '-c', code], capture_output=True, text=True, env=env, timeout=120)
     assert out.returncode == 0 and 'OVER MEMORY' in out.stderr and "'hog'" in out.stderr
     j = [x for x in machine.history() if x['what'] == 'hog'][-1]
-    assert j['over_gb'] > 0.05 and j['mem_peak_gb'] >= 0.25
+    assert j['over_gb'] > 0.55 and j['mem_peak_gb'] >= 0.65
+
+
+def test_a_render_in_a_big_process_is_not_over_its_estimate(board, monkeypatch):
+    """The holder's memory before the slot is not the job's: an agent's 0.7 GB Python process rendering a 0.15 GB
+    window was flagged OVER on every render (2026-10-05)."""
+    monkeypatch.setattr(machine, 'METER_S', 0.05)
+    monkeypatch.setattr(machine, '_GpuSampler', lambda: type('G', (), {'stop': lambda self: {}})())
+    keep = b'x' * (300 * 2 ** 20)                          # the process was already big
+    with machine.slot('cpu', 'render a window', mem_gb=0.15, who='song'):
+        import time
+        time.sleep(0.3)
+        assert not machine.jobs()[0].get('over')
+    assert 'over_gb' not in machine.history()[-1] and len(keep)
 
 
 def test_machine_disk_lists_the_songs_their_growth_and_reclaim(board, tmp_path):

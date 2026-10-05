@@ -515,37 +515,68 @@ def guide(project: str = None) -> str:
 
 @op()
 @heavy()
-def sketch(project: str, brief: str, styles: list = None, key: str = None, bpm: float = None, bars: int = None,
-           progression: str | list = None, seed: int = 0) -> str:
-    """First sound for a new song, in one call: two or three short contrasting sketches (about 30 s each) on the
-    showcase voices, each a project in <project>/sketches/<letter>-<style>/, rendered to mp3 (wav without ffmpeg).
-    brief: what the person said they want, in their words. styles: from piano, chamber, band (default all three);
-    key: 'A minor', 'Eb' (default from the brief's mood); progression: roman numerals or chord names, 'i VI III VII'.
-    Another call adds new letters (a second round never overwrites). Play each to the person, ask which is closest
-    or what each is missing, then sketch_keep(project, '<letter>'). Each sketch is a normal project: edit it."""
+def sketch(project: str, brief: str, base: str = None, n: int = None, styles: list = None, key: str = None,
+           bpm: float = None, bars: int = None, progression: str | list = None, seed: int = 0) -> str:
+    """First sound for a new song, in one call: short sketches on the showcase voices, each a project in
+    <project>/sketches/<letter>-<label>/, rendered to mp3 (wav without ffmpeg). brief: the person's words. The brief
+    is read: a tempo ('90 BPM'), a key ('A minor'), a genre (trip-hop, house, jazz, rock, ambient ...), instruments
+    and a form (intro, groove, breakdown, return, fade) shape the sketch; three readings come back (as asked,
+    sparser, busier). Whatever has no voice yet is named first in the reply ("asked for Rhodes: ... grand_piano plays
+    its part"): tell the person. A brief naming no genre or instrument gets three contrasting styles (piano,
+    chamber, band). base='<letter>': the next round, that sketch changed by the brief's words ("slower, no guitar,
+    add a pad"); n: how many (default 3, or 2 with base). styles: force the fixed styles. key, bpm, bars,
+    progression ('i VI III VII' or chord names) override. Play each to the person, ask which is closest or what
+    each is missing, then sketch_keep(project, '<letter>')."""
+    import sys
     from . import sketch as SK
     from . import voices as V
-    styles = styles or list(SK.ORDER)
-    if isinstance(styles, str):
-        styles = [x for x in re.split(r'[\s,]+', styles) if x]
-    bad = [x for x in styles if x not in SK.STYLES]
-    if bad or not 1 <= len(styles) <= 4:
-        raise OpError(f"styles: one to four of {', '.join(SK.STYLES)} (got {styles})")
-    sc = {v['name']: v for v in SK.showcase()['voices']}
     root = os.path.abspath(project)
     sd = os.path.join(root, 'sketches')
-    used = {f.split('-')[0] for f in os.listdir(sd)} if os.path.isdir(sd) else set()
+    have = sorted(os.listdir(sd)) if os.path.isdir(sd) else []
+    n = n or (2 if base else 3)
+    if not 1 <= n <= 4:
+        raise OpError("n: 1 to 4 sketches")
+    try:
+        if styles:
+            if isinstance(styles, str):
+                styles = [x for x in re.split(r'[\s,]+', styles) if x]
+            bad = [x for x in styles if x not in SK.STYLES]
+            if bad or not 1 <= len(styles) <= 4:
+                raise OpError(f"styles: one to four of {', '.join(SK.STYLES)} (got {styles})")
+            todo, said = [], []
+            for st in styles:
+                spec = SK.style_spec(st)
+                got = SK.read_brief(brief)
+                spec.update({'key': key or got['key'], 'bpm': bpm or got['bpm'], 'form': got['form']})
+                todo.append((st, spec))
+        else:
+            base_spec = None
+            if base:
+                hits = [f for f in have if f == base or f.split('-')[0] == base]
+                if len(hits) != 1 or not os.path.exists(os.path.join(sd, hits[0], 'sketch.json')):
+                    raise OpError(f"base={base!r}: no single sketch with that letter in {sd} (have: "
+                                  f"{', '.join(have) or 'none'})")
+                with open(os.path.join(sd, hits[0], 'sketch.json'), encoding='utf8') as f:
+                    base_spec = json.load(f)['spec']
+            todo, said = SK.specs_for(brief, key, bpm, n, base_spec)
+    except SK.SketchError as e:
+        raise OpError(str(e))
+    sc = {v['name']: v for v in SK.showcase()['voices']}
+    used = {f.split('-')[0] for f in have}
     letters = [c for c in 'abcdefghijklmnopqrstuvwxyz' if c not in used]
     mp3 = 'also' if _ffmpeg_ok() else 'none'
-    L = [f"sketches for: {brief}"]
-    for i, style in enumerate(styles):
+    L = [f"sketches for: {brief}" + (f" (from sketch {base})" if base else '')]
+    L += [f"SAY TO THE PERSON: {x}" for x in said]
+    t0 = time.time()
+    for i, (label, spec) in enumerate(todo):
         try:
-            pl = SK.plan(brief, style, key, bpm, bars, progression, seed, variant=i + len(used))
+            pl = SK.plan_spec(spec, brief, seed, i + len(used), bars, progression, label)
         except SK.SketchError as e:
             raise OpError(str(e))
         letter = letters[i]
-        sp = os.path.join(sd, f"{letter}-{style}")
-        project_new(sp, pl['bpm'], pl['bars'], name=f"sketch {letter} ({style})", objective=brief)
+        slug = re.sub(r'[^a-z]+', '-', label.split(',')[0].lower()).strip('-')
+        sp = os.path.join(sd, f"{letter}-{slug}")
+        project_new(sp, pl['bpm'], pl['bars'], name=f"sketch {letter} ({label})", objective=brief)
         ops = []
         for role, part in pl['parts'].items():
             v = sc[part['voice']]
@@ -559,21 +590,36 @@ def sketch(project: str, brief: str, styles: list = None, key: str = None, bpm: 
                 if t:
                     ops.append({'op': 'notes_write', 'track': role, 'bar': b + 1, 'notes': t, 'mode': 'add'})
         batch(sp, ops)
+        with open(os.path.join(sp, 'sketch.json'), 'w', encoding='utf8') as f:
+            json.dump({'brief': brief, 'label': label, 'spec': spec, 'key': pl['key'], 'bpm': pl['bpm'],
+                       'form': pl['form'], 'progression': pl['progression']}, f, indent=1)
         render(sp)
         _loudness_trim(sp, -16.0)
         render(sp, out=f"sketch_{letter}", mp3=mp3)
+        lufs, peak = _lufs_peak(os.path.join(sp, 'renders', 'latest.wav'))
         f = os.path.join(sp, 'renders', f"sketch_{letter}.{'mp3' if mp3 == 'also' else 'wav'}")
+        print(f"[sketch] {letter} ready ({i + 1}/{len(todo)}, {time.time() - t0:.0f} s): {f}", file=sys.stderr,
+              flush=True)
         sec = pl['bars'] * 4 * 60 / pl['bpm']
-        voices = ', '.join(dict.fromkeys(p['voice'] for p in pl['parts'].values()))
+        form = f"; form {' > '.join(pl['form'])} (4 bars each)" if pl['form'] else ''
         L += [f"{letter}) {pl['what']}",
-              f"   {pl['key']}, {pl['bpm']} BPM, {pl['bars']} bars (~{sec:.0f} s); chords {' '.join(pl['progression'])}"
-              f" (a motif, its answer, home on the last bar)",
-              f"   voices: {voices}",
-              f"   listen: {f}"]
+              f"   {pl['key']}, {pl['bpm']:g} BPM, {pl['bars']} bars (~{sec:.0f} s){form}; chords "
+              f"{' '.join(pl['progression'])}" + (f"; feel {pl['feel']}" if pl['feel'] else ''),
+              f"   {lufs:.1f} LUFS, peak {peak:.1f} dBFS; listen: {f}"]
     L.append("NEXT: play them to the person one at a time (open each file), ask which is closest or what each is "
-             "missing. Then sketch_keep(project, '<letter>') makes the pick the song (it is the song's example). "
-             "Another round: sketch again with their words; it adds new letters.")
+             "missing. Their correction is the next round: sketch(project, '<their words>', base='<letter>'). "
+             "sketch_keep(project, '<letter>') makes the pick the song (it is the song's example).")
     return '\n'.join(L)
+
+
+def _lufs_peak(path):
+    try:
+        import pyloudnorm as pyln
+        import soundfile as sf
+        y, sr = sf.read(path)
+        return float(pyln.Meter(sr).integrated_loudness(y)), float(20 * np.log10(np.max(np.abs(y)) + 1e-12))
+    except Exception:
+        return float('nan'), float('nan')
 
 
 @op(mutates=True)

@@ -56,6 +56,7 @@ DISK_FLOOR_GB = 15.0               # no new heavy job while a drive jobs write t
 DISK_WARN_GB = 30.0                # the board warns below this
 COMMIT_FLOOR_GB = 6.0              # no new heavy job while less commit than this is free (the pagefile would grow)
 MEM_OVER = 1.25                    # a running job past its declared memory by this much is flagged
+MEM_OVER_MIN_GB = 0.5              # ... and by at least this much (a small render's estimate is not worth a flag)
 JOB_NOTE_S = 15.0                  # a running job writes its memory to its board file this often
 
 
@@ -503,6 +504,8 @@ class _Meter:
         t = me.cpu_times()
         self.base = (me.pid, t.user + t.system)       # the holder's CPU before the slot is not the job's
         self.base_w = _write_bytes(me)
+        mi = me.memory_info()
+        self.base_priv = getattr(mi, 'private', mi.rss)   # the holder's memory before the slot is not the job's
         self.gpu = _GpuSampler() if gpu_sampler else None
         self.t = threading.Thread(target=self._loop, daemon=True)
         self.t.start()
@@ -521,7 +524,8 @@ class _Meter:
                 self.cpu[key] = t.user + t.system
                 mi = p.memory_info()
                 rss += mi.rss
-                priv += getattr(mi, 'private', mi.rss)  # Windows: private bytes, what the commit charge counts
+                own = getattr(mi, 'private', mi.rss)  # Windows: private bytes, what the commit charge counts
+                priv += max(0, own - self.base_priv) if p.pid == self.base[0] else own
                 w = _write_bytes(p)
                 if w is not None:
                     self.wrote[key] = w
@@ -535,7 +539,7 @@ class _Meter:
         """Past its declared memory by MEM_OVER: say so once in the job's own output and on the board. Every
         JOB_NOTE_S: the memory it uses now, on its board file."""
         decl = self.job.get('mem_gb') or 0
-        over = bool(decl) and now_gb > decl * MEM_OVER
+        over = bool(decl) and now_gb > decl * MEM_OVER and now_gb - decl > MEM_OVER_MIN_GB
         if over and not self.job.get('over'):
             free = memory()[0]
             print(f"[ismail.machine] OVER MEMORY: '{str(self.job['what'])[:60]}' uses {now_gb:.1f} GB, declared "
