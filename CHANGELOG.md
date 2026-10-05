@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### The phone page's keys get icons (Nate: "they could have their own little SVG icons too")
+
+- Love this, change it up, calmer, more energy, quieter, louder, pause and resume set each have an icon drawn to
+  the page's contract (24-unit grid, 2px strokes, square ends), with the word small beneath it. A tap lights the key
+  and reads SENT for a moment, so it can be read at a glance with the phone half out of the pocket.
+
 ### A brief for a take helper agent
 
 - `references/stage-takes.md`: when the person wants a fast take loop and the scene's agent is busy, a helper agent
