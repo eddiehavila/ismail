@@ -192,6 +192,11 @@ nudges you, follow it.
   mimic_measure, the fits, live_parity) take a slot themselves and refuse with the reason; anything outside ismail
   (Blender, whisper, demucs, a long script) runs through `python -m ismail.machine run --gpu|--cpu -- <command>` so
   it takes one too; give `--est` a unit (`--est 10m`, `600s`) so the board tells others when you will be done.
+  Declare what it really needs: `--mem` (peak GB) and `--disk` (GB it writes). A job past its `--mem` is flagged
+  OVER on the board and in its own output: stop it if it keeps growing, because on Windows the pagefile grows into
+  the disk. Heavy jobs wait while a drive is under 15 GB free or commit under 6 GB; `machine_disk` shows where the
+  space went. To free space, move finished intermediates (caches, old renders, uncut takes) into the project's
+  `_reclaim/` folder and tell the user: nobody deletes, the user clears `_reclaim`.
   `run --wait 30m` (or `slot(..., wait=)`) stands in line for a slot instead of being refused. Every finished job
   leaves a line in the board's history (what, which song, how long it waited, its exit, CPU seconds, peak memory, the
   GPU's load and the machine's state at its start): `python -m ismail.machine history --song <slug> --since 7d` sums

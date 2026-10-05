@@ -90,7 +90,7 @@ def heavy(kind='cpu'):
         @functools.wraps(fn)
         def wrapped(*a, **kw):
             proj = str(kw.get('project', a[0] if a else '')).replace(os.sep, '/').rstrip('/')
-            with machine.slot(kind, f"{fn.__name__} {os.path.basename(proj)}"):
+            with machine.slot(kind, f"{fn.__name__} {os.path.basename(proj)}", disk_path=proj or None):
                 return fn(*a, **kw)
         return wrapped
     return deco
@@ -1389,8 +1389,11 @@ def render(project: str, bars: list = None, tracks: list = None, stems: bool = F
             P.track(t)
     try:
         R = Renderer(P.d, P.root, bars[0] if bars else None, (bars[1] + 1) if bars else None, tracks, cache)
+        cache_gb, out_gb = _render_disk_gb(P.d, R.n, tracks, cache, stems, out and mp3 != 'only')
         with machine.slot('cpu', f"render {os.path.basename(P.root)}" + (f" bars {bars[0]}-{bars[1]}" if bars else ''),
-                          mem_gb=_render_gb(P.d, R.n, tracks)):
+                          mem_gb=_render_gb(P.d, R.n, tracks), disk_gb=cache_gb + out_gb, disk_path=P.root,
+                          disk_hint=(f"cache=False skips the track cache ({cache_gb:.1f} GB of it)" if cache_gb else
+                                     '') + (", a shorter window (bars=) writes less" if not bars else '')):
             y, st = R.run()
     except (RenderError, fxmod.FxError, inst_mod.InstrumentError) as e:
         raise OpError(f"render failed: {e}")
@@ -1464,6 +1467,15 @@ def _render_gb(d, n, only=None):
     tracks = [t for k, t in d['tracks'].items() if only is None or k in only]
     deps = set().union(*(Renderer.deps(None, t) for t in d['tracks'].values()))
     return machine.render_memory_gb(n, len(tracks), len(d.get('buses', {})), len(deps))
+
+
+def _render_disk_gb(d, n, only, cache, stems, named):
+    """-> (GB the track cache may write: float32 per track, at most every track; GB of wav: 24-bit latest.wav, the
+    named copy, the stems)."""
+    k = len([t for t in d['tracks'] if only is None or t in only])
+    cache_gb = k * n * 2 * 4 / 2 ** 30 if cache else 0.0
+    wavs = 1 + bool(named) + ((k + len(d.get('buses', {}))) if stems else 0)
+    return cache_gb, wavs * n * 2 * 3 / 2 ** 30
 
 
 def _record_window(rd, files, window):
@@ -1678,9 +1690,19 @@ def separate(project: str, source: str = 'ref', model: str = 'htdemucs_ft') -> s
 def machine_status(project: str = None) -> str:
     """The shared machine before anything heavy (a render over a minute, separate, mimic_measure, a fit, Blender,
     whisper): GPU heat and throttling, CPU, free memory, every heavy job running now in any session, and whether a new
-    GPU or CPU job may start. Heavy ops check it themselves and refuse with the reason; run commands outside ismail
-    through `python -m ismail.machine run --gpu|--cpu -- <command>` so they take a slot too."""
+    GPU or CPU job may start, free commit and disk (each running job's memory, OVER when past what it declared).
+    Heavy ops check it themselves and refuse with the reason; run commands outside ismail through
+    `python -m ismail.machine run --gpu|--cpu [--mem GB] [--disk GB] -- <command>` so they take a slot too."""
     return machine.board()
+
+
+@op()
+def machine_disk(top: int = 12) -> str:
+    """Where the disk went, when the board says disk LOW or a heavy job waits on disk: each drive's free space and
+    pagefile, the biggest folders under songs/ with their growth since the last daily snapshot, and every _reclaim
+    folder. To free space, move a project's finished intermediates (caches, old renders, uncut takes) into its
+    _reclaim/ folder and tell the user; never delete: the user clears _reclaim."""
+    return machine.disk_text(top)
 
 
 # ------------------------------------------------------------------ batch

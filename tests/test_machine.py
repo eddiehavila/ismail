@@ -19,6 +19,8 @@ def board(tmp_path, monkeypatch):
     monkeypatch.setattr(machine, 'gpu', lambda: dict(COOL))
     monkeypatch.setattr(machine, 'memory', lambda: (40.0, 70.0, 30.0))
     monkeypatch.setattr(machine, 'cpu_load', lambda: (12.0, []))
+    monkeypatch.setattr(machine, 'disks', lambda *a: [('D:', 100.0)])
+    monkeypatch.setattr(machine, 'pagefiles', lambda: [])
     depth = getattr(machine._held, 'depth', 0)
     machine._held.depth = 0                  # the suite's own slot (conftest) would make every slot pass through
     yield tmp_path / 'board'
@@ -278,3 +280,83 @@ def test_the_cli_records_the_commands_exit_and_its_cpu(board):
     out = subprocess.run([sys.executable, '-m', 'ismail.machine', 'history', '--since', '1d', '--jobs', '1'],
                          capture_output=True, text=True, env=env, timeout=60)
     assert "'busy probe'" in out.stdout and 'exit 3' in out.stdout
+
+
+def test_a_drive_under_the_floor_holds_every_heavy_job_and_says_where_the_space_went(board, monkeypatch, tmp_path):
+    """M72: D: filled four times in five days (render caches, takes, the pagefile); a job that would leave a drive
+    under the floor waits, with the numbers and what to do, and a render says cache=False writes less."""
+    monkeypatch.setattr(machine, 'disks', lambda *a: [('D:', 20.0)])
+    assert machine.check('gpu') == ''
+    why = machine.check('cpu', disk_gb=6.0, disk_hint='cache=False skips the track cache')
+    assert why.startswith('disk: it writes about 6.0 GB and D: has 20.0 GB free') and 'cache=False' in why
+    assert '_reclaim' in why and 'never delete' in why
+    monkeypatch.setattr(machine, 'disks', lambda *a: [('D:', 3.7)])
+    monkeypatch.setattr(machine, 'pagefiles', lambda: [('D:', 33.6)])
+    with pytest.raises(machine.MachineBusy) as e:
+        with machine.slot('gpu', 'whisper'):
+            pass
+    assert 'D: has 3.7 GB free' in str(e.value)
+    text = machine.board()
+    assert 'disk: D: 3.7 GB free; pagefile D: 33.6 GB  LOW' in text and 'a new gpu job: WAIT: disk' in text
+    assert 'D: 3.7 GB free' in machine.pressure_line()
+    root = str(tmp_path / 's')
+    api.project_new(root, bpm=120, length_bars=1)
+    api.track_add(root, 'k', instrument='preset:kick')
+    with pytest.raises(api.OpError) as e:
+        api.render(root)
+    assert 'cache=False skips the track cache' in str(e.value)
+    with machine.slot('live', 'live set', threads=None):     # a set on air is never held by the disk
+        pass
+
+
+def test_low_commit_holds_new_jobs_and_names_the_job_past_its_memory(board, monkeypatch):
+    """M72: 2026-10-05 a job declared 7 GB, took 10.7 GB, and the pagefile took D: from 9 GB to 0.2 GB."""
+    monkeypatch.setattr(machine, 'METER_S', 0.05)
+    monkeypatch.setattr(machine, '_GpuSampler', lambda: type('G', (), {'stop': lambda self: {}})())
+    with machine.slot('gpu', 'blender bvh', mem_gb=0.001, who='film') as job:
+        import time
+        t = time.time()
+        while not (machine.jobs() and machine.jobs()[0].get('over')) and time.time() - t < 10:
+            time.sleep(0.05)
+        on_board = machine.jobs()[0]
+        assert on_board['over'] > 0.001 and on_board['mem_now_gb'] > 0.001
+        assert 'OVER: peaked at' in machine._describe(on_board)
+        monkeypatch.setattr(machine, 'memory', lambda: (4.0, 70.0, 2.0))
+        why = machine.check('cpu')
+        assert why.startswith('memory: 4.0 GB of commit free') and "'blender bvh' (film" in why
+        assert 'LOW (heavy jobs wait below 6 GB)' in machine.board()
+        monkeypatch.setattr(machine, 'memory', lambda: (40.0, 70.0, 30.0))
+    j = machine.history()[-1]
+    assert j['over_gb'] > 0.001 and j['mem_peak_gb'] > 0 and j['write_gb'] >= 0
+    assert j['at_start']['disk_free_gb'] == 100.0 and 'disk_free_end_gb' in j
+    assert 'went past their declared memory' in machine.history_text()
+    assert not [f for f in os.listdir(board / 'jobs') if f.endswith('.tmp')]
+
+
+def test_the_cli_says_over_memory_in_the_jobs_own_output(board):
+    env = dict(os.environ, ISMAIL_MACHINE_DIR=str(board))
+    code = "import time; b = b'x' * (300 * 2 ** 20); time.sleep(2.5)"
+    out = subprocess.run([sys.executable, '-m', 'ismail.machine', 'run', '--cpu', '--force', '--mem', '0.05', '--what',
+                          'hog', '--', sys.executable, '-c', code], capture_output=True, text=True, env=env, timeout=120)
+    assert out.returncode == 0 and 'OVER MEMORY' in out.stderr and "'hog'" in out.stderr
+    j = [x for x in machine.history() if x['what'] == 'hog'][-1]
+    assert j['over_gb'] > 0.05 and j['mem_peak_gb'] >= 0.25
+
+
+def test_machine_disk_lists_the_songs_their_growth_and_reclaim(board, tmp_path):
+    root = tmp_path / 'songs'
+    (root / 'big' / 'renders').mkdir(parents=True)
+    (root / 'big' / 'renders' / 'a.wav').write_bytes(b'0' * 3 * 2 ** 20)
+    (root / 'small' / 'live' / '_reclaim').mkdir(parents=True)
+    (root / 'small' / 'live' / '_reclaim' / 'take.wav').write_bytes(b'0' * 2 ** 20)
+    (board / 'disk').mkdir(parents=True)
+    (board / 'disk' / '2000-01-01.json').write_text(json.dumps({'big': 1 * 2 ** 20}))
+    text = machine.disk_text(root=str(root))
+    assert 'growth since 2000-01-01' in text and 'big  +0.00 GB' not in text
+    lines = text.splitlines()
+    assert any(l.strip().startswith('0.00 GB  big') for l in lines)
+    assert '_reclaim (moved out, waiting for the user to clear)' in text
+    assert os.path.join('small', 'live', '_reclaim') in text
+    assert sorted(os.listdir(board / 'disk')) == ['2000-01-01.json', __import__('time').strftime('%Y-%m-%d') + '.json']
+    assert 'songs/' in api.OPS['machine_disk']()
+

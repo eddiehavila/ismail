@@ -202,8 +202,15 @@ def live_status(project: str, deck: str = None) -> str:
     cost, errors), the safety chain's gain reduction since the last status, runway (the last scheduled change and
     what loops after it) and render health (backlog, late events, underruns). A STALLED line means the audio
     device stopped asking for audio. deck='B' lists that deck's tracks and buses instead. Problems that arrive
-    between calls (a dropped note, a stall) are added to the next reply of any live op."""
-    return _call(project, 'status', deck=deck)
+    between calls (a dropped note, a stall) are added to the next reply of any live op. The last line is the
+    machine's free commit and disk (takes are written to disk; a full disk stops the recording)."""
+    out = _call(project, 'status', deck=deck)
+    try:
+        from .. import machine
+        out += '\n' + machine.pressure_line()
+    except Exception:
+        pass
+    return out
 
 
 def _project_fx(project, spec):

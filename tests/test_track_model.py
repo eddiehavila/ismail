@@ -15,6 +15,7 @@ def proj(tmp_path, monkeypatch):
     monkeypatch.setattr(machine, 'gpu', lambda: None)
     monkeypatch.setattr(machine, 'memory', lambda: (40.0, 70.0, 30.0))
     monkeypatch.setattr(machine, 'cpu_load', lambda: (12.0, []))
+    monkeypatch.setattr(machine, 'disks', lambda *a: [])
     p = str(tmp_path / 'song')
     api.project_new(p, bpm=120, length_bars=1)
     return p
