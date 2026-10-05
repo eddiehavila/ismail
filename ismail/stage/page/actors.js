@@ -360,9 +360,14 @@ export function initActors(ed, live) {
     if (it) it.obj.visible = false;
     scene.add(rig.root);
     const h0 = frames[0].head;
-    const turn = to && h0.length >= 7 ? turnFor(new THREE.Quaternion(h0[3], h0[4], h0[5], h0[6]), facingOf(ed, person, to)) : null;
+    const fc = to ? facingOf(ed, person, to) : null;
+    const turn = to && h0.length >= 7 ? turnFor(new THREE.Quaternion(h0[3], h0[4], h0[5], h0[6]), fc) : null;
+    // mirrored as it was made (the user, 2026-10-05: a take recorded with Follow's mirror played back the other way):
+    // the take keeps meta.mirror; the plane is the person's facing through the take's anchor, as in the Follow
+    const mirror = !!(c.mirror ?? meta.mirror);
     const st = { person, rig, frames, J, s, anchor, to, floor: ground, alignInv: align.clone().invert(), feet: { l: {}, r: {} },
       t0: performance.now(), loop: c.loop !== false, it, take: c.take, i: 0, rate: c.rate || 1, turn, meta,
+      mirror, mirrorN: fc ? new THREE.Vector3(fc.z, 0, -fc.x) : null,
       voice: c.voice == null ? null : !!c.voice };          // perform.js: the performance's voice with it
     // pinned in playback as while recording (the user, 2026-10-05: Sam's take played anchored by the feet, though
     // his hips were pinned to the stool): the take's own pins (meta.pins, Blender xyz), else this session's
@@ -403,6 +408,7 @@ export function initActors(ed, live) {
     if (pins) usePins(st, pins);
     await useStart(st, c);
     playing.set(person, st);
+    lastMirror.set(person, st.mirror);
     await control.onFollow(person);
     live.emit('actor_follow', { person, actor: who, scale: +s.toFixed(2), pinned: pinnedNames(st), drives: control.state(person),
       start: st.start ? st.start.spec : null });
@@ -500,10 +506,14 @@ export function initActors(ed, live) {
   const setSource = (fn) => { source = fn; };
   // where a playing take is now (its own clock, seconds) and its span
   const at = (person) => { const st = playing.get(person); return st && st.frames ? { t: st.frames[st.i].t, t0: st.frames[0].t, t1: st.frames[st.frames.length - 1].t } : null; };
+  // the mirror of each person's latest Follow (kept after it stops: the take kept from it plays the same way)
+  const lastMirror = new Map();
+  const mirrorOf = (person) => !!lastMirror.get(person);
   function setMirror(person, on) {
     const st = playing.get(person);
     if (!st) return null;
     st.mirror = !!on;
+    if (st.live) lastMirror.set(person, st.mirror);
     live.emit('actor_mirror', { person, mirror: st.mirror });
     return { person, mirror: st.mirror };
   }
@@ -588,9 +598,10 @@ export function initActors(ed, live) {
     rig.root.updateMatrixWorld(true);
     const putPelvis = (w) => { pel.parent.updateMatrixWorld(true); pel.position.copy(pel.parent.worldToLocal(w.clone())); pel.updateMatrixWorld(true); };
     if (pose === 'rest') {
-      const fc = facingOf(ed, st.person, st.to, null);
+      const at = st.to || st.anchor;                          // in place (or no stand-in yet): where the take stands
+      const fc = facingOf(ed, st.person, at, null);
       const yaw = fc ? new THREE.Quaternion().setFromUnitVectors(rig.fwd, fc.clone().setY(0).normalize()) : new THREE.Quaternion();
-      putPelvis(new THREE.Vector3(st.to.x, st.floor + rig.rest.pelvis.p.y - rig.rest.foot_l.p.y, st.to.z));
+      putPelvis(new THREE.Vector3(at.x, (st.floor ?? at.y) + rig.rest.pelvis.p.y - rig.rest.foot_l.p.y, at.z));
       setWorldQ(pel, yaw.multiply(rig.rest.pelvis.q));
     } else if (pose.take) {
       const tbase = `scenes/${encodeURIComponent(pose.scene || scn())}/takes/${encodeURIComponent(pose.take)}/`;
@@ -700,5 +711,5 @@ export function initActors(ed, live) {
   };
   const control = initControl(ed, live, { rigOf, readProfile, setWorldQ, twoBone, pinPoint, anchor: (c) => anchor(c), pinsOf: (p) => pinsOf(p) });
   const pinsOf = (person) => { const st = playing.get(person); return st ? pinnedNames(st) : Object.keys(anchors.get(person) || {}).filter((k) => k !== 'legs' && anchors.get(person)[k]); };
-  return { play, stop, follow, setSource, playing, load, pose, canPlay, turnBy, setMode, moveTo, at, setMirror, anchor, pinsOf, control, rigOf, pinsMeta };
+  return { play, stop, follow, setSource, playing, load, pose, canPlay, turnBy, setMode, moveTo, at, setMirror, anchor, pinsOf, control, rigOf, pinsMeta, mirrorOf };
 }
