@@ -155,10 +155,15 @@ def test_priority_from_the_user_puts_a_session_first_in_line_and_heat_still_hold
         machine._held.depth = 0
         bg = threading.Thread(target=take, args=('tambopata', 'render draft 5'))
         bg.start()
-        time.sleep(0.3)                                   # tambopata is in line first
+
+        def in_line(n):                                   # wait for the line, not a fixed time (a busy machine is slow)
+            t_end = time.time() + 10
+            while len(machine.waiters()) < n and time.time() < t_end:
+                time.sleep(0.02)
+        in_line(1)                                        # tambopata is in line first
         vx = threading.Thread(target=take, args=('vox', 'whisper small.en'))
         vx.start()
-        time.sleep(0.3)
+        in_line(2)
         line = machine.waiters()
         assert [w['who'] for w in line] == ['vox', 'tambopata']             # priority first, then arrival
         b = machine.board()
@@ -196,3 +201,42 @@ def test_an_expired_priority_is_gone_and_the_cli_sets_one(board):
     out = subprocess.run([sys.executable, '-m', 'ismail.machine', 'priority', 'vox', '--for', '3h'],
                          capture_output=True, text=True, env=env, timeout=60)
     assert out.returncode != 0 and 'the user' in out.stderr
+
+
+def test_the_board_lock_survives_waiters_racing_its_holders(board):
+    """Three sessions waiting at once once killed a queued job: a holder let go between a waiter's failed create and
+    its look at the lock (FileNotFoundError). Many threads now take turns with no error and never overlap."""
+    import threading
+    inside, overlaps, errors = [0], [0], []
+
+    def worker():
+        try:
+            for _ in range(60):
+                with machine._board_lock(timeout=30):
+                    inside[0] += 1
+                    if inside[0] > 1:
+                        overlaps[0] += 1
+                    inside[0] -= 1
+        except Exception as e:                       # noqa: BLE001
+            errors.append(repr(e))
+    ts = [threading.Thread(target=worker) for _ in range(8)]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join()
+    assert errors == [] and overlaps[0] == 0
+    assert not os.path.exists(os.path.join(str(board), 'lock'))
+
+
+def test_a_dead_holders_lock_is_taken_and_a_live_one_is_never_removed(board):
+    os.makedirs(str(board), exist_ok=True)
+    lock = os.path.join(str(board), 'lock')
+    with open(lock, 'w') as f:
+        f.write('a holder that died')
+    old = os.path.getmtime(lock) - machine.STALE_LOCK_S - 5
+    os.utime(lock, (old, old))
+    with machine._board_lock(timeout=5):
+        assert open(lock).read() != 'a holder that died'
+        with open(lock, 'w') as f:                   # a waiter broke our lock meanwhile and took it
+            f.write('someone else')
+    assert open(lock).read() == 'someone else'       # our release left their lock alone
