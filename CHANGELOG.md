@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### A performance always has a way out, and agents hear it while it runs
+
+- The user spent seven minutes inside a performance an agent had started ("I'm basically just stuck in a
+  performance"): its Follow had no panel, its voice was one clip transcribed only at the end, and nothing he said
+  reached the agents. Now:
+  - an agent's Follow (`stage_actor_follow`) opens the Follow panel too (Stop, Mic off);
+  - `stage_perform(action="stop")` ends the whole performance: the Follow, and a take recording with it;
+  - the person can always end it: both thumbs down held 1.5 s (the HUD says so), or saying "stop the performance"
+    (or "stop the recording", "end performance"), which the server turns into the same stop;
+  - a clip cuts itself at the first pause after 6 s, or at 25 s, with no gap (the next starts before it stops), so
+    its words arrive while the performance goes on; a clip with no voice in it is not sent to the speech server;
+  - a clip's words (`perform_clip` with text) reach `stage_listen`, the text first.
+- A take made in a performance plays its recorded voice only on the person it was recorded for:
+  `stage_actor_play(voice=)` True plays it on another body too, False keeps it silent. One clip sounds once, however
+  many bodies play the take and however often it is played (a dance take on six dancers, played twice, built up "a din
+  of just me").
+
 ### Follow counts down first
 
 - The menu's Follow (and Take on a person) counts 3, 2, 1, GO in front of the user, with ticks, before the person

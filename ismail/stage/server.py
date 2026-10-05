@@ -843,10 +843,17 @@ class Handler(SimpleHTTPRequestHandler):
                 by = qs.get('by', ['page'])[0][:40]
                 server_event(name, {'type': 'perform_clip_in', 'perf': perf_id, 'clip': n, 'at': at, 'seconds': secs, 'by': by})
                 files = sorted(d.glob(f'clip_{n}.*'))
+                quiet = 'quiet' in qs                              # the page heard nothing in it
                 perform.set_clip(d, {'n': n, 'at': at, 'seconds': secs, 'by': by, 'file': files[0].name if files else None,
-                                     'state': 'transcribing'})
-                threading.Thread(target=perform.transcribe_clip, daemon=True,
-                                 args=(d, n, at, secs, by, stt_words, lambda ev: server_event(name, ev))).start()
+                                     'state': 'quiet' if quiet else 'transcribing'})
+
+                def heard(ev, name=name, perf_id=perf_id):
+                    server_event(name, ev)
+                    said = perform.asks_stop(ev.get('text'))
+                    if said:                                       # "stop the performance": always a way out
+                        server_cmd(name, {'type': 'perform', 'action': 'stop', 'by': f'voice: "{said}"', 'perf': perf_id})
+                stt = (lambda audio, fn: {'text': '', 'words': []}) if quiet else stt_words
+                threading.Thread(target=perform.transcribe_clip, daemon=True, args=(d, n, at, secs, by, stt, heard)).start()
                 return self._json(200, {'ok': True})
             ext = {'audio/webm': 'webm', 'audio/ogg': 'ogg', 'audio/mp4': 'm4a', 'audio/wav': 'wav'}.get(
                 (self.headers.get('Content-Type') or '').split(';')[0].strip(), 'webm')

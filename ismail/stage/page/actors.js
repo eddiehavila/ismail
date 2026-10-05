@@ -362,7 +362,8 @@ export function initActors(ed, live) {
     const h0 = frames[0].head;
     const turn = to && h0.length >= 7 ? turnFor(new THREE.Quaternion(h0[3], h0[4], h0[5], h0[6]), facingOf(ed, person, to)) : null;
     const st = { person, rig, frames, J, s, anchor, to, floor: ground, alignInv: align.clone().invert(), feet: { l: {}, r: {} },
-      t0: performance.now(), loop: c.loop !== false, it, take: c.take, i: 0, rate: c.rate || 1, turn, meta };
+      t0: performance.now(), loop: c.loop !== false, it, take: c.take, i: 0, rate: c.rate || 1, turn, meta,
+      voice: c.voice == null ? null : !!c.voice };          // perform.js: the performance's voice with it
     // pinned in playback as while recording (the user, 2026-10-05: Sam's take played anchored by the feet, though
     // his hips were pinned to the stool): the take's own pins (meta.pins, Blender xyz), else this session's
     const pins = c.pins || meta.pins ? pinsFromMeta(c.pins || meta.pins) : anchors.get(person);

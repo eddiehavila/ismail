@@ -346,5 +346,5 @@ export function initActions(ed, hands, panels, live, takes) {
       ed.select(null, 'idle');
     }
   }
-  return { update, show, touchUse, countdown };
+  return { update, show, touchUse, countdown, followPanel };
 }

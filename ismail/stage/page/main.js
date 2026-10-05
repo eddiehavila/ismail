@@ -73,7 +73,15 @@ live.handlers.take_view_clear = () => takes4d.clear();
 const actors = initActors(ed, live);
 actors.setSource(() => hands.frameNow());   // live follow: the user's body this moment
 // countdown: seconds to count before it starts, so the user can take the pose first (the menu's Follow counts 3)
-live.handlers.actor_follow = async (c) => { if (c.countdown) await actions.countdown(c.countdown, c.person); return actors.follow(c); };
+// an agent's Follow opens the Follow panel too (Stop, Mic off): one an agent began had none, and the user was stuck
+// inside its performance for seven minutes (2026-10-05)
+live.handlers.actor_follow = async (c) => {
+  if (c.countdown) await actions.countdown(c.countdown, c.person);
+  const r = await actors.follow(c);
+  const it = ed.byName.get(c.person);
+  if (it) actions.followPanel(it);
+  return r;
+};
 const perform = initPerform(ed, hands, voice, live, () => actors);   // a Follow is a performance (perform.js)
 window.VR_perform = perform;
 xr.setPerforming(() => hands.performing);
@@ -119,6 +127,13 @@ const startTake = (name) => {
   return r;
 };
 const stopTake = async () => { const r = await hands.stopTake(); if (r && r.id) voice.takeAudioStop(); return r; };
+// a performance's way out (perform.js stopAll): the take recording with it, then the Follow (whose actor_stop ends the
+// performance below)
+perform.setStopAll(async (person, by) => {
+  const take = hands.rec.on ? await stopTake().catch(() => null) : null;
+  actors.stop({ person, why: 'stopped: ' + by });
+  return { stopped: person, by, take: take && take.id ? take.id : null };
+});
 live.handlers.take_start = (c) => startTake(c.name || '');
 xr.setHandState(hands.state);
 // every Follow is a performance (perform.js) and is buffered in memory on the performance's clock (hands.js); after

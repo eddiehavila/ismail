@@ -340,14 +340,17 @@ def stage_take_view_clear(scene: str) -> str:
 
 @op(mutates=True)
 def stage_actor_play(scene: str, person: str, take: str, actor: str = None, loop: bool = True, rate: float = 1,
-               trim: list = None, in_place: bool = False, assets: str = None, takes: str = None) -> str:
+               trim: list = None, in_place: bool = False, assets: str = None, takes: str = None, voice: bool = None) -> str:
     """Play a take on a person: their skinned body replaces the statue and is driven by the take's head and hands,
     scaled to their height (page command: actor_play). actor defaults from the person (a fixed table in actors.js);
     trim [t0, t1] in the take's seconds defaults to the take's saved trim (the page treats an explicit null as "no
     trim", which a None default here cannot express); in_place plays it where it was recorded instead of where the
-    person stands; assets / takes read the body / take from another scene. Errors: no actor for that person, no take,
-    no frames. Page replies {person, actor, frames, scale}. Emits: actor_stop (a take already on them), actor_play."""
-    return page_cmd(scene, 'actor_play', {'person': person, 'take': take, 'actor': actor, 'loop': loop, 'rate': rate, 'trim': trim, 'in_place': in_place, 'assets': assets, 'takes': takes}, timeout=30)
+    person stands; assets / takes read the body / take from another scene. voice: a take made in a performance plays
+    its recorded voice only on the person it was recorded for (None, the default); True plays it on this body too,
+    False keeps it silent. One clip sounds once however many bodies play the take. Errors: no actor for that person,
+    no take, no frames. Page replies {person, actor, frames, scale}. Emits: actor_stop (a take already on them),
+    actor_play."""
+    return page_cmd(scene, 'actor_play', {'person': person, 'take': take, 'actor': actor, 'loop': loop, 'rate': rate, 'trim': trim, 'in_place': in_place, 'assets': assets, 'takes': takes, 'voice': voice}, timeout=30)
 
 
 @op(mutates=True)
@@ -536,18 +539,21 @@ def stage_perform(scene: str, action: str = 'state', label: str = None) -> str:
     no gesture acts (pokes still press panels), your speech is shown and not spoken (stage_say aloud=True speaks), and
     the mic records from the first moment in clips on the Follow's clock (seconds since it began). action:
     'state' (default): {performing, perf, person, seconds, mic, clip, clips, markers, take};
+    'stop': end the whole performance: the Follow, and a take recording with it (the person can too: both thumbs down
+    held 1.5 s, saying "stop the performance", or Stop on the Follow panel, which opens however the Follow began);
     'stop_clip': end the clip now so it is transcribed (the person goes on; the mic waits for start_clip);
     'start_clip': record the next clip (turns the mic back on);
     'next_clip': stop_clip then start_clip in one step (read one part while recording the next);
     'mic_off': end the clip and leave the mic off (start_clip turns it on);
     'mark': a marker with label= at this moment on the Follow clock.
-    A stopped clip arrives as event perform_clip {perf, clip, at, seconds, text, words: [[word, start, end]]} with
+    Clips also cut themselves at the first pause after 6 s, or at 25 s, so the words arrive while they go on: each
+    perform_clip with words also reaches stage_listen. A stopped clip arrives as event perform_clip {perf, clip, at, seconds, text, words: [[word, start, end]]} with
     word times on the Follow clock, snapped onto the measured voice; stage_performance reads a whole performance. The
     Follow panel has Mic off / Mic on for the person. Errors: nobody follows the person; the mic is not allowed.
-    Emits: perform_clip_start, perform_clip_stop, perform_mic, perform_mark (and from the server perform_clip_in,
-    perform_clip)."""
-    if action not in ('state', 'stop_clip', 'start_clip', 'next_clip', 'mic_off', 'mark'):
-        raise OpError("action is 'state', 'stop_clip', 'start_clip', 'next_clip', 'mic_off' or 'mark'")
+    Emits: perform_clip_start, perform_clip_stop, perform_mic, perform_mark, perform_stop_asked, perform_stop (and
+    from the server perform_clip_in, perform_clip)."""
+    if action not in ('state', 'stop', 'stop_clip', 'start_clip', 'next_clip', 'mic_off', 'mark'):
+        raise OpError("action is 'state', 'stop', 'stop_clip', 'start_clip', 'next_clip', 'mic_off' or 'mark'")
     if action == 'mark' and not label:
         raise OpError("mark needs label= (what happens at this moment)")
     return page_cmd(scene, 'perform', {'action': action, 'label': label}, timeout=30)

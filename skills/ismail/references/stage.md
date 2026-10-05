@@ -212,6 +212,10 @@ A person in a headset cannot see your terminal. Contact is part of the interface
   clock) while the next one records. Mark moments with `action="mark"`. Do not speak (a line is shown, not said,
   unless `aloud=True` because they asked you something). After the Follow it plays back on the person with the
   voice; read the whole thing with `stage_performance`.
+- **A performance always has a way out.** Clips cut themselves at pauses, so their words reach `stage_listen` while
+  it runs: listen during it, and when they ask to stop, `stage_perform(action="stop")` (it ends the Follow and a take
+  with it). They can also stop it themselves: both thumbs down held, saying "stop the performance", or Stop on the
+  Follow panel. A take borrowed onto another body plays silent unless `stage_actor_play(voice=True)`.
 - **Give the person the control they need, and change it as you go.** Ask how they want to drive a part
   ("his feet with your hands?"), then `stage_control_set` it: `effector` for an arm or a leg (relative: their hand's
   motion becomes his foot's), `touch=True` so they start when ready, `pin` to keep a hand on the bar, `hold` to keep
