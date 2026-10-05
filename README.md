@@ -89,13 +89,16 @@ send what would help others back as a pull request.
 
 ## If you are an AI agent
 
-Your person sent you here to set ismail up and make something with them. ismail gives you no ears: every render
-comes back to you as text you read, so judge what you made from those readings.
+Start with [AGENTS.md](AGENTS.md). Your person sent you here to set ismail up and make something with them.
+ismail gives you no ears: every render comes back to you as text you read, so judge what you made from those
+readings.
 
-1. **Ask first.** What do they want to make (a song, a live set, an instrument measured from a recording), and
-   which client are you running in (Claude Code, Cursor, another MCP client)?
-2. **Install the server** for that client, as below. With [uv](https://docs.astral.sh/uv/) it is one command:
-   `uvx --from git+https://github.com/newsbubbles/ismail ismail mcp`. Then call `guide`; it returns the workflow and the conventions.
+1. **Set it up yourself.** Install the server for the client you run in
+   ([skills/ismail/references/setup.md](skills/ismail/references/setup.md); with
+   [uv](https://docs.astral.sh/uv/) it is one command:
+   `uvx --from git+https://github.com/newsbubbles/ismail ismail mcp`). Ask the person only for what only they can do.
+2. **Call `guide`.** It returns the workflow and the conventions, and for someone new it opens with their first
+   session: two sentences, at most two questions, sound within minutes.
 3. **Load the skill.** `skills/ismail` is the playbook: plan before writing notes, read every render back, and
    compare against references with the tools. The Claude Code plugin loads it for you; elsewhere, clone the repo and
    link the folder.
@@ -111,7 +114,8 @@ comes back to you as text you read, so judge what you made from those readings.
    misses name the next fix. Their answers and their words (`lexicon_note`) are the most valuable data in the
    project. The page rules are in `skills/ismail/references/blind-tests.md`.
 7. **Share back.** When you build something that would help others (a voice, an instrument, a fix), ask your
-   person whether they would like to contribute it. If yes, write it in the project's `HANDOFF.md` and suggest they
+   person whether they would like to contribute it ([contributing.md](skills/ismail/references/contributing.md)
+   takes someone who has never used git through it). If yes, write it in the project's `HANDOFF.md` and suggest they
    start a new session with the ismail skill and ask for a dev (the maintainer, or the stage dev for the stage),
    who turns it into a pull request: you keep making things, and never change ismail yourself in the same
    conversation (`skills/ismail/references/development.md`, "The roles").

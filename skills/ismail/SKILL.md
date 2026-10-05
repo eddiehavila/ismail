@@ -160,6 +160,11 @@ nudges you, follow it.
 - `references/music-video.md`: music videos with `ismail.video`: the per-song `video/` folder, the CLI, the shot kit (units, floors, posing, mirrors, GPU budget), the cut list and note-driven glitches, contact-sheet review and the creative rules. Read before planning any video.
 - `references/maintainer.md`, `references/stage-dev.md`: the dev roles' routines and lessons, for a session the
   person asked to be the maintainer or the stage dev.
+- `references/setup.md`: setting ismail up on a person's machine yourself: what to check, what to install, the
+  prompts only they can answer, proving it with a sound they hear, and what to do when a step fails.
+- `references/contributing.md`: sending something back for a person who has never used git: in the studio
+  (review, ask, `HANDOFF.md`, the sentence that starts a new conversation), then through GitHub (an account,
+  `gh auth login`, fork and pull request done for them) or without it (a bundle).
 - `references/development.md`: only for changing ismail itself, when the user asks: worktrees, the collaboration must-haves (what is not yours is not touched, nothing unmerged is deleted, the user merges), the roles as a multi-agent system (the user, song agents, the dev agent, subagents: who owns and writes what), the migration loop (intake with `python -m ismail.handoffs`, the ledger in `songs/_migration/`, the user decides, build, announce to the sessions, close), the inclusion review (general? may it be public? anything measured from the user needs their yes first), preparing a voice or an engine for ismail, API changes a song asks for, the handoff format.
 - `references/LOCAL.md`, if it exists: an index of the user's private references kept on this machine only (never committed). Read it at the start of a task; it says which private file covers which kind of song.
 
