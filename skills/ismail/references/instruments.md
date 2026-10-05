@@ -18,6 +18,7 @@ Reference audio is for measuring. Never place it in the render.
 | route | when | how |
 |---|---|---|
 | library voice or profile | `voices_list` has it (grand_piano, growl, sfx, electric, kit70, mimic profiles ...) | `voice_help(name)` / `instrument_help(type='mimic')`; set params, and for a performer add the rig `voice_help` lists; done |
+| sampled library voice | a Rhodes (`rhodes`), a real acoustic kit (`rusty`), a clean electric guitar (`emily`): real multisamples played note by note | `samples_list` says whether its set is here; if not, tell the person its size and licence and `samples_fetch(<set>)` only on their yes (the Rhodes samples are CC BY-NC: free for their music, not for redistribution) |
 | mimic | you have a few isolated recorded notes of the instrument (bowed, blown, sung work best) | `mimic_measure(name, folder=...)` (one note per file, named by pitch), read its leave-one-out report, then `{"type": "mimic", "profile": name}`; pass the open strings as `defaults` for bowed strings |
 | measured voice | the instrument needs a mechanism mimic lacks (touch harmonics, articulations picked by velocity, a crowd, foley) | write `<project>/voices/<name>.py` from the principles below, fit its params to the example |
 | sampler | you have a clean recording of the exact sound and one pitch or a few pitches is enough (a hit, a stab, a vocal chop) | `sound_import`, then a `sampler` track (or a `kit` mapping pitches to samplers) |

@@ -1,5 +1,5 @@
 {
- "about": "The voices a first sketch reaches for: each one measured from real recordings or fitted against a record, so a newcomer's first sound is never a console patch. guide shows this list to a new person, voices_list marks these with *, and sketch builds only from them. Add a voice when it is measured and has passed an ear test.",
+ "about": "The voices a first sketch reaches for: each one measured from real recordings or fitted against a record, so a newcomer's first sound is never a console patch. guide shows this list to a new person, voices_list marks these with *, and sketch builds only from them. Add a voice when it is measured and has passed an ear test. A voice with `needs` plays samples fetched on the person's word (samples_fetch); until then sketch uses its `standin` and says so.",
  "voices": [
   {
    "name": "grand_piano",
@@ -145,12 +145,224 @@
     "bass"
    ],
    "why": "designed by ear: electronic (dubstep) only, never in an acoustic sketch"
+  },
+  {
+   "name": "rhodes",
+   "family": "keys",
+   "instrument": {
+    "type": "code",
+    "voice": "rhodes",
+    "tail": 4.0,
+    "params": {
+     "level": 1.0
+    }
+   },
+   "fx": [
+    {
+     "type": "eq",
+     "bands": [
+      {
+       "type": "lowcut",
+       "freq": 75
+      },
+      {
+       "type": "peak",
+       "freq": 170,
+       "gain_db": 2.0,
+       "q": 0.8
+      },
+      {
+       "type": "highshelf",
+       "freq": 4500,
+       "gain_db": -5
+      }
+     ]
+    },
+    {
+     "type": "amp",
+     "gain": 2.0,
+     "volume": 5.0,
+     "bass": 6,
+     "mid": 5,
+     "treble": 4,
+     "presence": 3,
+     "bright": 0.0,
+     "sag": 0.4
+    },
+    {
+     "type": "tremolo",
+     "rate_beats": 0.5,
+     "depth": 0.5,
+     "shape": "sine",
+     "mode": "pan"
+    },
+    {
+     "type": "chorus",
+     "rate_hz": 0.5,
+     "depth_ms": 2.0,
+     "delay_ms": 10,
+     "mix": 0.25
+    }
+   ],
+   "needs": "jrhodes3d",
+   "standin": "grand_piano",
+   "range": "A0-C8",
+   "roles": [
+    "keys"
+   ],
+   "why": "a real 1977 Rhodes Mark I, sampled (jRhodes3d, Jeff Learman), through amp, pan tremolo and chorus"
+  },
+  {
+   "name": "rusty",
+   "family": "drums",
+   "instrument": {
+    "type": "code",
+    "voice": "rusty",
+    "tail": 4.0,
+    "params": {
+     "oh_db": -9.0,
+     "btm_db": -12.0,
+     "bleed_db": -22.0,
+     "humanize_ms": 2.0,
+     "kick_tune": -1.0,
+     "snare_tune": -1.5,
+     "ride_db": -1.0,
+     "crash_db": -8.0
+    }
+   },
+   "fx": [
+    {
+     "type": "eq",
+     "bands": [
+      {
+       "type": "lowcut",
+       "freq": 32
+      },
+      {
+       "type": "peak",
+       "freq": 115,
+       "gain_db": 4.0,
+       "q": 0.9
+      },
+      {
+       "type": "peak",
+       "freq": 420,
+       "gain_db": -2.5,
+       "q": 1.0
+      },
+      {
+       "type": "highshelf",
+       "freq": 7000,
+       "gain_db": 1.5
+      }
+     ]
+    }
+   ],
+   "needs": "big_rusty",
+   "standin": "kit70",
+   "range": "GM drum map",
+   "roles": [
+    "drums"
+   ],
+   "why": "a real 1980s kit, sampled (Big Rusty Drums, Karoryfer, CC0): velocity layers, round robins, its mics"
+  },
+  {
+   "name": "emily",
+   "family": "guitar",
+   "instrument": {
+    "type": "code",
+    "voice": "emily",
+    "tail": 4.0,
+    "params": {
+     "mono": true,
+     "release_db": -24.0,
+     "humanize_ms": 2.0
+    }
+   },
+   "fx": [
+    {
+     "type": "amp",
+     "gain": 2.5,
+     "volume": 5.0,
+     "bass": 5,
+     "mid": 6,
+     "treble": 7,
+     "presence": 5,
+     "bright": 0.6,
+     "sag": 0.3
+    },
+    {
+     "type": "cab",
+     "mic": 0.3,
+     "low_hz": 95,
+     "high_hz": 6500,
+     "presence_db": 4.0,
+     "breakup": 0.6,
+     "width": 0.4
+    },
+    {
+     "type": "eq",
+     "bands": [
+      {
+       "type": "lowcut",
+       "freq": 140
+      },
+      {
+       "type": "peak",
+       "freq": 2600,
+       "gain_db": -1.5,
+       "q": 1.0
+      }
+     ]
+    },
+    {
+     "type": "compressor",
+     "threshold_db": -24,
+     "ratio": 3.0,
+     "attack_ms": 2,
+     "release_ms": 140,
+     "makeup_db": 2.0
+    },
+    {
+     "type": "delay",
+     "time_beats": 0.75,
+     "feedback": 0.3,
+     "mix": 0.2,
+     "lp_hz": 3200,
+     "hp_hz": 300,
+     "pingpong": true
+    }
+   ],
+   "needs": "emilyguitar",
+   "standin": "strat70_clean",
+   "range": "Db2-D6",
+   "roles": [
+    "melody"
+   ],
+   "why": "a real clean electric guitar, sampled (Emilyguitar, Karoryfer, CC0), through a clean amp and a pingpong delay"
+  },
+  {
+   "name": "crackle",
+   "family": "fx",
+   "instrument": {
+    "type": "code",
+    "voice": "crackle",
+    "tail": 0.5,
+    "params": {
+     "clicks_per_s": 5.0,
+     "hiss_db": -12.0
+    }
+   },
+   "range": "one long note",
+   "roles": [
+    "fx"
+   ],
+   "why": "designed vinyl surface noise: clicks and hiss, under the whole sketch"
   }
  ],
  "never_first": "the other synth presets (the sprite `synth` type): a first sketch on them sounds like a game console",
  "gaps": [
-  "an electric piano (Rhodes, Wurlitzer)",
-  "a real-sample acoustic kit (brushes, lo-fi)",
+  "a brushes kit",
   "a pad or ambient voice",
   "a singing voice (vox is in progress)",
   "winds and brass (flute, sax, trumpet)"

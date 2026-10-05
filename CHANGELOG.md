@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### Sampled voices: a Rhodes, a real kit, a clean guitar, vinyl crackle (from udio_ab_01)
+
+- `rhodes` (keys): jRhodes3d by Jeff Learman, a 1977 Rhodes Mark I DI, 5 velocity layers. `rusty` (drums): Big
+  Rusty Drums by Karoryfer, velocity layers, round robins and mics; a missing piece is skipped, not a crash.
+  `emily` (guitar): Emilyguitar by Karoryfer, a clean DI guitar with legato, bends and vibrato lanes. `crackle`
+  (fx): designed vinyl surface noise. Moved from the udio_ab_01 song, which made the same trip-hop brief.
+- The samples stay out of the repo (`ismail/samples.py`): `samples_list` shows each set, its size and licence;
+  `samples_fetch(name)` downloads it into `~/.ismail/samples` ($ISMAIL_SAMPLES) on the person's yes, or registers a
+  folder that already holds it. A voice whose set is missing says what to fetch. Licences: Big Rusty and
+  Emilyguitar are CC0; jRhodes3d samples are CC BY-NC 4.0 (the author grants CC0 for music made with them), so
+  ismail ships the voice's code only.
+- `sketch` reaches for them: a Rhodes, a breakbeat or live kit, a clean or bluesy guitar, vinyl or dust in a brief.
+  When a set is not on the machine it plays the stand-in (grand_piano, kit70, the fitted strat) and says what to
+  fetch, how big, under what licence. showcase.json lists them with their fx chains. 183 tools.
+
 ### `sketch` reads the brief (M110, from the first cold-start run)
 
 - A brief's tempo, key, genre (trip-hop, hip-hop, house, jazz, rock, ambient ...), instruments and form (intro,

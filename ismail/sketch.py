@@ -30,11 +30,13 @@ MOTIF_RHYTHMS = [   # (start beat, length) over two bars of 4/4; none of them on
 # (role, voice) -> register and fader; a role with no entry for its voice uses the role's default
 REG = {'melody': (62, 84), 'keys': (55, 72), 'harmony': (36, 60), 'counter': (48, 64), 'pad': (45, 62),
        'bass': (28, 50), 'sub': (26, 40), 'chords': (52, 67)}
-REG_VOICE = {('melody', 'strat70_clean'): (57, 79), ('bass', 'contrabass'): (31, 48), ('melody', 'violin'): (62, 84)}
+REG_VOICE = {('melody', 'strat70_clean'): (57, 79), ('melody', 'emily'): (57, 81), ('bass', 'contrabass'): (31, 48),
+             ('melody', 'violin'): (62, 84), ('keys', 'rhodes'): (52, 72)}
 LEVEL = {('drums', 'kit70'): 7.0, ('bass', 'pbass70'): -9.0, ('bass', 'contrabass'): -6.0, ('sub', 'sub_bass'): -11.0,
          ('keys', 'grand_piano'): -7.0, ('melody', 'grand_piano'): 0.0, ('melody', 'violin'): -1.0,
          ('melody', 'strat70_clean'): 1.0, ('counter', 'cello'): 1.0, ('pad', 'cello'): -3.0,
-         ('chords', 'strat70_rhythm'): -3.0, ('harmony', 'grand_piano'): -10.0}
+         ('chords', 'strat70_rhythm'): -3.0, ('harmony', 'grand_piano'): -10.0, ('keys', 'rhodes'): -12.0,
+         ('drums', 'rusty'): 5.0, ('melody', 'emily'): 0.0, ('fx', 'crackle'): -6.0}
 
 # the three styles a vague brief gets, as specs
 STYLES = {
@@ -51,11 +53,11 @@ ORDER = ['piano', 'chamber', 'band']
 
 # words in a brief -> (role, showcase voice, what to say when the voice stands in for what was asked)
 INSTRUMENTS = [
-    (r'rhodes|electric piano|e-piano|wurli\w*|epiano', 'keys', 'grand_piano',
-     'no electric piano (Rhodes) voice yet: grand_piano plays its part'),
+    (r'rhodes|electric piano|e-piano|epiano', 'keys', 'rhodes', None),
+    (r'wurli\w*', 'keys', 'rhodes', 'no Wurlitzer voice yet: the Rhodes plays its part'),
     (r'organ|hammond', 'keys', 'grand_piano', 'no organ voice yet: grand_piano plays its part'),
     (r'(?:clean |bluesy |blues |lead |melodic |jazz )+guitar(?: melody| lead| solo| line)?|guitar (?:melody|lead|solo|line)',
-     'melody', 'strat70_clean', None),
+     'melody', 'emily', None),
     (r'(?:rhythm )?guitars?', 'chords', 'strat70_rhythm', None),
     (r'(?:deep |big |heavy )?sub(?:[- ]?bass)?|808s?', 'sub', 'sub_bass', None),
     (r'upright(?: bass)?|double bass|contrabass|acoustic bass', 'bass', 'contrabass', None),
@@ -69,7 +71,9 @@ INSTRUMENTS = [
      'no {word} voice yet: violin plays the line'),
     (r'vocals?|singer|singing|voice|rap\w*|choir', None, None,
      'no singing voice in the showcase yet: {word} left out (say it to the person)'),
-    (r'breakbeats?|breaks|boom[- ]?bap|drums?|kit|beat|percussion|hats|hi-?hats?|ride', 'drums', 'kit70', None),
+    (r'vinyl(?: crackle)?|crackle|record noise|surface noise|dusty', 'fx', 'crackle', None),
+    (r'breakbeats?|breaks|boom[- ]?bap|live drums|acoustic drums|sampled (?:kit|drums)', 'drums', 'rusty', None),
+    (r'drums?|kit|beat|percussion|hats|hi-?hats?|ride', 'drums', 'kit70', None),
 ]
 GENRES = [   # words -> feel, tempo range, the parts a genre brings when the brief names none
     (r'trip[- ]?hop|downtempo', 'break', (84, 94), ['drums', 'bass', 'keys', 'melody'], True),
@@ -87,7 +91,7 @@ SECTIONS = {'intro': 'intro', 'verse': 'groove', 'groove': 'groove', 'main': 'gr
             'hook': 'groove', 'drop': 'groove', 'breakdown': 'breakdown', 'break down': 'breakdown',
             'bridge': 'breakdown', 'build': 'build', 'buildup': 'build', 'return': 'groove', 'reprise': 'groove',
             'outro': 'outro', 'fade': 'outro', 'ending': 'outro'}
-ROLE_ORDER = ['drums', 'sub', 'bass', 'chords', 'keys', 'harmony', 'pad', 'counter', 'melody']
+ROLE_ORDER = ['drums', 'sub', 'bass', 'chords', 'keys', 'harmony', 'pad', 'counter', 'melody', 'fx']
 
 
 class SketchError(ValueError):
@@ -220,6 +224,7 @@ def read_brief(brief):
             if role == 'bass' and 'sub' in spec['parts']:
                 continue
             spec['parts'].setdefault(role, DEFAULT_VOICE[role])
+    _stand_ins(spec)
     spec['asked'] = sorted(spec['parts'])                    # what the words named, before any default fills in
     if spec['parts'] and 'melody' not in spec['parts']:
         spec['parts']['melody'] = 'grand_piano'               # every sketch carries a tune
@@ -246,6 +251,31 @@ def _roles_named(word, parts):
         if re.fullmatch(pat, word.split()[-1], re.I):
             out += [r for r, v in parts.items() if fam.get(v) == family or (family == 'drums' and r == 'drums')]
     return list(dict.fromkeys(out))
+
+
+def ready(voice):
+    """A showcase voice can play here: it needs no samples, or its sample set is on this machine."""
+    v = next((x for x in showcase()['voices'] if x['name'] == voice), None)
+    if not v or not v.get('needs'):
+        return True
+    from . import samples
+    return samples.path(v['needs']) is not None
+
+
+def _stand_ins(spec):
+    """Swap a sampled voice whose samples are not here for its stand-in, and say how to get the real one."""
+    from . import samples
+    sc = {v['name']: v for v in showcase()['voices']}
+    for role, voice in list(spec['parts'].items()):
+        v = sc.get(voice, {})
+        if v.get('needs') and not ready(voice):
+            st = samples.SETS[v['needs']]
+            spec['parts'][role] = v['standin']
+            line = (f"the {voice} voice plays real samples not on this machine yet ({st['what']}): ask the person, "
+                    f"then samples_fetch('{v['needs']}') (~{st['size_mb']} MB, {st['licence']}); {v['standin']} "
+                    f"plays it for now")
+            if line not in spec['said']:
+                spec['said'].append(line)
 
 
 def apply_words(base, words):
@@ -571,6 +601,8 @@ def plan_spec(spec, brief='', seed=0, variant=0, bars=None, progression=None, la
             notes = subline(chords, reg, rng, feel)
         elif role == 'chords':
             notes = stabs(chords, reg, rng)
+        elif role == 'fx':
+            notes = [(0, 0, 60, bars * 4, 72)]
         else:
             notes = []
             for b in range(bars):
@@ -583,7 +615,7 @@ def plan_spec(spec, brief='', seed=0, variant=0, bars=None, progression=None, la
         keep = []
         for n in notes:
             b = n[0]
-            if role != 'drums' and role not in ACTIVE[secs[b]]:
+            if role not in ('drums', 'fx') and role not in ACTIVE[secs[b]]:
                 continue
             if secs[b] == 'outro':                           # the outro fades: velocity falls across it
                 first = secs.index('outro')
