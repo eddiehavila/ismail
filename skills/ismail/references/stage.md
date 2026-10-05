@@ -210,6 +210,11 @@ A person in a headset cannot see your terminal. Contact is part of the interface
   clock) while the next one records. Mark moments with `action="mark"`. Do not speak (a line is shown, not said,
   unless `aloud=True` because they asked you something). After the Follow it plays back on the person with the
   voice; read the whole thing with `stage_performance`.
+- **Give the person the control they need, and change it as you go.** Ask how they want to drive a part
+  ("his feet with your hands?"), then `stage_control_set` it: `effector` for an arm or a leg (relative: their hand's
+  motion becomes his foot's), `touch=True` so they start when ready, `pin` to keep a hand on the bar, `hold` to keep
+  a part still, `mimic` for a turn (a fingertip into a tail). Seated is a hips pin plus the legs' drives. When a map
+  works, save it to the actor (`stage_actor_map_save`); a "default" map is ready every Follow.
 - **Set up a moment in one call.** `stage_batch(scene, ops=[...])` runs several stage ops in order (seat a person,
   mark the clip, show a card): the page commands land together, and a failure stops the rest.
 - **Say who you are.** Pass `sender=` (your name as the person knows it, e.g. "crossroads film") on `stage_say` and

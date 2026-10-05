@@ -379,6 +379,59 @@ def stage_performance(scene: str, perf: str = None) -> str:
     return out
 
 
+
+def _body_of(scene, person):
+    """(actors folder, body name) for a person in a scene: world.json actors says which body plays them; a derived
+    scene's bodies are in its assets scene."""
+    from .world import load_world
+    d = Path(link.server_for(scene)['scenes'])
+    w = load_world(d, scene)
+    who = (w.get('actors') or {}).get(person)
+    if not who:
+        raise OpError(f'no body for {person!r} in {scene}: world.json actors casts {sorted(w.get("actors") or {})}')
+    return d / (w.get('assets') or scene) / 'actors', who
+
+
+@op()
+def stage_actor_profile(scene: str, person: str) -> str:
+    """A person's actor profile (person= the scene's person, as for stage_control_set; world.json actors says which
+    body plays them): the rig type read from the body, its named parts (bone chains, parents first; arms and legs can
+    reach) and the control maps saved for it. The profile lives beside the body (actors/<body>.json next to
+    <body>.glb), so it goes wherever the body goes, to whoever it plays. stage_actor_map_save stores a map;
+    stage_control_map(preset=) applies one."""
+    from . import rigs
+    adir, who = _body_of(scene, person)
+    try:
+        return json.dumps(rigs.profile(adir, who), indent=1)
+    except FileNotFoundError:
+        raise OpError(f'{person} is played by {who}, but there is no {adir.parent.name}/actors/{who}.glb')
+
+
+@op(mutates=True)
+def stage_actor_map_save(scene: str, person: str, name: str, pins: dict = None, drives: list = None) -> str:
+    """Save a control map on a person's actor (in the body's profile, actors/<body>.json; the previous file kept as
+    .json.prev), to apply later with stage_control_map(preset=name). pins: {"hips": "<seat object>" | [x, y, z],
+    "foot_l": ..., "foot_r": ..., "feet": ...}; drives: [{part, mode, joint, at, scale, touch}] as for
+    stage_control_set, each checked against the body's parts. A map named "default" applies by itself when a Follow
+    of anyone this body plays starts and nothing was set in the session."""
+    from . import rigs
+    adir, who = _body_of(scene, person)
+    if not (pins or drives):
+        raise OpError('a map needs pins= or drives= (or both)')
+    try:
+        prof = rigs.profile(adir, who)
+        checked = [rigs.check_drive(x, prof['parts']) for x in drives or []]
+    except FileNotFoundError:
+        raise OpError(f'{person} is played by {who}, but there is no {adir.parent.name}/actors/{who}.glb')
+    except ValueError as e:
+        raise OpError(str(e))
+    if set(pins or {}) - {'hips', 'foot_l', 'foot_r', 'feet'}:
+        raise OpError("pins are hips, foot_l, foot_r or feet")
+    f = rigs.save_map(adir, who, name, {**({'pins': pins} if pins else {}), **({'drives': checked} if checked else {})})
+    return (f'saved map {name!r} on {who} (plays {person}) in {f}: {len(checked)} drives, pins: {", ".join(pins or {}) or "none"}; '
+            f'presets now: {", ".join(rigs.profile(adir, who)["maps"])}')
+
+
 NOT_IN_BATCH = {'stage_batch', 'stage_start', 'stage_stop', 'stage_listen', 'stage_scene_export', 'stage_scene_new',
                 'stage_scene_go'}
 
