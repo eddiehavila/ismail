@@ -3,6 +3,7 @@
 // hand lets go. Events Claude reads: touch (a new target held a moment), grab, release (how far it moved and turned).
 import * as THREE from 'three';
 import { GIZMO } from './editor.js';
+import { cyclePick } from './pickcycle.js';
 
 const REACH = 0.04;                    // metres: the pinch point or palm this close to an object's box touches it
 const PINCH_ON = 0.02, PINCH_OFF = 0.04;
@@ -34,19 +35,21 @@ export function initTouch(ed, xrApi, hands, emit) {
   // the building's fixed parts (manifest `locked`, set in Blender as vr_lock) are never taken by a hand
   const isLocked = (it) => !!(it && it.path && it.path.some((x) => x.man && x.man.locked));
   // the smallest box the point is in (or within REACH of): the most specific thing the hand is on
-  function nearAt(pt) {
-    let best = null;
-    for (const x of boxes) {
-      const d = x.b.distanceToPoint(pt);
-      if (d < REACH && (!best || x.vol < best.vol)) best = { ...x, d };
+  // everything the point is in, smallest box first, one entry per whole thing (pickcycle.js takes the next on a
+  // second pinch at the same point)
+  function nearAll(pt) {
+    const out = [];
+    const hits = boxes.map((x) => ({ x, d: x.b.distanceToPoint(pt) })).filter((h) => h.d < REACH).sort((a, b) => a.x.vol - b.x.vol);
+    for (const { x, d } of hits) {
+      // a hand takes the whole thing (the person, the stool, the mic stand), never a piece inside it: the desktop's
+      // click-again-to-go-deeper made a second grab take the mic stand's inner mesh, which then jumped
+      const path = x.it.path ? x.it.path.filter((y) => !y.big) : [];
+      const item = path[0] || x.it;
+      if (!out.some((n) => n.item === item)) out.push({ item, leaf: x.it, dist: d, locked: isLocked(item) });
     }
-    if (!best) return null;
-    // a hand takes the whole thing (the person, the stool, the mic stand), never a piece inside it: the desktop's
-    // click-again-to-go-deeper made a second grab take the mic stand's inner mesh, which then jumped
-    const path = best.it.path ? best.it.path.filter((x) => !x.big) : [];
-    const item = path[0] || best.it;
-    return { item, leaf: best.it, dist: best.d, locked: isLocked(item) };
+    return out;
   }
+  const nearAt = (pt) => nearAll(pt)[0] || null;
 
   // ---- one hand's joints, read fresh (select events can come before this frame's update)
   const ctlOf = (side) => xrApi.ctls.find((s) => s.src && s.src.handedness === side && s.src.hand && s.hand.joints && s.hand.joints.wrist);
@@ -194,7 +197,14 @@ export function initTouch(ed, xrApi, hands, emit) {
           if (!(held[side].how === 'pinch' ? pinch : fist)) release(side);
           else follow(side, p);
         } else if (rose && !hands.state[side].resting && !hands.performing) {   // perform.js: no grabs while performing
-          const n = rose === 'pinch' ? nearAt(p.pinchPt) || nearAt(p.palm) : nearAt(p.palm) || nearAt(p.pinchPt);
+          let pt = null, all = [];
+          for (const q of rose === 'pinch' ? [p.pinchPt, p.palm] : [p.palm, p.pinchPt]) {
+            all = nearAll(q);
+            if (all.length) { pt = q; break; }
+          }
+          const free = all.filter((x) => !x.locked);
+          const pick = pt && cyclePick(pt, free.map((x) => x.item), 'touch');
+          const n = pick ? free.find((x) => x.item === pick) : all[0];
           if (n && !n.locked && ed.canMove(n.item)) grab(side, n, rose, p);
           else if (n && !n.locked && rose === 'pinch' && ed.selected !== n.item) ed.select(n.item, 'touch');   // its menu opens
         }

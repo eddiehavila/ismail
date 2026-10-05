@@ -17,6 +17,16 @@ There are two kinds of test. Use both, in this order.
 | use when | the numbers plateau and you need a direction | you think you are close and need to know if you are done |
 | score | the words the user uses | the share of trials the user could not decide |
 
+## 0. Before any exam reaches the person: `exam_check`
+
+Run `exam_check` on every exam before you show it, and show it only on READY: `exam_check(page='<the page or its
+URL>', key={'<clip label or file>': '<its class>'}, secrets=['<source names>'], submit_url='<the page Submit>',
+answers_path='<where you read answers>')`. It fails a page whose clips are missing or do not decode, whose loudness
+spreads more than 1 LU, whose answer can be read from anything but the sound (file names, URLs, metadata, the page
+source or a key file it loads, formats, lengths or order that follow the key), or whose Submit lands somewhere you
+don't read. `phone_exam` runs it itself. A WARN is a likely tell: fix it, or say why it can't be fixed. The round trip
+leaves one answer line marked `preflight`: skip it when scoring.
+
 ## 1. The eye exam: lenses that change one thing
 
 Put the real sound next to lenses, versions that each change exactly ONE named, physical thing (body colour, wood ring, room, open strings, pick or bow noise, brightness, attack, vibrato, evenness). The names become the user's vocabulary for the rest of the session: "B, but more air" is an instruction you can execute. Loudness-match every clip and make clips long enough to include the release. One round of this on a bowed voice found three things no metric showed (moving vibrato, missing air, sympathetic strings).

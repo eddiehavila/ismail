@@ -340,14 +340,19 @@ def stage_take_view_clear(scene: str) -> str:
 
 @op(mutates=True)
 def stage_actor_play(scene: str, person: str, take: str, actor: str = None, loop: bool = True, rate: float = 1,
-               trim: list = None, in_place: bool = False, assets: str = None, takes: str = None) -> str:
+               trim: list = None, in_place: bool = False, assets: str = None, takes: str = None, voice: bool = None,
+               mirror: bool = None) -> str:
     """Play a take on a person: their skinned body replaces the statue and is driven by the take's head and hands,
     scaled to their height (page command: actor_play). actor defaults from the person (a fixed table in actors.js);
     trim [t0, t1] in the take's seconds defaults to the take's saved trim (the page treats an explicit null as "no
     trim", which a None default here cannot express); in_place plays it where it was recorded instead of where the
-    person stands; assets / takes read the body / take from another scene. Errors: no actor for that person, no take,
-    no frames. Page replies {person, actor, frames, scale}. Emits: actor_stop (a take already on them), actor_play."""
-    return page_cmd(scene, 'actor_play', {'person': person, 'take': take, 'actor': actor, 'loop': loop, 'rate': rate, 'trim': trim, 'in_place': in_place, 'assets': assets, 'takes': takes}, timeout=30)
+    person stands; assets / takes read the body / take from another scene. voice: a take made in a performance plays
+    its recorded voice only on the person it was recorded for (None, the default); True plays it on this body too,
+    False keeps it silent. One clip sounds once however many bodies play the take. mirror: a take plays mirrored as it
+    was recorded (meta.mirror, from the Follow's mirror; None, the default); True or False overrides. Errors: no actor for that person,
+    no take, no frames. Page replies {person, actor, frames, scale}. Emits: actor_stop (a take already on them),
+    actor_play."""
+    return page_cmd(scene, 'actor_play', {'person': person, 'take': take, 'actor': actor, 'loop': loop, 'rate': rate, 'trim': trim, 'in_place': in_place, 'assets': assets, 'takes': takes, 'voice': voice, 'mirror': mirror}, timeout=30)
 
 
 @op(mutates=True)
@@ -359,13 +364,16 @@ def stage_actor_stop(scene: str, person: str, why: str = 'stopped') -> str:
 
 @op(mutates=True)
 def stage_actor_follow(scene: str, person: str, actor: str = None, mode: str = 'place', mirror: bool = False,
-                 assets: str = None) -> str:
+                 assets: str = None, countdown: int = 0) -> str:
     """Make a person move with the person in VR, live, from where they stand (page command: actor_follow). mode:
     place (dances on the spot) | walk (walks as the user walks); mirror reflects left and right. It stops by itself
     when the user goes more than 6 m away. Meant for VR (it reads the live head and hands). Errors: no actor for that
     person, no live body source. Page replies {person, actor, following: true, scale}. Emits: actor_stop (anything
-    already on them), actor_follow; later actor_stop {why: walked_away}."""
-    return page_cmd(scene, 'actor_follow', {'person': person, 'actor': actor, 'mode': mode, 'mirror': mirror, 'assets': assets}, timeout=30)
+    already on them), actor_follow; later actor_stop {why: walked_away}. countdown= seconds counted down in front of
+    the user first (3, 2, 1, GO, with ticks) so they can take the person's pose; the Follow starts from their pose at
+    GO (the menu's Follow and Take count 3). Emits follow_countdown when it begins."""
+    return page_cmd(scene, 'actor_follow', {'person': person, 'actor': actor, 'mode': mode, 'mirror': mirror, 'assets': assets,
+                                            'countdown': countdown or None}, timeout=30 + (countdown or 0))
 
 
 @op(mutates=True)
@@ -533,18 +541,21 @@ def stage_perform(scene: str, action: str = 'state', label: str = None) -> str:
     no gesture acts (pokes still press panels), your speech is shown and not spoken (stage_say aloud=True speaks), and
     the mic records from the first moment in clips on the Follow's clock (seconds since it began). action:
     'state' (default): {performing, perf, person, seconds, mic, clip, clips, markers, take};
+    'stop': end the whole performance: the Follow, and a take recording with it (the person can too: both thumbs down
+    held 1.5 s, saying "stop the performance", or Stop on the Follow panel, which opens however the Follow began);
     'stop_clip': end the clip now so it is transcribed (the person goes on; the mic waits for start_clip);
     'start_clip': record the next clip (turns the mic back on);
     'next_clip': stop_clip then start_clip in one step (read one part while recording the next);
     'mic_off': end the clip and leave the mic off (start_clip turns it on);
     'mark': a marker with label= at this moment on the Follow clock.
-    A stopped clip arrives as event perform_clip {perf, clip, at, seconds, text, words: [[word, start, end]]} with
+    Clips also cut themselves at the first pause after 6 s, or at 25 s, so the words arrive while they go on: each
+    perform_clip with words also reaches stage_listen. A stopped clip arrives as event perform_clip {perf, clip, at, seconds, text, words: [[word, start, end]]} with
     word times on the Follow clock, snapped onto the measured voice; stage_performance reads a whole performance. The
     Follow panel has Mic off / Mic on for the person. Errors: nobody follows the person; the mic is not allowed.
-    Emits: perform_clip_start, perform_clip_stop, perform_mic, perform_mark (and from the server perform_clip_in,
-    perform_clip)."""
-    if action not in ('state', 'stop_clip', 'start_clip', 'next_clip', 'mic_off', 'mark'):
-        raise OpError("action is 'state', 'stop_clip', 'start_clip', 'next_clip', 'mic_off' or 'mark'")
+    Emits: perform_clip_start, perform_clip_stop, perform_mic, perform_mark, perform_stop_asked, perform_stop (and
+    from the server perform_clip_in, perform_clip)."""
+    if action not in ('state', 'stop', 'stop_clip', 'start_clip', 'next_clip', 'mic_off', 'mark'):
+        raise OpError("action is 'state', 'stop', 'stop_clip', 'start_clip', 'next_clip', 'mic_off' or 'mark'")
     if action == 'mark' and not label:
         raise OpError("mark needs label= (what happens at this moment)")
     return page_cmd(scene, 'perform', {'action': action, 'label': label}, timeout=30)
@@ -620,4 +631,14 @@ def stage_control_map(scene: str, person: str, preset: str = None, drives: list 
     return page_cmd(scene, 'control_map', {'person': person, 'preset': preset, 'drives': drives, 'clear': clear or None}, timeout=30)
 
 
-TYPED = {'key_interp': 'stage_key_interp', 'control_set': 'stage_control_set', 'control_map': 'stage_control_map', 'perform': 'stage_perform', 'follow_anchor': 'stage_follow_anchor', 'take_keep_last': 'stage_take_keep_last', 'ack': 'stage_voice_ack', 'actor_follow': 'stage_actor_follow', 'actor_play': 'stage_actor_play', 'actor_stop': 'stage_actor_stop', 'anchor': 'stage_anchor_set', 'anchor_release': 'stage_anchor_release', 'anim_clear': 'stage_anim_clear', 'anim_save': 'stage_anim_save', 'ask': 'stage_ask', 'clear_markers': 'stage_markers_clear', 'clock': 'stage_clock_set', 'cue': 'stage_cue_set', 'cue_remove': 'stage_cue_remove', 'cues_clear': 'stage_cues_clear', 'cues_list': 'stage_cues_list', 'deselect': 'stage_object_deselect', 'drop': 'stage_object_drop', 'eyecam': 'stage_view_eyecam', 'focus': 'stage_view_focus', 'gallery_add': 'stage_gallery_add', 'goto': 'stage_person_goto', 'goto_camera': 'stage_camera_goto', 'growth': 'stage_growth_set', 'highlight': 'stage_object_highlight', 'key': 'stage_key_set', 'key_delete': 'stage_key_delete', 'light': 'stage_light_set', 'look_through': 'stage_view_look_through', 'marker': 'stage_marker_set', 'music': 'stage_music', 'panel': 'stage_panel_show', 'panel_close': 'stage_panel_close', 'reload': 'stage_scene_reload', 'say': 'stage_say', 'scene_go': 'stage_scene_go', 'scene_list': 'stage_scene_list', 'select': 'stage_object_select', 'set': 'stage_object_set', 'sky': 'stage_sky_set', 'snapshot': 'stage_view_snapshot', 'stream': 'stage_stream', 'take_start': 'stage_take_start', 'take_stop': 'stage_take_stop', 'take_view': 'stage_take_view', 'take_view_clear': 'stage_take_view_clear', 'timeline': 'stage_timeline_show', 'trees_reload': 'stage_trees_reload', 'undo': 'stage_edit_undo', 'voice_rec': 'stage_voice_note', 'walk': 'stage_view_walk', 'waypoint': 'stage_waypoint_set', 'waypoint_go': 'stage_waypoint_go', 'waypoint_remove': 'stage_waypoint_remove', 'waypoints_clear': 'stage_waypoints_clear', 'waypoints_list': 'stage_waypoints_list'}
+@op()
+def stage_actor_pose(scene: str, person: str, t: float = None) -> str:
+    """Where a person's joints are, in Blender metres (page command: actor_pose): pelvis, spine_03, head, lowerarm_l/r,
+    hand_l/r, calf_l/r, foot_l/r. While the user follows them: now. While a take plays on them: at t seconds of the
+    take (default: the frame playing). Otherwise: their start pose (stage_actor_start; 'rest' when none), i.e. frame 0
+    of the next Follow. Check contact numerically: the pelvis over the seat top, the hands on the bar top. Page
+    replies {person, joints, start, take, t}."""
+    return page_cmd(scene, 'actor_pose', {'person': person, 't': t}, timeout=30)
+
+
+TYPED = {'actor_pose': 'stage_actor_pose', 'key_interp': 'stage_key_interp', 'control_set': 'stage_control_set', 'control_map': 'stage_control_map', 'perform': 'stage_perform', 'follow_anchor': 'stage_follow_anchor', 'take_keep_last': 'stage_take_keep_last', 'ack': 'stage_voice_ack', 'actor_follow': 'stage_actor_follow', 'actor_play': 'stage_actor_play', 'actor_stop': 'stage_actor_stop', 'anchor': 'stage_anchor_set', 'anchor_release': 'stage_anchor_release', 'anim_clear': 'stage_anim_clear', 'anim_save': 'stage_anim_save', 'ask': 'stage_ask', 'clear_markers': 'stage_markers_clear', 'clock': 'stage_clock_set', 'cue': 'stage_cue_set', 'cue_remove': 'stage_cue_remove', 'cues_clear': 'stage_cues_clear', 'cues_list': 'stage_cues_list', 'deselect': 'stage_object_deselect', 'drop': 'stage_object_drop', 'eyecam': 'stage_view_eyecam', 'focus': 'stage_view_focus', 'gallery_add': 'stage_gallery_add', 'goto': 'stage_person_goto', 'goto_camera': 'stage_camera_goto', 'growth': 'stage_growth_set', 'highlight': 'stage_object_highlight', 'key': 'stage_key_set', 'key_delete': 'stage_key_delete', 'light': 'stage_light_set', 'look_through': 'stage_view_look_through', 'marker': 'stage_marker_set', 'music': 'stage_music', 'panel': 'stage_panel_show', 'panel_close': 'stage_panel_close', 'reload': 'stage_scene_reload', 'say': 'stage_say', 'scene_go': 'stage_scene_go', 'scene_list': 'stage_scene_list', 'select': 'stage_object_select', 'set': 'stage_object_set', 'sky': 'stage_sky_set', 'snapshot': 'stage_view_snapshot', 'stream': 'stage_stream', 'take_start': 'stage_take_start', 'take_stop': 'stage_take_stop', 'take_view': 'stage_take_view', 'take_view_clear': 'stage_take_view_clear', 'timeline': 'stage_timeline_show', 'trees_reload': 'stage_trees_reload', 'undo': 'stage_edit_undo', 'voice_rec': 'stage_voice_note', 'walk': 'stage_view_walk', 'waypoint': 'stage_waypoint_set', 'waypoint_go': 'stage_waypoint_go', 'waypoint_remove': 'stage_waypoint_remove', 'waypoints_clear': 'stage_waypoints_clear', 'waypoints_list': 'stage_waypoints_list'}

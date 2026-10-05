@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { VRButton } from 'three/addons/webxr/VRButton.js';
 import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js';
 import { GIZMO } from './editor.js';
+import { cyclePick } from './pickcycle.js';
 
 const PW = 1024, PH = 640, PANEL_W = 0.42;        // panel canvas px and width in metres
 const HUES = 12;
@@ -186,8 +187,9 @@ export function initXR(ed, desktop) {
     // the first surface stops the beam: a wall or the floor ends it there and picks nothing (the user: the beams
     // "literally go through all the walls" and picked things they could not see)
     // (panels live on the GIZMO layer like every helper; they are hit on purpose, the other helpers never)
-    const hit = ray.intersectObjects(targets, true).find((h) => h.object.isMesh && h.object.visible && h.object !== monitor &&
-      (h.object === panelMesh || h.object.userData.panelApi || ((!h.object.layers.isEnabled(GIZMO) || h.object.userData.pickProxy) && ed.itemOf(h.object))));
+    const ok = (h) => h.object.isMesh && h.object.visible && h.object !== monitor &&
+      (h.object === panelMesh || h.object.userData.panelApi || ((!h.object.layers.isEnabled(GIZMO) || h.object.userData.pickProxy) && ed.itemOf(h.object)));
+    const hits = ray.intersectObjects(targets, true).filter(ok), hit = hits[0];
     if (!hit) return null;
     if (hit.object.userData.panelApi) return { extra: hit.object, uv: hit.uv, point: hit.point, dist: hit.distance };
     if (hit.object !== panelMesh && ed.itemOf(hit.object).big) return { wall: true, point: hit.point, dist: hit.distance };
@@ -196,8 +198,16 @@ export function initXR(ed, desktop) {
       return { panel: true, point: hit.point, dist: hit.distance,
         button: buttons.find((b) => px >= b.x && px <= b.x + b.w && py >= b.y && py <= b.y + b.h) || null };
     }
-    const leaf = ed.itemOf(hit.object), path = leaf && leaf.path ? leaf.path.filter((x) => !x.big) : [];
-    return { item: path[0] || leaf, point: hit.point, dist: hit.distance };   // the whole thing, never a piece of it
+    const whole = (o) => { const leaf = ed.itemOf(o), path = leaf && leaf.path ? leaf.path.filter((x) => !x.big) : []; return path[0] || leaf; };
+    // everything under the beam up to the first wall, nearest first: a pinch again at the same point takes the next
+    const items = [];
+    for (const h of hits) {
+      if (h.object === panelMesh || h.object.userData.panelApi) break;
+      const it = whole(h.object);
+      if (!it || it.big || (st.locked && st.locked(it))) break;      // a wall, the bar counter: the beam ends there
+      if (!items.includes(it)) items.push(it);
+    }
+    return { item: whole(hit.object), items, point: hit.point, dist: hit.distance };   // the whole thing, never a piece of it
   }
 
   function pulse(s, k = 0.4, ms = 25) {
@@ -229,6 +239,7 @@ export function initXR(ed, desktop) {
     // the building (locked: walls, floor, ceiling) is not picked at all: a pinch on it is a pinch on empty space, so it
     // moves you (the user, 2026-10-03: "I want to select the furniture, but the walls... I don't care to move them")
     if (h && h.item && !(st.locked && st.locked(h.item))) {
+      h.item = cyclePick(h.point, h.items.length ? h.items : [h.item], 'ray', h.dist) || h.item;   // pickcycle.js
       // a tracked hand grabs from afar only after holding the pinch on the same object (a quick pinch selects it):
       // quick pinches from a relaxed hand grabbed the front door from five metres and swung it a metre
       if (!ed.canMove(h.item)) { ed.select(h.item, 'xr'); return; }   // selecting is free; moving needs Move (actions.js)
