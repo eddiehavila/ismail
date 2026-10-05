@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### A brief for a take helper agent
+
+- `references/stage-takes.md`: when the person wants a fast take loop and the scene's agent is busy, a helper agent
+  runs it from a brief (scene, who, goal, setup, takes, the stage tools it may use, trial moves only, when to stop,
+  what to hand back). The person asked for it so the loop never waits on a busy agent.
+
 ### A set on air comes first, for now (ledger:M127, hq:D-11)
 
 - While a live engine is on the board, the governor holds GPU jobs and Blender renders (also those registered as
