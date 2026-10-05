@@ -2,13 +2,14 @@
 
 ## Unreleased
 
-### Live control maps and actor profiles (S33)
+### Live control maps and actor profiles (M100)
 
 - An actor's profile lives beside its body: `scenes/<scene>/actors/<who>.json` next to `<who>.glb`, so it goes
-  where the body goes. `stage_actor_profile(scene, actor)` reads it: the rig type (read from the body's bones), its
+  where the body goes. `stage_actor_profile(scene, person)` reads it: the rig type (read from the body's bones), its
   named parts (bone chains, parents first: head, spine, arm_l, leg_r, fingers_l, index_r, ... on people; any other
-  rig gets one part per unbranched chain, so a tail is a part) and its saved control maps. `save_map=` / `map=`
-  stores a preset; one named "default" applies by itself when a Follow starts.
+  rig gets one part per unbranched chain, so a tail is a part) and its saved control maps.
+  `stage_actor_map_save(scene, person, name, pins, drives)` stores one; a map named "default" applies by itself
+  when a Follow starts. Every control op names the scene's person; world.json actors says which body plays them.
 - The control map: which part of the user drives which part of an actor, changeable at any moment, during a Follow
   too. The built-in human map stays the base; `stage_control_set(scene, person, part, mode, joint, at, scale,
   touch)` takes one part over: `hold` (keeps its pose, riding with the body), `effector` (arms and legs reach for a

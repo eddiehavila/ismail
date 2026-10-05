@@ -69,23 +69,32 @@ def test_drives_are_checked_against_the_rig():
             rigs.check_drive(bad, parts)
 
 
-def _body(stage, who='bf_sam', names=HUMAN_BONES, parent=HUMAN_PARENT):
+def _body(stage, who='bf_sam', names=HUMAN_BONES, parent=HUMAN_PARENT, person='person_bar_lean'):
     d = stage['scenes'] / 'room' / 'actors'
     d.mkdir(exist_ok=True)
     (d / f'{who}.glb').write_bytes(glb(names, parent))
+    wf = stage['scenes'] / 'room' / 'world.json'
+    w = json.loads(wf.read_text(encoding='utf-8')) if wf.is_file() else {}
+    w.setdefault('actors', {})[person] = who
+    wf.write_text(json.dumps(w), encoding='utf-8')
     return d
+
+
+def test_reading_a_profile_changes_nothing():
+    assert 'stage_actor_profile' not in __import__('ismail.api', fromlist=['MUTATING']).MUTATING
+    assert 'stage_actor_map_save' in __import__('ismail.api', fromlist=['MUTATING']).MUTATING
 
 
 def test_the_profile_lives_beside_the_body(stage):
     d = _body(stage)
-    prof = json.loads(OPS['stage_actor_profile'](scene='room', actor='bf_sam'))
+    prof = json.loads(OPS['stage_actor_profile'](scene='room', person='person_bar_lean'))
     assert prof['rig'] == 'human_game_engine' and prof['maps'] == {} and 'leg_r' in prof['effectors']
-    out = OPS['stage_actor_profile'](scene='room', actor='bf_sam', save_map='seated', map={
-        'pins': {'hips': 'stool_3'}, 'drives': [{'part': 'leg_l', 'mode': 'effector', 'joint': 'hand_l', 'touch': True}]})
-    assert "saved map 'seated'" in out and 'presets now: seated' in out
+    out = OPS['stage_actor_map_save'](scene='room', person='person_bar_lean', name='seated', pins={'hips': 'stool_3'},
+                                      drives=[{'part': 'leg_l', 'mode': 'effector', 'joint': 'hand_l', 'touch': True}])
+    assert "saved map 'seated' on bf_sam (plays person_bar_lean)" in out and 'presets now: seated' in out
     own = json.loads((d / 'bf_sam.json').read_text(encoding='utf-8'))
     assert own['maps']['seated']['pins'] == {'hips': 'stool_3'}
-    OPS['stage_actor_profile'](scene='room', actor='bf_sam', save_map='default', map={'drives': [{'part': 'head', 'mode': 'hold'}]})
+    OPS['stage_actor_map_save'](scene='room', person='person_bar_lean', name='default', drives=[{'part': 'head', 'mode': 'hold'}])
     assert (d / 'bf_sam.json.prev').is_file()
     got = _get(stage['port'], 'actor/profile?scene=room&who=bf_sam')[1]
     assert set(got['maps']) == {'seated', 'default'} and got['file'] == 'bf_sam.json'
@@ -93,23 +102,26 @@ def test_the_profile_lives_beside_the_body(stage):
 
 def test_a_derived_scene_finds_the_bodies_in_its_assets(stage):
     _body(stage)
-    (stage['scenes'] / 'attic' / 'world.json').write_text(json.dumps({'assets': 'room'}), encoding='utf-8')
+    (stage['scenes'] / 'attic' / 'world.json').write_text(json.dumps({'assets': 'room', 'actors': {'sam': 'bf_sam'}}), encoding='utf-8')
+    assert json.loads(OPS['stage_actor_profile'](scene='attic', person='sam'))['actor'] == 'bf_sam'
     assert _get(stage['port'], 'actor/profile?scene=attic&who=bf_sam')[1]['rig'] == 'human_game_engine'
     with pytest.raises(urllib.error.HTTPError):
         _get(stage['port'], 'actor/profile?scene=attic&who=nobody')
 
 
 def test_a_bad_map_is_not_saved(stage):
-    d = _body(stage, 'dog', DOG, DOG_PARENT)
+    d = _body(stage, 'dog', DOG, DOG_PARENT, person='rex')
     with pytest.raises(OpError, match='reaches'):
-        OPS['stage_actor_profile'](scene='room', actor='dog', save_map='x', map={'drives': [{'part': 'tail_1', 'mode': 'effector', 'joint': 'hand_r'}]})
+        OPS['stage_actor_map_save'](scene='room', person='rex', name='x', drives=[{'part': 'tail_1', 'mode': 'effector', 'joint': 'hand_r'}])
     with pytest.raises(OpError, match='pins are'):
-        OPS['stage_actor_profile'](scene='room', actor='dog', save_map='x', map={'pins': {'tail': 'x'}})
-    with pytest.raises(OpError, match='no body'):
-        OPS['stage_actor_profile'](scene='room', actor='cat')
+        OPS['stage_actor_map_save'](scene='room', person='rex', name='x', pins={'tail': 'x'})
+    with pytest.raises(OpError, match='pins= or drives='):
+        OPS['stage_actor_map_save'](scene='room', person='rex', name='x')
+    with pytest.raises(OpError, match='no body for'):
+        OPS['stage_actor_profile'](scene='room', person='cat')
     assert not (d / 'dog.json').exists()
-    OPS['stage_actor_profile'](scene='room', actor='dog', save_map='wag', map={'drives': [
-        {'part': 'tail_1', 'mode': 'mimic', 'joint': ['hand_r:index-finger-metacarpal', 'hand_r:index-finger-phalanx-proximal', 'hand_r:index-finger-tip']}]})
+    OPS['stage_actor_map_save'](scene='room', person='rex', name='wag', drives=[
+        {'part': 'tail_1', 'mode': 'mimic', 'joint': ['hand_r:index-finger-metacarpal', 'hand_r:index-finger-phalanx-proximal', 'hand_r:index-finger-tip']}])
     assert json.loads((d / 'dog.json').read_text(encoding='utf-8'))['maps']['wag']['drives'][0]['part'] == 'tail_1'
 
 

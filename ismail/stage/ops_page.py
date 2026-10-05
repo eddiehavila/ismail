@@ -571,7 +571,7 @@ def stage_control_set(scene: str, person: str, part: str, mode: str = 'default',
                       at: str | list = None, scale: float = None, touch: bool = False) -> str:
     """Change what drives one part of a person, now, during a Follow too (page command: control_set). The built-in
     map stays the base (the user's head drives head and spine, the wrists the arms, the fingers the fingers, legs
-    step or sit); a drive takes one part over. part: a named part of the actor's rig (stage_actor_profile lists
+    step or sit); a drive takes one part over. part: a named part of the actor's rig (stage_actor_profile(person) lists
     them; on people: head, spine, arm_l, arm_r, leg_l, leg_r, fingers_l, fingers_r, thumb_l, index_l, ...). mode:
     'hold' keeps the pose it has now (riding with the body); 'effector' (arms and legs) reaches for a target that
     moves as joint= moves, relative to where both were when it bound (his feet acted by the user's hands: part
@@ -599,7 +599,7 @@ def stage_control_map(scene: str, person: str, preset: str = None, drives: list 
     presets saved in the actor's profile, and their pins. preset= applies a saved map from the profile (its pins and
     drives; a map named "default" applies by itself when a Follow starts and nothing was set); drives= a list of
     {part, mode, joint, at, scale, touch} applied in order; clear=True first gives every part back to the built-in
-    map. Save a map to the actor with stage_actor_profile(save_map=, map=). Page replies {person, drives, presets,
+    map. Save a map to the actor with stage_actor_map_save. Page replies {person, drives, presets,
     pins}. Emits: control_map, control_set, control_bound."""
     return page_cmd(scene, 'control_map', {'person': person, 'preset': preset, 'drives': drives, 'clear': clear or None}, timeout=30)
 
