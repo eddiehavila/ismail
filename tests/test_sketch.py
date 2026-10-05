@@ -29,7 +29,7 @@ def test_a_sketch_is_a_tune_not_block_chords():
     mel = pl['parts']['melody']['notes']
     assert sum(1 for n in mel if n[1] != 0) > len(mel) / 2          # most notes off beat 1
     assert mel[-1][0] == pl['bars'] - 1 and mel[-1][2] % 12 == 9 and mel[-1][3] == 4   # home, held
-    lo, hi = SK.STYLES['piano']['parts']['melody'][1]
+    lo, hi = SK.REG['melody']
     assert all(lo <= n[2] <= hi for n in mel)
     first = [n[2] for n in mel if n[0] < 4]
     second = [n[2] for n in mel if 4 <= n[0] < 8]
@@ -81,3 +81,53 @@ def test_sketch_then_keep_makes_the_song_and_ends_the_first_session(tmp_path):
     assert 'b-piano' in api.sketch_keep(song, 'b', replace=True)
     with pytest.raises(OpError):
         api.sketch(song, 'x', styles=['opera'])
+
+
+TRIP = ('trip-hop, 90 BPM, A minor; dusty breakbeat, crisp hats, ride, deep sub, warm Rhodes chords, clean bluesy '
+        'guitar melody; intro, groove, Rhodes-and-ride breakdown, return, fade')
+
+
+def test_the_brief_is_read_and_what_has_no_voice_is_said():
+    """M021 run 1: a trip-hop brief got three fixed styles that matched none of it, and nothing said so."""
+    s = SK.read_brief(TRIP)
+    assert s['bpm'] == 90 and s['key'] == 'A minor' and s['feel'] == 'break' and s['ride'] and s['crisp']
+    assert s['parts'] == {'drums': 'kit70', 'sub': 'sub_bass', 'keys': 'grand_piano', 'melody': 'strat70_clean'}
+    assert s['form'] == ['intro', 'groove', 'breakdown', 'groove', 'outro'] and s['blues'] and s['sevenths']
+    assert s['said'] == ['asked for Rhodes: no electric piano (Rhodes) voice yet: grand_piano plays its part']
+    pl = SK.plan_spec(s, TRIP)
+    assert pl['bars'] == 20 and pl['bpm'] == 90 and pl['form'] == s['form']
+    by_bar = lambda role: {n[0] for n in pl['parts'][role]['notes']}
+    assert not by_bar('melody') & set(range(8, 12)) and not by_bar('sub') & set(range(8, 12))   # breakdown
+    assert {n[2] for n in pl['parts']['drums']['notes'] if 8 <= n[0] < 12} <= {51, 37, 38, 42, 49, 48, 45, 41}
+    assert 51 in {n[2] for n in pl['parts']['drums']['notes']} and 36 not in {
+        n[2] for n in pl['parts']['drums']['notes'] if n[0] < 4}                                 # no kick in the intro
+    assert all(len(n[2]) == 4 for n in pl['parts']['keys']['notes'])                         # sevenths
+    lo = SK.read_brief('lo-fi beat with flute and vocals')
+    assert lo['parts']['melody'] == 'violin' and any('vocals left out' in x for x in lo['said'])
+    assert 'drums' not in SK.read_brief('house track with piano and strings, no drums')['parts']
+    assert SK.read_brief('a quiet song for a rainy morning')['parts'] == {}
+
+
+def test_the_next_round_takes_the_persons_words():
+    base = SK.read_brief(TRIP)
+    s, changed = SK.apply_words(base, 'slower, no guitar, add a pad')
+    assert s['bpm'] < 90 and 'strat70_clean' not in s['parts'].values() and s['parts']['pad'] == 'cello'
+    assert 'no melody' in changed and any(c.startswith('slower') for c in changed)
+    assert any('no pad voice' in x for x in s['said'])
+    s, changed = SK.apply_words(base, 'in D minor at 100 bpm')
+    assert s['key'] == 'D minor' and s['bpm'] == 100 and s['parts'] == base['parts']
+    todo, said = SK.specs_for('hmm', base=base)
+    assert len(todo) == 3 and 'named nothing to change' in said[-1]
+
+
+def test_a_brief_sketch_and_a_next_round_from_it(tmp_path):
+    song = str(tmp_path / 'songs' / 'trip')
+    out = api.sketch(song, 'trip-hop with rhodes and a guitar melody, A minor, 88 BPM', n=1, bars=4)
+    assert 'SAY TO THE PERSON: asked for rhodes' in out and 'a) as asked' in out and 'LUFS' in out
+    out = api.sketch(song, 'no guitar, slower', base='a', n=1, bars=4)
+    assert 'b) as asked' in out and 'changed from the base' in out and 'no melody' in out
+    with open(os.path.join(song, 'sketches', 'b-as-asked', 'sketch.json'), encoding='utf8') as f:
+        assert json.load(f)['bpm'] < 88
+    with pytest.raises(OpError):
+        api.sketch(song, 'x', base='q')
+

@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### `sketch` reads the brief (M110, from the first cold-start run)
+
+- A brief's tempo, key, genre (trip-hop, hip-hop, house, jazz, rock, ambient ...), instruments and form (intro,
+  groove, breakdown, build, return, fade) now shape the sketches: drum feel (break, four on the floor, jazz, rock),
+  ride and crisp hats, seventh chords, a pentatonic melody for blues words, 4-bar sections with the right parts
+  in each (a breakdown is keys and ride, an intro has no kick, an outro fades). Three readings: as asked, sparser,
+  busier. A brief that names nothing still gets the three styles.
+- What has no voice yet is said first ("SAY TO THE PERSON: asked for Rhodes: no electric piano voice yet:
+  grand_piano plays its part"; vocals, winds, pads likewise).
+- `sketch(..., base='<letter>')`: the next round is that sketch changed by the person's words (slower, no guitar,
+  add a pad, D minor); each sketch keeps its spec in `sketch.json`. `n` sets how many.
+- Each sketch prints a line when it is ready and reports its loudness and peak.
+- showcase.json: a clean single-note guitar (the fitted strat through the clean rig) and `sub_bass` (a sine: the one
+  synth a sketch uses); the gaps now list an electric piano, a singing voice, winds and brass.
+- `ismail.machine`: a running job's memory counts what it added, not the holder process it runs in, and OVER needs
+  0.5 GB past the declaration (every in-process render was flagged).
+
 ### A new person's first session: sketches in minutes (M110, S36)
 
 - `guide` opens with a first-session block for a person who has made nothing with ismail yet (no finished render

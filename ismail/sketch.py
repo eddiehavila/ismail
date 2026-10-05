@@ -1,7 +1,10 @@
-"""First sketches: a brief in, two or three short contrasting pieces on the showcase voices out, so a person hears
-something within minutes and picks a direction by ear (the pick becomes the song's example). Each sketch is a
-normal project the agent can edit: a motif that comes back and answers itself, chords that move, parts in their
-own registers and rhythms, never block chords on every beat 1."""
+"""First sketches: a brief in, two or three short pieces on the showcase voices out, so a person hears something
+within minutes and picks a direction by ear (the pick becomes the song's example). The brief is read: a named
+tempo, key, genre, instruments and form shape the sketch, and whatever has no voice yet is named in the reply
+(never played as if it answered). A vague brief gets three contrasting styles. Each sketch is a normal project the
+agent can edit: a motif that comes back and answers itself, chords that move, parts in their own registers and
+rhythms, never block chords on every beat 1."""
+import copy
 import json
 import os
 import random
@@ -11,30 +14,80 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 SHOWCASE = os.path.join(HERE, 'voices', 'showcase.json')
 
 NAMES = {'C': 0, 'D': 2, 'E': 4, 'F': 5, 'G': 7, 'A': 9, 'B': 11}
-SCALES = {'major': [0, 2, 4, 5, 7, 9, 11], 'minor': [0, 2, 3, 5, 7, 8, 10]}
+SCALES = {'major': [0, 2, 4, 5, 7, 9, 11], 'minor': [0, 2, 3, 5, 7, 8, 10],
+          'major_pent': [0, 2, 4, 7, 9], 'minor_pent': [0, 3, 5, 7, 10]}
 ROMAN = ['i', 'ii', 'iii', 'iv', 'v', 'vi', 'vii']
 PROGRESSIONS = {'major': [['I', 'V', 'vi', 'IV'], ['I', 'vi', 'IV', 'V'], ['IV', 'I', 'V', 'vi']],
                 'minor': [['i', 'VI', 'III', 'VII'], ['i', 'iv', 'VII', 'III'], ['i', 'VI', 'iv', 'V']]}
 DARK = re.compile(r'\b(sad|dark|melanchol\w*|night\w*|lonely|grief|rain\w*|minor|moody|haunt\w*|tense|cold|loss)\b', re.I)
-
-# style -> what it is, tempo, parts (role -> showcase voice, register, level)
-STYLES = {
-    'piano': {'what': 'solo piano: a melody over a broken-chord left hand', 'bpm': (72, 88),
-              'parts': {'melody': ('grand_piano', (60, 84), -2.0), 'harmony': ('grand_piano', (36, 60), -10.0)}},
-    'chamber': {'what': 'string trio and piano: violin melody, cello counterline, contrabass, soft piano',
-                'bpm': (68, 84),
-                'parts': {'melody': ('violin', (62, 84), -1.0), 'counter': ('cello', (48, 64), 1.0),
-                          'bass': ('contrabass', (31, 48), -6.0), 'harmony': ('grand_piano', (55, 72), 2.0)}},
-    'band': {'what': 'a small band: drums, bass guitar, rhythm guitar, piano melody', 'bpm': (92, 112),
-             'parts': {'drums': ('kit70', None, 7.0), 'bass': ('pbass70', (28, 50), -9.0),
-                       'chords': ('strat70_rhythm', (52, 67), -3.0), 'melody': ('grand_piano', (64, 86), 2.0)}},
-}
-ORDER = ['piano', 'chamber', 'band']
 MOTIF_RHYTHMS = [   # (start beat, length) over two bars of 4/4; none of them only lands on beat 1
     [(0, 1.5), (1.5, 0.5), (2, 1), (3, 1), (4, 3), (7, 1)],
     [(0.5, 0.5), (1, 1), (2, 0.5), (2.5, 1.5), (4.5, 0.5), (5, 1), (6, 2)],
     [(1, 1), (2, 1), (3, 0.5), (3.5, 0.5), (4, 2), (6, 1), (7, 1)],
+    [(0.5, 1), (1.5, 0.5), (2, 2), (4.5, 0.5), (5, 0.5), (5.5, 2.5)],          # sparse, laid back
 ]
+
+# (role, voice) -> register and fader; a role with no entry for its voice uses the role's default
+REG = {'melody': (62, 84), 'keys': (55, 72), 'harmony': (36, 60), 'counter': (48, 64), 'pad': (45, 62),
+       'bass': (28, 50), 'sub': (26, 40), 'chords': (52, 67)}
+REG_VOICE = {('melody', 'strat70_clean'): (57, 79), ('bass', 'contrabass'): (31, 48), ('melody', 'violin'): (62, 84)}
+LEVEL = {('drums', 'kit70'): 7.0, ('bass', 'pbass70'): -9.0, ('bass', 'contrabass'): -6.0, ('sub', 'sub_bass'): -11.0,
+         ('keys', 'grand_piano'): -7.0, ('melody', 'grand_piano'): 0.0, ('melody', 'violin'): -1.0,
+         ('melody', 'strat70_clean'): 1.0, ('counter', 'cello'): 1.0, ('pad', 'cello'): -3.0,
+         ('chords', 'strat70_rhythm'): -3.0, ('harmony', 'grand_piano'): -10.0}
+
+# the three styles a vague brief gets, as specs
+STYLES = {
+    'piano': {'what': 'solo piano: a melody over a broken-chord left hand', 'bpm': (72, 88), 'feel': None,
+              'parts': {'melody': 'grand_piano', 'harmony': 'grand_piano'}},
+    'chamber': {'what': 'string trio and piano: violin melody, cello counterline, contrabass, soft piano',
+                'bpm': (68, 84), 'feel': None,
+                'parts': {'melody': 'violin', 'counter': 'cello', 'bass': 'contrabass', 'keys': 'grand_piano'}},
+    'band': {'what': 'a small band: drums, bass guitar, rhythm guitar, piano melody', 'bpm': (92, 112),
+             'feel': 'rock', 'parts': {'drums': 'kit70', 'bass': 'pbass70', 'chords': 'strat70_rhythm',
+                                       'melody': 'grand_piano'}},
+}
+ORDER = ['piano', 'chamber', 'band']
+
+# words in a brief -> (role, showcase voice, what to say when the voice stands in for what was asked)
+INSTRUMENTS = [
+    (r'rhodes|electric piano|e-piano|wurli\w*|epiano', 'keys', 'grand_piano',
+     'no electric piano (Rhodes) voice yet: grand_piano plays its part'),
+    (r'organ|hammond', 'keys', 'grand_piano', 'no organ voice yet: grand_piano plays its part'),
+    (r'(?:clean |bluesy |blues |lead |melodic |jazz )+guitar(?: melody| lead| solo| line)?|guitar (?:melody|lead|solo|line)',
+     'melody', 'strat70_clean', None),
+    (r'(?:rhythm )?guitars?', 'chords', 'strat70_rhythm', None),
+    (r'(?:deep |big |heavy )?sub(?:[- ]?bass)?|808s?', 'sub', 'sub_bass', None),
+    (r'upright(?: bass)?|double bass|contrabass|acoustic bass', 'bass', 'contrabass', None),
+    (r'bass(?: guitar)?|electric bass', 'bass', 'pbass70', None),
+    (r'piano|keys', 'keys', 'grand_piano', None),
+    (r'violins?|fiddle', 'melody', 'violin', None),
+    (r'cellos?', 'counter', 'cello', None),
+    (r'strings|string section|orchestra\w*', 'counter', 'cello', None),
+    (r'(?:synth |ambient |warm )?pads?', 'pad', 'cello', 'no pad voice yet (a known gap): cello holds the long notes'),
+    (r'flute|sax\w*|trumpet|horns?|brass|clarinet|oboe|synth lead|lead synth', 'melody', 'violin',
+     'no {word} voice yet: violin plays the line'),
+    (r'vocals?|singer|singing|voice|rap\w*|choir', None, None,
+     'no singing voice in the showcase yet: {word} left out (say it to the person)'),
+    (r'breakbeats?|breaks|boom[- ]?bap|drums?|kit|beat|percussion|hats|hi-?hats?|ride', 'drums', 'kit70', None),
+]
+GENRES = [   # words -> feel, tempo range, the parts a genre brings when the brief names none
+    (r'trip[- ]?hop|downtempo', 'break', (84, 94), ['drums', 'bass', 'keys', 'melody'], True),
+    (r'hip[- ]?hop|boom[- ]?bap|lo-?fi|chillhop', 'break', (84, 94), ['drums', 'bass', 'keys', 'melody'], True),
+    (r'house|techno|disco|dance|edm|garage', 'four', (120, 126), ['drums', 'bass', 'keys', 'melody'], False),
+    (r'jazz\w*|swing', 'jazz', (110, 140), ['drums', 'bass', 'keys', 'melody'], True),
+    (r'rock|indie|funk\w*|soul|blues|r&b|band|pop', 'rock', (92, 116), ['drums', 'bass', 'chords', 'melody'], False),
+    (r'ambient|cinematic|film|score|orchestral|classical|chamber|string', None, (66, 80),
+     ['melody', 'counter', 'bass', 'keys'], False),
+    (r'ballad|solo piano|lullaby', None, (68, 84), ['melody', 'harmony'], False),
+]
+DEFAULT_VOICE = {'drums': 'kit70', 'bass': 'pbass70', 'keys': 'grand_piano', 'melody': 'grand_piano',
+                 'chords': 'strat70_rhythm', 'counter': 'cello', 'harmony': 'grand_piano', 'sub': 'sub_bass'}
+SECTIONS = {'intro': 'intro', 'verse': 'groove', 'groove': 'groove', 'main': 'groove', 'chorus': 'groove',
+            'hook': 'groove', 'drop': 'groove', 'breakdown': 'breakdown', 'break down': 'breakdown',
+            'bridge': 'breakdown', 'build': 'build', 'buildup': 'build', 'return': 'groove', 'reprise': 'groove',
+            'outro': 'outro', 'fade': 'outro', 'ending': 'outro'}
+ROLE_ORDER = ['drums', 'sub', 'bass', 'chords', 'keys', 'harmony', 'pad', 'counter', 'melody']
 
 
 class SketchError(ValueError):
@@ -87,6 +140,14 @@ def chord(sym, tonic, mode):
     return root, [root, (root + third) % 12, (root + 7) % 12]
 
 
+def seventh(ch):
+    """A triad with its seventh: m7 on a minor chord, maj7 on a major one, 7 on a major chord a fourth below the
+    next (left to the caller); here minor -> b7, major -> maj7."""
+    root, pcs = ch
+    minor = (pcs[1] - root) % 12 == 3
+    return root, pcs + [(root + (10 if minor else 11)) % 12]
+
+
 def near(pc, target, lo, hi):
     """The pitch of class pc nearest to target inside [lo, hi]."""
     best = None
@@ -99,6 +160,155 @@ def near(pc, target, lo, hi):
 def scale_pitches(tonic, mode, lo, hi):
     return [p for p in range(lo, hi + 1) if (p - tonic) % 12 in SCALES[mode]]
 
+
+# ------------------------------------------------------------------ reading a brief
+
+def _find(pattern, text):
+    return re.search(r'(?<!\w)(?:' + pattern + r')(?!\w)', text, re.I)
+
+
+def read_brief(brief):
+    """What the brief names -> a spec: bpm, key, feel, parts {role: voice}, form, density, blues, and `said`: one
+    line per thing asked for that a voice only stands in for, or that is left out."""
+    text = ' ' + (brief or '') + ' '
+    spec = {'bpm': None, 'key': None, 'feel': None, 'bpm_range': None, 'parts': {}, 'form': None, 'dense': 0,
+            'blues': False, 'sevenths': False, 'ride': False, 'crisp': False, 'said': [], 'named': False,
+            'removed': []}
+    m = re.search(r'(\d{2,3})\s*bpm', text, re.I)
+    if m:
+        spec['bpm'] = float(m.group(1))
+    m = re.search(r'(?<![\w#])([A-G])([#b]?)\s*(minor|major|min|maj|m)(?![a-z])', text)
+    if m:
+        spec['key'] = m.group(1) + m.group(2) + ' ' + ('minor' if m.group(3) in ('m', 'min', 'minor') else 'major')
+    for pat, feel, rng, parts, sev in GENRES:
+        if _find(pat, text):
+            spec['feel'], spec['bpm_range'], spec['sevenths'] = feel, rng, sev
+            spec['genre_parts'] = parts
+            spec['named'] = True
+            break
+    for m in re.finditer(r'\b(?:no|without|drop|lose)\s+(?:the\s+)?([a-z][a-z -]{1,20}?)(?=[,.;]|\s+(?:and|but|or)\b|$)',
+                         text, re.I):
+        spec['removed'].append(m.group(1).strip().lower())
+    rest = text
+    for pat, role, voice, note in INSTRUMENTS:
+        for m in list(re.finditer(r'(?<!\w)(?:' + pat + r')(?!\w)', rest, re.I)):
+            word = m.group(0).strip()
+            if any(word.lower() in r or r in word.lower() for r in spec['removed']):
+                continue
+            spec['named'] = True
+            line = f"asked for {word}: " + note.format(word=word) if note else None
+            if line and not any(x.lower().split(':')[1:] == line.lower().split(':')[1:] for x in spec['said']):
+                spec['said'].append(line)
+            if role and role not in spec['parts']:
+                spec['parts'][role] = voice
+            rest = rest[:m.start()] + ' ' * (m.end() - m.start()) + rest[m.end():]   # each word counts once
+    spec['ride'] = bool(_find(r'ride', text))
+    spec['crisp'] = bool(_find(r'crisp|bright|tight', text))
+    spec['blues'] = bool(_find(r'blues\w*|bluesy', text))
+    if _find(r'sparse|minimal|sparser|simple|less|quiet', text):
+        spec['dense'] = -1
+    if _find(r'busy|busier|dense|more energy|driving', text):
+        spec['dense'] = 1
+    form = []
+    for m in re.finditer(r'(?<!\w)(' + '|'.join(sorted(map(re.escape, SECTIONS), key=len, reverse=True)) +
+                         r')(?!\w)', text, re.I):
+        form.append(SECTIONS[m.group(1).lower()])
+    if len(form) >= 2:
+        spec['form'] = form[:6]
+    if spec['named'] and spec['feel'] and 'genre_parts' in spec:
+        for role in spec['genre_parts']:
+            if role == 'bass' and 'sub' in spec['parts']:
+                continue
+            spec['parts'].setdefault(role, DEFAULT_VOICE[role])
+    spec['asked'] = sorted(spec['parts'])                    # what the words named, before any default fills in
+    if spec['parts'] and 'melody' not in spec['parts']:
+        spec['parts']['melody'] = 'grand_piano'               # every sketch carries a tune
+    if spec['parts'] and 'drums' not in spec['parts'] and spec['feel'] is None and spec['ride']:
+        spec['parts']['drums'] = 'kit70'
+    if 'drums' in spec['parts'] and not spec['feel']:
+        spec['feel'] = 'rock'
+    for r in spec['removed']:
+        for role in _roles_named(r, spec['parts']):
+            spec['parts'].pop(role)
+    spec['genre'] = bool(spec.pop('genre_parts', None))
+    return spec
+
+
+FAMILY_WORDS = {'drums': r'drums?|beat|percussion|kit|breakbeats?|hats|ride', 'guitar': r'guitars?',
+                'bass': r'bass\w*|sub\w*|808s?', 'keys': r'piano|keys|rhodes|organ', 'strings': r'strings?|violin|cello'}
+
+
+def _roles_named(word, parts):
+    """The roles a removed word means ('guitar' -> every guitar part), by the showcase voice's family."""
+    fam = {v['name']: v['family'] for v in showcase()['voices']}
+    out = [r for r in parts if r == word]
+    for family, pat in FAMILY_WORDS.items():
+        if re.fullmatch(pat, word.split()[-1], re.I):
+            out += [r for r, v in parts.items() if fam.get(v) == family or (family == 'drums' and r == 'drums')]
+    return list(dict.fromkeys(out))
+
+
+def apply_words(base, words):
+    """A sketch's spec changed by the person's next words ("more like a Rhodes, slower drums, no guitar"): what the
+    words name replaces, the rest stays. -> (new spec, [what changed])."""
+    spec = copy.deepcopy(base)
+    new = read_brief(words)
+    changed = []
+    if new['bpm']:
+        spec['bpm'] = new['bpm']
+        changed.append(f"tempo {new['bpm']:g}")
+    elif _find(r'slower|slow(?:er)? down|half[- ]time|chill(?:er)?', words):
+        spec['bpm'] = round((spec.get('bpm') or 90) * 0.88)
+        changed.append(f"slower ({spec['bpm']:g} BPM)")
+    elif _find(r'faster|speed up|more energy|uptempo', words):
+        spec['bpm'] = round((spec.get('bpm') or 90) * 1.12)
+        changed.append(f"faster ({spec['bpm']:g} BPM)")
+    if new['key']:
+        spec['key'] = new['key']
+        changed.append(f"key {new['key']}")
+    elif _find(r'darker|sadder|minor', words) and spec.get('key') and 'major' in spec['key']:
+        spec['key'] = spec['key'].split()[0] + ' minor'
+        changed.append('minor')
+    elif _find(r'brighter|happier|major', words) and spec.get('key') and 'minor' in spec['key']:
+        spec['key'] = spec['key'].split()[0] + ' major'
+        changed.append('major')
+    if new['genre'] and new['feel'] != spec.get('feel'):
+        spec['feel'] = new['feel']
+        changed.append(f"feel {new['feel']}")
+    for role in new['asked']:
+        voice = new['parts'].get(role)
+        if voice and spec['parts'].get(role) != voice:
+            spec['parts'][role] = voice
+            changed.append(f"{role}: {voice}")
+    for r in new['removed']:
+        for role in _roles_named(r, spec['parts']):
+            spec['parts'].pop(role)
+            changed.append(f"no {role}")
+    if 'melody' not in spec['parts'] and spec['parts']:
+        spec['parts']['melody'] = 'grand_piano'
+        changed.append('melody: grand_piano')
+    if new['form']:
+        spec['form'] = new['form']
+        changed.append('form ' + ' '.join(new['form']))
+    if new['dense']:
+        spec['dense'] = new['dense']
+        changed.append('sparser' if new['dense'] < 0 else 'busier')
+    for k in ('ride', 'crisp', 'blues'):
+        if new[k] and not spec.get(k):
+            spec[k] = True
+            changed.append(k)
+    spec['said'] = new['said']
+    return spec, changed
+
+
+def style_spec(style):
+    st = STYLES[style]
+    return {'bpm': None, 'key': None, 'feel': st['feel'], 'bpm_range': st['bpm'], 'parts': dict(st['parts']),
+            'form': None, 'dense': 0, 'blues': False, 'sevenths': False, 'ride': False, 'crisp': False, 'said': [],
+            'what': st['what'], 'style': style}
+
+
+# ------------------------------------------------------------------ parts
 
 def melody(chords, tonic, mode, reg, rng, rhythm, alt):
     """A 2-bar motif and its answer make a 4-bar phrase. Each later phrase keeps the motif's steps (that is what
@@ -152,6 +362,25 @@ def broken_chord(chords, reg, rng, pattern='8ths'):
     return out
 
 
+def comp(chords, reg, rng, feel, dense, sevenths):
+    """Chords voiced close and led (each voicing near the last), in the feel's rhythm: laid back and pushed for a
+    break, offbeat for four on the floor, two per bar otherwise."""
+    lo, hi = reg
+    rhythms = {'break': [[(0, 1.5), (1.5, 1), (2.75, 1.25)], [(0, 2.5), (2.75, 1.25)], [(0, 1), (1.5, 0.5), (2, 1.5), (3.5, 0.5)]],
+               'four': [[(0.5, 0.5), (1.5, 0.5), (2.5, 0.5), (3.5, 0.5)], [(0.5, 1), (2.5, 1)], [(0.5, 0.5), (1.5, 0.5), (2.5, 0.5), (3, 0.5), (3.5, 0.5)]],
+               'jazz': [[(0, 1.5), (2.5, 1.5)], [(1.5, 2.5)], [(0, 0.5), (1.5, 1), (3, 1)]]}
+    pat = rhythms.get(feel, [[(0, 2), (2, 2)], [(0, 4)], [(0, 1), (1.5, 1), (3, 1)]])[{0: 0, -1: 1, 1: 2}[dense]]
+    out, last = [], None
+    for bar, ch in enumerate(chords):
+        root, pcs = seventh(ch) if sevenths else ch
+        centre = (lo + hi) // 2 if last is None else sum(last) // len(last)
+        v = sorted(near(pc, centre, lo, hi) for pc in pcs[1:] + pcs[:1])
+        last = v
+        for i, (b, d) in enumerate(pat):
+            out.append((bar, b, v, d, 60 + (6 if i == 0 else 0) + rng.randint(-4, 4)))
+    return out
+
+
 def counterline(chords, reg, rng):
     """Half notes on chord tones, each the nearest to the one before (voice leading), moving on beat 3."""
     lo, hi = reg
@@ -164,19 +393,52 @@ def counterline(chords, reg, rng):
     return out
 
 
-def roots(chords, reg, rng, walk=False):
+def pad(chords, reg, rng):
+    """Two held voices a bar long: the third and the fifth, led."""
+    lo, hi = reg
+    out, last = [], (lo + hi) // 2
+    for bar, (root, pcs) in enumerate(chords):
+        a = near(pcs[1], last, lo, hi)
+        out.append((bar, 0, [a, near(pcs[2], a + 4, lo, hi + 5)], 4, 58 + rng.randint(-3, 3)))
+        last = a
+    return out
+
+
+def bassline(chords, reg, rng, feel):
     lo, hi = reg
     out = []
     for bar, (root, pcs) in enumerate(chords):
         r = near(root, lo + 5, lo, hi)
-        if not walk:
-            out.append((bar, 0, r, 4, 70 + rng.randint(-3, 3)))
-            continue
         nxt = chords[(bar + 1) % len(chords)][0]
         approach = near(nxt, r, lo, hi)
         approach += -1 if approach > r else 1                 # a half step into the next root
-        out += [(bar, 0, r, 1.5, 92), (bar, 1.5, r, 0.5, 70), (bar, 2, near(pcs[2], r, lo, hi), 1.5, 84),
-                (bar, 3.5, approach, 0.5, 74)]
+        fifth = near(pcs[2], r, lo, hi)
+        if feel == 'rock':
+            out += [(bar, 0, r, 1.5, 92), (bar, 1.5, r, 0.5, 70), (bar, 2, fifth, 1.5, 84), (bar, 3.5, approach, 0.5, 74)]
+        elif feel == 'break':
+            out += [(bar, 0, r, 1.5, 94), (bar, 1.75, r, 0.25, 72), (bar, 2.5, fifth if bar % 2 else r, 1, 84),
+                    (bar, 3.5, approach, 0.5, 76)]
+        elif feel == 'four':
+            out += [(bar, b, r if b < 3 else fifth, 0.45, 88) for b in (0.5, 1.5, 2.5, 3.5)]
+        elif feel == 'jazz':
+            walk = [r, near(pcs[1], r + 3, lo, hi), fifth, approach]
+            out += [(bar, b, walk[b], 1, 82 + rng.randint(-4, 4)) for b in range(4)]
+        else:
+            out.append((bar, 0, r, 4, 70 + rng.randint(-3, 3)))
+    return out
+
+
+def subline(chords, reg, rng, feel):
+    lo, hi = reg
+    out = []
+    for bar, (root, pcs) in enumerate(chords):
+        r = near(root, lo + 5, lo, hi)
+        if feel == 'break':
+            out += [(bar, 0, r, 2.25, 100), (bar, 2.5, r, 1.25, 92)]
+        elif feel == 'four':
+            out += [(bar, b, r, 0.45, 96) for b in (0.5, 1.5, 2.5, 3.5)]
+        else:
+            out.append((bar, 0, r, 4, 96))
     return out
 
 
@@ -190,64 +452,54 @@ def stabs(chords, reg, rng):
     return out
 
 
-def drums(n_bars, rng):
+def drum_bar(feel, bar, sec, rng, spec, fill, crash):
+    """One bar of kit70 for a feel and a section: intro is cymbals only, a breakdown is the ride and a rim, an
+    outro thins out; a fill leads into the next section."""
+    ride, dense = spec.get('ride'), spec.get('dense', 0)
     out = []
-    for bar in range(n_bars):
-        fill = bar == n_bars - 2
-        out += [(bar, 0, 36, 0.5, 100), (bar, 2.5, 36, 0.5, 86)]
-        if bar % 2:
-            out.append((bar, 1.75, 36, 0.25, 72))
-        out += [(bar, 1, 38, 0.5, 96), (bar, 3, 38, 0.5, 98 if not fill else 90)]
-        for i in range(8):
-            if fill and i >= 4:
-                break
-            out.append((bar, i / 2, 42, 0.5, (70 if i % 2 == 0 else 50) + rng.randint(-4, 4)))
-        if fill:
-            for i, t in enumerate((48, 48, 45, 45, 41, 41, 41, 38)):
-                out.append((bar, 2 + i * 0.25, t, 0.25, 80 + i * 2))
-        if bar == 0 or bar == n_bars // 2:
-            out.append((bar, 0, 49, 2, 92))
-    out.append((n_bars - 1, 0, 49, 4, 96))
-    return out
-
-
-def plan(brief, style, key=None, bpm=None, bars=None, progression=None, seed=0, variant=0):
-    """-> a dict: style, key, bpm, bars, chords per bar, and every part's notes as (bar, beat, pitch, dur, vel)."""
-    if style not in STYLES:
-        raise SketchError(f"style {style!r}: one of {', '.join(STYLES)}")
-    st = STYLES[style]
-    rng = random.Random(f"{seed}:{style}:{brief}")
-    tonic, mode = parse_key(key, brief)
-    bpm = bpm or rng.randint(*st['bpm'])
-    if not bars:
-        bars = max(8, min(16, int(round(30 * bpm / 240 / 4)) * 4))   # about 30 seconds, whole 4-bar phrases
-    prog = progression or PROGRESSIONS[mode][variant % len(PROGRESSIONS[mode])]
-    if isinstance(prog, str):
-        prog = [x for x in re.split(r'[\s,|-]+', prog) if x]
-    loop = [chord(s, tonic, mode) for s in prog]
-    chords = [loop[i % len(loop)] for i in range(bars - 1)] + [chord('i' if mode == 'minor' else 'I', tonic, mode)]
-    rhythm = MOTIF_RHYTHMS[(variant + len(style)) % len(MOTIF_RHYTHMS)]
-    alt = MOTIF_RHYTHMS[(variant + len(style) + 1) % len(MOTIF_RHYTHMS)]
-    parts = {}
-    for role, (voice, reg, level) in st['parts'].items():
-        if role == 'melody':
-            notes = melody(chords, tonic, mode, reg, rng, rhythm, alt)
-        elif role == 'harmony':
-            notes = broken_chord(chords, reg, rng, '8ths' if style == 'piano' else 'quarters')
-        elif role == 'counter':
-            notes = counterline(chords, reg, rng)
-        elif role == 'bass':
-            notes = roots(chords, reg, rng, walk=style == 'band')
-        elif role == 'chords':
-            notes = stabs(chords, reg, rng)
+    cym = 51 if ride and sec in ('breakdown', 'groove', 'outro') and (sec == 'breakdown' or bar % 8 >= 4) else 42
+    kick = sec not in ('intro', 'breakdown')
+    if feel == 'four':
+        if kick:
+            out += [(b, 36, 0.5, 104) for b in range(4)] + [(b, 38, 0.5, 80) for b in (1, 3)]
+        out += [(b + 0.5, 46, 0.5, 70) for b in range(4)]
+        if dense >= 0:
+            out += [(i / 4, 42, 0.25, 44 + 10 * (i % 2 == 0)) for i in range(16) if i % 4 != 2]
+    elif feel == 'jazz':
+        out += [(b, 51, 1, 76 if b % 2 else 68) for b in range(4)] + [(b + 2 / 3, 51, 1 / 3, 60) for b in (1, 3)]
+        out += [(b, 44, 0.5, 60) for b in (1, 3)]
+        if kick:
+            out += [(0, 36, 0.5, 70)] + [(rng.choice([1.66, 2.66, 3.66]), 38, 0.3, 52)]
+    else:
+        if feel == 'break':
+            if kick:
+                out += [(0, 36, 0.5, 104), (1.75, 36, 0.25, 84), (2.5, 36, 0.5, 96)]
+                if dense > 0 or bar % 2:
+                    out.append((3.25, 36, 0.25, 70))
+            if sec != 'intro':
+                out += [(1, 38, 0.5, 100 if kick else 70), (3, 38, 0.5, 102 if kick else 72)]
+                out += [(2.75, 37, 0.25, 42), (3.75, 37, 0.25, 38)] if dense >= 0 else []
         else:
-            notes = drums(bars, rng)
-        if style == 'chamber' and role == 'harmony':
-            notes = [n for n in notes if n[0] >= 4]           # the piano enters with the answer
-        parts[role] = {'voice': voice, 'level': level, 'notes': notes}
-    names = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B']
-    return {'style': style, 'what': st['what'], 'key': f"{names[tonic]} {mode}", 'bpm': bpm, 'bars': bars,
-            'progression': prog, 'parts': parts}
+            if kick:
+                out += [(0, 36, 0.5, 100), (2.5, 36, 0.5, 86)] + ([(1.75, 36, 0.25, 72)] if bar % 2 else [])
+            if sec != 'intro':
+                out += [(1, 38, 0.5, 96), (3, 38, 0.5, 98)]
+        steps = 16 if (spec.get('crisp') and dense >= 0) or dense > 0 else 8
+        for i in range(steps):
+            t = i * 4 / steps
+            if fill and t >= 2:
+                break
+            if cym == 51 and i % (steps // 4) and i % (steps // 4) != steps // 8:
+                continue                                       # the ride plays quarters and the skip
+            v = (72 if i % (steps // 4) == 0 else 52 if i % 2 == 0 else 40) + rng.randint(-4, 4)
+            if dense < 0 and i % 2:
+                continue
+            out.append((t, cym, 4 / steps, v + (6 if cym == 51 else 0)))
+    if fill:
+        out += [(2 + i * 0.25, t, 0.25, 78 + i * 2) for i, t in enumerate((48, 48, 45, 45, 41, 41, 41, 38))]
+    if crash:
+        out.append((0, 49, 2, 92))
+    return [(bar, b, p, d, v) for b, p, d, v in out]
 
 
 def note_text(notes, bar):
@@ -259,6 +511,137 @@ def note_text(notes, bar):
         pitch = ','.join(str(x) for x in p) if isinstance(p, list) else str(p)
         L.append(f"{beat:g} {pitch} {dur:g} {max(1, min(127, int(vel)))}")
     return '; '.join(L)
+
+
+# ------------------------------------------------------------------ a whole sketch
+
+ACTIVE = {   # section -> roles that play in it (drums play their own section pattern)
+    'intro': {'drums', 'keys', 'harmony', 'pad', 'chords', 'counter'},
+    'groove': set(ROLE_ORDER),
+    'breakdown': {'drums', 'keys', 'harmony', 'pad', 'counter'},
+    'build': set(ROLE_ORDER) - {'melody'},
+    'outro': set(ROLE_ORDER),
+}
+
+
+def plan_spec(spec, brief='', seed=0, variant=0, bars=None, progression=None, label=None):
+    """-> a dict: what it is, key, bpm, bars, form, chords, every part's notes as (bar, beat, pitch, dur, vel)."""
+    rng = random.Random(f"{seed}:{variant}:{brief}:{sorted(spec['parts'].items())}")
+    tonic, mode = parse_key(spec.get('key'), brief)
+    lo_b, hi_b = spec.get('bpm_range') or (80, 100)
+    bpm = spec.get('bpm') or rng.randint(lo_b, hi_b)
+    form = spec.get('form')
+    if form:
+        bars = bars or 4 * len(form)
+    elif not bars:
+        bars = max(8, min(16, int(round(30 * bpm / 240 / 4)) * 4))   # about 30 seconds, whole 4-bar phrases
+    if form:
+        per = max(1, bars // len(form))
+        secs = [form[min(len(form) - 1, b // per)] for b in range(bars)]
+    else:
+        secs = ['groove'] * bars
+    prog = progression or PROGRESSIONS[mode][variant % len(PROGRESSIONS[mode])]
+    if isinstance(prog, str):
+        prog = [x for x in re.split(r'[\s,|-]+', prog) if x]
+    loop = [chord(s, tonic, mode) for s in prog]
+    chords = [loop[i % len(loop)] for i in range(bars - 1)] + [chord('i' if mode == 'minor' else 'I', tonic, mode)]
+    mmode = ('minor_pent' if mode == 'minor' else 'major_pent') if spec.get('blues') else mode
+    k = (variant + len(spec['parts'])) % 3 if spec.get('dense', 0) >= 0 else 3
+    rhythm, alt = MOTIF_RHYTHMS[k], MOTIF_RHYTHMS[(k + 1) % 3]
+    feel, dense = spec.get('feel'), spec.get('dense', 0)
+    parts = {}
+    for role in [r for r in ROLE_ORDER if r in spec['parts']]:
+        voice = spec['parts'][role]
+        reg = REG_VOICE.get((role, voice), REG.get(role))
+        if role == 'melody':
+            if voice == 'grand_piano' and len(spec['parts']) > 2:
+                reg = (64, 86)
+            notes = melody(chords, tonic, mmode, reg, rng, rhythm, alt)
+        elif role == 'harmony':
+            notes = broken_chord(chords, reg, rng, '8ths' if len(spec['parts']) <= 2 else 'quarters')
+        elif role == 'keys':
+            notes = comp(chords, reg, rng, feel, dense, spec.get('sevenths'))
+        elif role == 'counter':
+            notes = counterline(chords, reg, rng)
+        elif role == 'pad':
+            notes = pad(chords, reg, rng)
+        elif role == 'bass':
+            notes = bassline(chords, reg, rng, feel)
+        elif role == 'sub':
+            notes = subline(chords, reg, rng, feel)
+        elif role == 'chords':
+            notes = stabs(chords, reg, rng)
+        else:
+            notes = []
+            for b in range(bars):
+                nxt = secs[b + 1] if b + 1 < bars else None
+                fill = nxt is not None and nxt != secs[b] and nxt in ('groove', 'outro')
+                crash = secs[b] in ('groove', 'build', 'outro') and (b == 0 or secs[b - 1] != secs[b])
+                notes += drum_bar(feel or 'rock', b, secs[b], rng, spec, fill or (not form and b == bars - 2), crash)
+            if not form:
+                notes.append((bars - 1, 0, 49, 4, 96))
+        keep = []
+        for n in notes:
+            b = n[0]
+            if role != 'drums' and role not in ACTIVE[secs[b]]:
+                continue
+            if secs[b] == 'outro':                           # the outro fades: velocity falls across it
+                first = secs.index('outro')
+                n = n[:4] + (int(n[4] * (1 - 0.45 * (b - first) / max(1, bars - first))),)
+            keep.append(n)
+        parts[role] = {'voice': voice, 'level': LEVEL.get((role, voice), -4.0), 'notes': keep}
+    names = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B']
+    what = spec.get('what') or (label or 'as asked') + ': ' + ', '.join(
+        f"{r} ({v})" for r, v in ((r, spec['parts'][r]) for r in ROLE_ORDER if r in spec['parts']))
+    return {'what': what, 'key': f"{names[tonic]} {mode}", 'bpm': bpm, 'bars': bars, 'progression': prog,
+            'form': [s for i, s in enumerate(secs) if i == 0 or secs[i - 1] != s] if form else None,
+            'feel': feel, 'parts': parts}
+
+
+def plan(brief, style, key=None, bpm=None, bars=None, progression=None, seed=0, variant=0):
+    """One of the three styles a vague brief gets (piano, chamber, band), with the brief's tempo, key and form."""
+    if style not in STYLES:
+        raise SketchError(f"style {style!r}: one of {', '.join(STYLES)}")
+    spec = style_spec(style)
+    got = read_brief(brief)
+    spec.update({k: got[k] for k in ('form', 'blues') if got[k]})
+    spec['key'] = key or got['key']
+    spec['bpm'] = bpm or got['bpm']
+    return plan_spec(spec, brief, seed, variant, bars, progression)
+
+
+VARIANTS = [('as asked', 0), ('sparser, other chords', -1), ('busier, other chords', 1)]
+
+
+def specs_for(brief, key=None, bpm=None, n=3, base=None):
+    """-> [(label, spec)], and the lines to say: a brief that names a genre or instruments gets n readings of it
+    (as asked, sparser, busier); a vague one gets the three styles; base= a sketch's spec changed by the words."""
+    if base is not None:
+        spec, changed = apply_words(base, brief)
+        said = spec['said'] + ([f"changed from the base: {', '.join(changed)}"] if changed else
+                               ["the words named nothing to change: say what to change (an instrument, tempo, "
+                                "sparser or busier, a section)"])
+    else:
+        spec = read_brief(brief)
+        said = list(spec['said'])
+        if not spec['parts']:
+            out = []
+            for st in ORDER[:n]:
+                s = style_spec(st)
+                s.update({'key': key or spec['key'], 'bpm': bpm or spec['bpm'], 'form': spec['form']})
+                out.append((st, s))
+            return out, said + ["the brief names no genre or instrument: three contrasting styles (piano, chamber, "
+                                "band); sketch again with what the person wants to hear"]
+    if key:
+        spec['key'] = key
+    if bpm:
+        spec['bpm'] = bpm
+    out = []
+    for label, d in VARIANTS[:n]:
+        s = copy.deepcopy(spec)
+        s['dense'] = d if label != 'as asked' else s.get('dense', 0)
+        out.append((label, s))
+    return out, said
 
 
 # ------------------------------------------------------------------ the first session
