@@ -150,16 +150,18 @@ def test_the_agent_drives_the_page(phone, tmp_path):
 
 def test_a_blind_exam_on_the_phone_writes_its_answers(phone, tmp_path):
     ph, base, _ = phone
+    import soundfile as sf
     a, b = tmp_path / 'a.wav', tmp_path / 'b.wav'
-    a.write_bytes(b'RIFFa')
-    b.write_bytes(b'RIFFb')
+    t = np.arange(22050) / 44100
+    sf.write(str(a), 0.1 * np.sin(2 * np.pi * 220 * t), 44100)
+    sf.write(str(b), 0.1 * np.sin(2 * np.pi * 230 * t), 44100)
     ans = tmp_path / 'exam' / 'answers.jsonl'
     P.phone_exam('round 35', [{'label': 'A', 'path': str(a)}, {'label': 'B', 'path': str(b)}],
                    question='which is the record?', chips=['harsh', 'thin'], choices=['A', 'B', "can't tell"],
                    answers_path=str(ans), exam_id='r35')
     p = get(base, '/api/state?since=0&wait=0')['panels'][-1]
     assert p['kind'] == 'exam' and [c['label'] for c in p['clips']] == ['A', 'B']
-    assert urllib.request.urlopen(base + p['clips'][1]['url'], timeout=5).read() == b'RIFFb'
+    assert urllib.request.urlopen(base + p['clips'][1]['url'], timeout=5).read() == b.read_bytes()
     post(base, '/api/answer', {'id': 'r35', 'answers': {'choice': "can't tell", 'clips': {'A': ['thin'], 'B': []}}})
     assert json.loads(ans.read_text(encoding='utf8').splitlines()[0])['answers']['choice'] == "can't tell"
     assert json.loads(P.phone_listen('x', since=0, wait=0))['lines'][-1]['kind'] == 'exam'

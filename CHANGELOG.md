@@ -59,6 +59,16 @@
   knees, feet): now while following, at `t` of a playing take, otherwise the start pose (frame 0 of the next
   Follow), so contact can be checked by number.
 
+### exam_check: every exam's pre-flight (D-7: self-checks live in tools)
+
+- `exam_check(page or clips, key, secrets, submit_url, answers_path)` before any exam reaches the person: every
+  clip exists and decodes; loudness within 1 LU; no blind leak (the key's classes or secrets in file names, URLs,
+  metadata tags or the page source and what it loads, a key file the page loads, formats, lengths, leading silence
+  or order that separate the classes); a marked test answer posted to Submit lands where the agent reads answers.
+  READY or NOT READY, each problem named with what to do.
+- `phone_exam` runs it and refuses a NOT READY exam (`key=`, `secrets=` for the leak checks; `check=False` only when
+  the person asks to see it anyway). `references/blind-tests.md` section 0 says when to run it.
+
 ### The phone page: a live set in your pocket
 
 - `phone_start` serves a page over the tailnet that plays the live engine's master as an mp3 stream, which keeps
