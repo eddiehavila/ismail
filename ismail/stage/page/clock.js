@@ -87,9 +87,11 @@ export function initClock(ed, live, xrApi, panels) {
   }
 
   // ---- growth: patch the materials of meshes that carry the attributes, once per tree (its top-level item)
-  function patchGrowth() {
+  // root: only under it (trees.js patches a tree before it is staged, so its growth shaders are compiled with the rest
+  // before it shows: patched after, every tree's programs compiled in one drawn frame, 1.6 s on the Quest)
+  function patchGrowth(root = ed.scene) {
     const done = new Set();
-    ed.scene.traverse((o) => {
+    root.traverse((o) => {
       const at = o.isMesh && o.geometry && o.geometry.attributes;
       if (!at || !at._born || done.has(o) || o.userData.growPatched) return;
       done.add(o);
