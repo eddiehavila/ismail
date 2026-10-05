@@ -1829,3 +1829,4 @@ from . import api_sound  # noqa: E402,F401  (registers sound_compare / instrumen
 from . import api_measure  # noqa: E402,F401  (registers tuning, swing, kit, section and level ops)
 from .live import ops as _live_ops  # noqa: E402,F401  (registers the live_* ops)
 from .stage import ops as _stage_ops  # noqa: E402,F401  (registers the stage_* ops)
+from .phone import ops as _phone_ops  # noqa: E402,F401  (registers the phone_* ops)
