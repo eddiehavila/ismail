@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### The headset speaks when the server's voice is off
+
+- While speakwright is off, `stage_say` was silent in VR (the server answers 502). The page now says the line with the
+  headset browser's own speech engine instead (Web Speech), still waiting while the person talks; the event says
+  `voice_spoken` with `via: "headset speech (server voice off)"`, or `voice_error` when the browser has no engine or
+  voice. Lines in the speech cache still play from the server.
+
 ### Setup a novice can sit through (M119, the dress rehearsal)
 
 - `references/setup.md`: say the install takes about five minutes and looks frozen; prefer `uv pip install`
