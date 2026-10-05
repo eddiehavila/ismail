@@ -27,7 +27,7 @@ export function initExit(ed, hands, live) {
 
   function update() {
     const L = hands.state.left, R = hands.state.right;
-    const both = !!(L && L.f && R && R.f && L.g === 'thumbs_up' && R.g === 'thumbs_up');
+    const both = !hands.performing && !!(L && L.f && R && R.f && L.g === 'thumbs_up' && R.g === 'thumbs_up');   // perform.js: gestures off
     if (!both) { since = 0; card.visible = false; return false; }
     const now = performance.now();
     if (!since) since = now;

@@ -235,6 +235,14 @@ export function initVoice(ed, hands, live) {
   let phoneSeen = 0, phoneSince = 0, refused = 0, waitRelease = false;
   function update() {
     const now = performance.now();
+    // performing (perform.js): no gesture acts, so the phone, the framing and the thumbs are not read; the mic is
+    // already recording the performance
+    if (hands.performing) {
+      if (note.rec && note.via === 'phone gesture' && !note.locked) noteStop('performing');
+      phoneSince = 0; note.lockProgress = 0; hands.framing = false;
+      hud(now);
+      return;
+    }
     let phone = false;
     for (const side of ['left', 'right']) {
       const h = hands.state[side];
@@ -313,6 +321,7 @@ export function initVoice(ed, hands, live) {
   const asking = { q: null, since: 0, g: null, resolve: null, timer: null };
   async function ask(text, seconds = 60, from = null) {
     if (asking.q) return { error: 'already asking: ' + asking.q };
+    if (hands.performing) return { error: 'performing: thumbs are off while someone follows the user; ask after the Follow, or show a panel' };
     speak(text);
     while (speaking || sayQ.length) await new Promise((res) => setTimeout(res, 150));
     EAR.incoming();
@@ -421,12 +430,13 @@ export function initVoice(ed, hands, live) {
     const rh = hands.state.right;
     qcard.visible = !!(prompt.by && rh && rh.f && !rh.resting);
     if (qcard.visible) { qcard.position.copy(rh.f.wrist).y += 0.22; drawPrompt(); }
-    const rec = !!note.rec, takeOn = !!take.rec, warn = micState.s !== 'on';
-    badge.visible = rec || takeOn || !!asking.q || (warn && hands.state.left.f !== null);
+    const rec = !!note.rec, takeOn = !!take.rec, warn = micState.s !== 'on', pf = self.perfHud && self.perfHud();
+    badge.visible = rec || takeOn || !!asking.q || !!pf || (warn && hands.state.left.f !== null);
     if (!badge.visible) return;
     camera.getWorldPosition(tmp); camera.getWorldDirection(fwd);
-    badge.position.copy(tmp).addScaledVector(fwd, 0.6).y += 0.17;
-    if (asking.q && !rec) draw(badge, 'right thumb:  up = yes   down = no', 'rgba(30,64,175,0.9)');
+    badge.position.copy(tmp).addScaledVector(fwd, 0.6).y += pf ? 0.3 : 0.17;     // performing: above the view, not in it
+    if (pf) draw(badge, pf, pf.startsWith('●') ? 'rgba(185,28,28,0.9)' : 'rgba(60,60,60,0.85)');
+    else if (asking.q && !rec) draw(badge, 'right thumb:  up = yes   down = no', 'rgba(30,64,175,0.9)');
     else if (rec && note.locked) draw(badge, '● REC locked: phone to send', 'rgba(185,28,28,0.9)');
     else if (rec) draw(badge, '● REC  voice note', 'rgba(185,28,28,0.9)');
     else if (takeOn) draw(badge, '● TAKE recording', 'rgba(185,28,28,0.9)');
@@ -569,6 +579,7 @@ export function initVoice(ed, hands, live) {
   }
 
   const abortSpeech = () => { sayQ.length = 0; if (speechAbort) speechAbort.abort(); };
-  return { update, speak, talking, thumbPrompt, prompt, qcard, noteStart, noteStop, takeAudioStart, takeAudioStop, eyeSnapshot, eyecam, EAR, mic, note, micState, head, ask,
-    shotHooks, abortSpeech };
+  const self = { update, speak, talking, thumbPrompt, prompt, qcard, noteStart, noteStop, takeAudioStart, takeAudioStop, eyeSnapshot, eyecam, EAR, mic, note, micState, head, ask,
+    shotHooks, abortSpeech, ctx: audio, perfHud: null };
+  return self;
 }

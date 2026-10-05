@@ -2,6 +2,7 @@
 for the page's answer, read events. Plain HTTP to 127.0.0.1 (the server's registry, ~/.ismail/stage/<port>.json)."""
 import json
 import os
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -87,8 +88,43 @@ def page_state(rec, scene):
     return http(rec, f'live/state?{q(scene=scene)}', timeout=10)
 
 
+# stage_batch: while a batch collects, page commands are gathered (one page command 'batch' sends them together)
+_BATCH = threading.local()
+QUEUED = '(queued in the batch)'
+
+
+def collecting(scene):
+    _BATCH.scene, _BATCH.cmds, _BATCH.timeout = scene, [], 0.0
+
+
+def collected():
+    """The commands gathered since collecting() (or the last collected()), and the time they may take."""
+    cmds, t = getattr(_BATCH, 'cmds', None) or [], getattr(_BATCH, 'timeout', 0.0)
+    if getattr(_BATCH, 'cmds', None) is not None:
+        _BATCH.cmds, _BATCH.timeout = [], 0.0
+    return cmds, t
+
+
+def done_collecting():
+    _BATCH.cmds = None
+
+
 def page_cmd(scene, ctype, fields, timeout=30):
     """Queue one command for the page showing `scene`; wait for its cmd_done; reply with the page's answer."""
+    if getattr(_BATCH, 'cmds', None) is not None:
+        if scene != _BATCH.scene:
+            raise OpError(f'a batch drives one scene ({_BATCH.scene!r}); {ctype} asked for {scene!r}')
+        if ctype == 'scene_go':
+            raise OpError('stage_scene_go cannot be inside a batch (the page leaves the scene the batch drives); send it on its own')
+        _BATCH.cmds.append({'type': ctype, **{k: v for k, v in fields.items() if v is not None}})
+        _BATCH.timeout += timeout
+        return QUEUED
+    e = send(scene, ctype, fields, timeout)
+    return e if isinstance(e, str) else reply(ctype, e)
+
+
+def send(scene, ctype, fields, timeout=30):
+    """page_cmd without the formatting: the page's cmd_done event (or, for a scene switch, a line saying so)."""
     rec = server_for(scene)
     st = page_state(rec, scene)
     age = st.get('age_s')                                  # 0.0 is a page seen just now: never `age or default`
@@ -108,7 +144,7 @@ def page_cmd(scene, ctype, fields, timeout=30):
             since[s] = got['last']
             for e in got['events']:
                 if e.get('type') == 'cmd_done' and e.get('cmd_id') in ids and s == scene:
-                    return reply(ctype, e)
+                    return e
                 if ctype == 'scene_go' and s != scene and e.get('type') == 'scene_switched':
                     return f'scene_go: switched to {s} ({e.get("objects")} objects, {e.get("ms")} ms); send further ops with scene="{s}"'
     raise OpError(f'the page took no answer to {ctype} within {timeout:.0f} s (command {ids[0]}); a panel or question '

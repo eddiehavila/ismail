@@ -204,6 +204,14 @@ A person in a headset cannot see your terminal. Contact is part of the interface
 - **Seat a person before they are followed.** `stage_follow_anchor(person, joint="hips", to="<their seat>")` keeps
   them seated while the person drives them sitting or standing; a Follow keeps nothing, so keep a good one with
   `stage_take_keep_last`.
+- **A Follow is a performance: be quick and quiet in it.** From the moment someone follows the person, the mic
+  records in clips and their gestures do nothing. Watch the `perform_*` events; when a part is worth reading,
+  `stage_perform(action="next_clip")` cuts the clip there (its words come back as `perform_clip`, on the Follow
+  clock) while the next one records. Mark moments with `action="mark"`. Do not speak (a line is shown, not said,
+  unless `aloud=True` because they asked you something). After the Follow it plays back on the person with the
+  voice; read the whole thing with `stage_performance`.
+- **Set up a moment in one call.** `stage_batch(scene, ops=[...])` runs several stage ops in order (seat a person,
+  mark the clip, show a card): the page commands land together, and a failure stops the rest.
 - **Say who you are.** Pass `sender=` (your name as the person knows it, e.g. "crossroads film") on `stage_say` and
   `stage_panel_show`: the card shows it in your colour, on your side. Several agents can be talking to them at once.
 

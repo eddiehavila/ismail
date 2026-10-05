@@ -140,7 +140,7 @@ def stage_view_eyecam(scene: str, fps: float = 1, seconds: float = 10) -> str:
 
 @op(mutates=True)
 def stage_say(scene: str, text: str, seconds: float = 8, voice: bool = False, voice_name: str = None,
-              sender: str = None) -> str:
+              sender: str = None, aloud: bool = False) -> str:
     """Tell the person something (page command: say). Desktop: a caption, one at a time, queued, shown only while the
     tab is visible. VR (or voice=True on the desktop): also spoken by Kokoro (voice_name picks the voice; the server
     default is af_heart), and in VR shown for min(120, 25 + 0.8 x words) seconds as a caption panel. A line that waited
@@ -148,8 +148,11 @@ def stage_say(scene: str, text: str, seconds: float = 8, voice: bool = False, vo
     {captions_ahead}, plus {spoken: false, stale_s} for a stale line. Emits: voice_spoken, voice_hushed (the person
     started a voice note mid-line), voice_dropped, voice_error, and in VR panel_shown and panel_closed. sender= your
     name as the person should see it (e.g. "crossroads film"): the caption and its VR card say it, in that name's
-    colour, on that name's side of their body."""
-    return page_cmd(scene, 'say', {'text': text, 'seconds': seconds, 'voice': voice, 'voice_name': voice_name, 'from': sender}, timeout=30)
+    colour, on that name's side of their body. While the person performs (someone follows them) the line is shown,
+    not spoken, since it would be in the recording (page replies held: ...); aloud=True speaks it anyway (an answer
+    they asked for)."""
+    return page_cmd(scene, 'say', {'text': text, 'seconds': seconds, 'voice': voice, 'voice_name': voice_name, 'from': sender,
+                                   'aloud': aloud or None}, timeout=30)
 
 
 @op(mutates=True)
@@ -522,6 +525,29 @@ def stage_take_keep_last(scene: str, name: str = None) -> str:
 
 
 @op(mutates=True)
+def stage_perform(scene: str, action: str = 'state', label: str = None) -> str:
+    """Your hand on a performance (page command: perform). A Follow is a performance: while someone follows the person
+    no gesture acts (pokes still press panels), your speech is shown and not spoken (stage_say aloud=True speaks), and
+    the mic records from the first moment in clips on the Follow's clock (seconds since it began). action:
+    'state' (default): {performing, perf, person, seconds, mic, clip, clips, markers, take};
+    'stop_clip': end the clip now so it is transcribed (the person goes on; the mic waits for start_clip);
+    'start_clip': record the next clip (turns the mic back on);
+    'next_clip': stop_clip then start_clip in one step (read one part while recording the next);
+    'mic_off': end the clip and leave the mic off (start_clip turns it on);
+    'mark': a marker with label= at this moment on the Follow clock.
+    A stopped clip arrives as event perform_clip {perf, clip, at, seconds, text, words: [[word, start, end]]} with
+    word times on the Follow clock, snapped onto the measured voice; stage_performance reads a whole performance. The
+    Follow panel has Mic off / Mic on for the person. Errors: nobody follows the person; the mic is not allowed.
+    Emits: perform_clip_start, perform_clip_stop, perform_mic, perform_mark (and from the server perform_clip_in,
+    perform_clip)."""
+    if action not in ('state', 'stop_clip', 'start_clip', 'next_clip', 'mic_off', 'mark'):
+        raise OpError("action is 'state', 'stop_clip', 'start_clip', 'next_clip', 'mic_off' or 'mark'")
+    if action == 'mark' and not label:
+        raise OpError("mark needs label= (what happens at this moment)")
+    return page_cmd(scene, 'perform', {'action': action, 'label': label}, timeout=30)
+
+
+@op(mutates=True)
 def stage_follow_anchor(scene: str, person: str, joint: str = 'hips', to: str | list = None, legs: str = 'keep_pose',
                         clear: bool = False) -> str:
     """Pin a person's joint for when the user follows (animates) them (page command: follow_anchor): joint 'hips'
@@ -540,4 +566,4 @@ def stage_follow_anchor(scene: str, person: str, joint: str = 'hips', to: str | 
 
 
 # page command type -> its typed op (stage_cmd refuses these and names the op)
-TYPED = {'follow_anchor': 'stage_follow_anchor', 'take_keep_last': 'stage_take_keep_last', 'ack': 'stage_voice_ack', 'actor_follow': 'stage_actor_follow', 'actor_play': 'stage_actor_play', 'actor_stop': 'stage_actor_stop', 'anchor': 'stage_anchor_set', 'anchor_release': 'stage_anchor_release', 'anim_clear': 'stage_anim_clear', 'anim_save': 'stage_anim_save', 'ask': 'stage_ask', 'clear_markers': 'stage_markers_clear', 'clock': 'stage_clock_set', 'cue': 'stage_cue_set', 'cue_remove': 'stage_cue_remove', 'cues_clear': 'stage_cues_clear', 'cues_list': 'stage_cues_list', 'deselect': 'stage_object_deselect', 'drop': 'stage_object_drop', 'eyecam': 'stage_view_eyecam', 'focus': 'stage_view_focus', 'gallery_add': 'stage_gallery_add', 'goto': 'stage_person_goto', 'goto_camera': 'stage_camera_goto', 'growth': 'stage_growth_set', 'highlight': 'stage_object_highlight', 'key': 'stage_key_set', 'key_delete': 'stage_key_delete', 'light': 'stage_light_set', 'look_through': 'stage_view_look_through', 'marker': 'stage_marker_set', 'music': 'stage_music', 'panel': 'stage_panel_show', 'panel_close': 'stage_panel_close', 'reload': 'stage_scene_reload', 'say': 'stage_say', 'scene_go': 'stage_scene_go', 'scene_list': 'stage_scene_list', 'select': 'stage_object_select', 'set': 'stage_object_set', 'sky': 'stage_sky_set', 'snapshot': 'stage_view_snapshot', 'stream': 'stage_stream', 'take_start': 'stage_take_start', 'take_stop': 'stage_take_stop', 'take_view': 'stage_take_view', 'take_view_clear': 'stage_take_view_clear', 'timeline': 'stage_timeline_show', 'trees_reload': 'stage_trees_reload', 'undo': 'stage_edit_undo', 'voice_rec': 'stage_voice_note', 'walk': 'stage_view_walk', 'waypoint': 'stage_waypoint_set', 'waypoint_go': 'stage_waypoint_go', 'waypoint_remove': 'stage_waypoint_remove', 'waypoints_clear': 'stage_waypoints_clear', 'waypoints_list': 'stage_waypoints_list'}
+TYPED = {'perform': 'stage_perform', 'follow_anchor': 'stage_follow_anchor', 'take_keep_last': 'stage_take_keep_last', 'ack': 'stage_voice_ack', 'actor_follow': 'stage_actor_follow', 'actor_play': 'stage_actor_play', 'actor_stop': 'stage_actor_stop', 'anchor': 'stage_anchor_set', 'anchor_release': 'stage_anchor_release', 'anim_clear': 'stage_anim_clear', 'anim_save': 'stage_anim_save', 'ask': 'stage_ask', 'clear_markers': 'stage_markers_clear', 'clock': 'stage_clock_set', 'cue': 'stage_cue_set', 'cue_remove': 'stage_cue_remove', 'cues_clear': 'stage_cues_clear', 'cues_list': 'stage_cues_list', 'deselect': 'stage_object_deselect', 'drop': 'stage_object_drop', 'eyecam': 'stage_view_eyecam', 'focus': 'stage_view_focus', 'gallery_add': 'stage_gallery_add', 'goto': 'stage_person_goto', 'goto_camera': 'stage_camera_goto', 'growth': 'stage_growth_set', 'highlight': 'stage_object_highlight', 'key': 'stage_key_set', 'key_delete': 'stage_key_delete', 'light': 'stage_light_set', 'look_through': 'stage_view_look_through', 'marker': 'stage_marker_set', 'music': 'stage_music', 'panel': 'stage_panel_show', 'panel_close': 'stage_panel_close', 'reload': 'stage_scene_reload', 'say': 'stage_say', 'scene_go': 'stage_scene_go', 'scene_list': 'stage_scene_list', 'select': 'stage_object_select', 'set': 'stage_object_set', 'sky': 'stage_sky_set', 'snapshot': 'stage_view_snapshot', 'stream': 'stage_stream', 'take_start': 'stage_take_start', 'take_stop': 'stage_take_stop', 'take_view': 'stage_take_view', 'take_view_clear': 'stage_take_view_clear', 'timeline': 'stage_timeline_show', 'trees_reload': 'stage_trees_reload', 'undo': 'stage_edit_undo', 'voice_rec': 'stage_voice_note', 'walk': 'stage_view_walk', 'waypoint': 'stage_waypoint_set', 'waypoint_go': 'stage_waypoint_go', 'waypoint_remove': 'stage_waypoint_remove', 'waypoints_clear': 'stage_waypoints_clear', 'waypoints_list': 'stage_waypoints_list'}

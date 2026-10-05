@@ -363,3 +363,130 @@ def stage_note(scenes: str, title: str, level: str = 'normal') -> str:
 
 
 from . import ops_page  # noqa: E402,F401  (registers the page command ops)
+
+
+@op()
+def stage_performance(scene: str, perf: str = None) -> str:
+    """A performance as text (the newest when perf= is not given): who was followed, how long, the markers, and each
+    voice clip with its words and their times on the Follow clock (seconds since the Follow began), snapped onto the
+    measured voice. A take kept from it plays its voice with it (meta: performance, perf_shift = take time 0 on the
+    Follow clock). Files: <scenes>/<scene>/performances/<perf>/perf.json and clip_<n>.<ext>."""
+    from . import perform
+    d = Path(link.server_for(scene)['scenes'])
+    out = perform.summary(d, scene, perf)
+    if out is None:
+        raise OpError(f'no performance {perf!r} in {scene}' if perf else f'no performances in {scene} yet (a Follow makes one)')
+    return out
+
+
+NOT_IN_BATCH = {'stage_batch', 'stage_start', 'stage_stop', 'stage_listen', 'stage_scene_export', 'stage_scene_new',
+                'stage_scene_go'}
+
+
+@op(mutates=True)
+def stage_batch(scene: str, ops: list, stop_on_error: bool = True) -> str:
+    """Many stage ops in one call, in order, on one scene (scene is implied): ops = [{"op": "stage_follow_anchor",
+    "person": ..., "joint": "hips", "to": "stool_3"}, {"op": "stage_perform", "action": "mark", "label": "legs"}, ...].
+    Ops that are page commands go to the page together as one command and run back to back there (the ones that
+    answer at once land in the same frame); an op that runs here (stage_world, stage_events, stage_performance, ...)
+    first sends the page commands before it, so the order holds. With stop_on_error (default) the first failure stops
+    the batch: the scene folder's top-level .json files that the ops here changed (world.json and the like) go back
+    to what they were; takes, performances and voice files are not put back, and what the page already did stays
+    (the page cannot roll back; the reply says what ran). Not in a batch: stage_batch, stage_start,
+    stage_stop, stage_listen, stage_scene_export, stage_scene_new, stage_scene_go. Replies one line per op:
+    [i] op: its answer."""
+    import inspect
+    from ..api import OPS
+    if not isinstance(ops, list) or not ops:
+        raise OpError('ops is a list of {"op": "stage_...", ...fields}')
+    specs = []
+    for i, spec in enumerate(ops):
+        name = spec.get('op') if isinstance(spec, dict) else None
+        if not name or not name.startswith('stage_') or name not in OPS:
+            raise OpError(f'op #{i}: {name!r} is not a stage op (stage_* only)')
+        if name in NOT_IN_BATCH:
+            raise OpError(f'op #{i}: {name} cannot be in a batch; call it on its own')
+        kw = {k: v for k, v in spec.items() if k != 'op'}
+        if 'scene' in inspect.signature(OPS[name]).parameters:
+            if kw.get('scene', scene) != scene:
+                raise OpError(f'op #{i}: a batch drives one scene ({scene!r}); it asked for {kw["scene"]!r}')
+            kw['scene'] = scene
+        on_page = OPS[name].__module__.endswith('ops_page') or name == 'stage_cmd'
+        specs.append((i, name, kw, on_page))
+    sdir = Path(link.server_for(scene)['scenes']) / scene
+    changed = {}                                   # file -> its bytes before the batch, for files the ops here changed
+    out, queued = [], []
+    failed = None
+
+    def flush():
+        nonlocal failed
+        cmds, t = link.collected()
+        if not cmds:
+            return
+        link.done_collecting()
+        try:
+            e = link.send(scene, 'batch', {'cmds': cmds, 'stop_on_error': stop_on_error}, timeout=t + 30)
+        finally:
+            link.collecting(scene)
+        if e.get('ok') is False:
+            raise OpError(f'the page refused the batch: {e.get("error")}')
+        res = e.get('result') or []
+        for (i, name), r in zip(queued, res):
+            try:
+                out.append(f'[{i}] {name}: ' + link.reply(r.get('type'), r))
+            except OpError as err:
+                out.append(f'[{i}] {name}: ERROR {err}')
+                failed = failed or (i, name)
+        for i, name in queued[len(res):]:
+            out.append(f'[{i}] {name}: not run (an op before it failed)')
+        queued.clear()
+
+    link.collecting(scene)
+    try:
+        for i, name, kw, on_page in specs:
+            if not on_page:
+                flush()
+            if failed and stop_on_error:
+                break
+            before = None if on_page else {f: f.read_bytes() for f in sdir.glob('*.json')}
+
+            def note_changes():                        # a file this op changed here, failed or not
+                for f in set(before) | set(sdir.glob('*.json')):
+                    if f not in changed and (not f.exists() or f.read_bytes() != before.get(f)):
+                        changed[f] = before.get(f)    # None: the op made it
+            try:
+                r = OPS[name](**kw)
+            except Exception as err:                   # any failure rolls back, not only OpError
+                if before is not None:
+                    note_changes()
+                if not isinstance(err, OpError):
+                    err = f'{type(err).__name__}: {err}'
+                if stop_on_error:                  # nothing queued after the last send has run: it does not run now
+                    out.extend(f'[{j}] {n}: not run (an op after it failed first)' for j, n in queued)
+                    queued.clear()
+                    link.collected()
+                out.append(f'[{i}] {name}: ERROR {err}')
+                failed = failed or (i, name)
+                continue
+            if on_page:
+                queued.append((i, name))
+                continue
+            note_changes()
+            out.append(f'[{i}] {name}: {r}')
+        if not (failed and stop_on_error):
+            flush()
+    finally:
+        link.done_collecting()
+    if failed and stop_on_error:
+        for f, b in changed.items():                   # back to before the batch (a file it made goes again)
+            if b is None:
+                f.unlink(missing_ok=True)
+            else:
+                f.write_bytes(b)
+        raise OpError('\n'.join(sorted(out, key=_batch_index)) + f'\nop #{failed[0]} ({failed[1]}) failed; the batch stopped there.'
+                      + (f' Put back: {", ".join(f.name for f in changed)}.' if changed else ''))
+    return '\n'.join(sorted(out, key=_batch_index))
+
+
+def _batch_index(line):
+    return int(line[1:line.index(']')])
