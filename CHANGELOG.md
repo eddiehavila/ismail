@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### sketch hears a gentle classical or church brief (M118, the organist's dress rehearsal)
+
+- A classical feel: "prelude", "hymn", "chorale", "church", "sacred", "baroque", "classical", "chamber", "adagio" and
+  the like give a slow piece (56 to 72 BPM) of piano broken chords, a piano tune, cello and contrabass, in two
+  phrases and a fading close; its chords move by function and every reading closes on a cadence (V I, or IV I for
+  the second), so the chord readout ends on the tonic.
+- "Gentle", "soft", "quiet", "calm", "slow" and the like play every part lighter and keep the tempo at 76 or under.
+- "Strings" is a section (violin and cello, and contrabass when no other bass plays), and the reply says so; parts
+  a classical brief fills in are named in the reply.
+- In a classical or soft sketch the tune sits on top: every other part is at least 9 dB under it (the rehearsal's
+  cello read 17 to 22 dB over the piano melody; now each part measures 4 to 6 LUFS under it).
+- The readings sit in order inside the tempo range: sparser the slowest, busier the fastest. The reply names the
+  closing cadence and a soft reading.
+
 ### Point an agent at the repository and it knows what to do (family first sessions)
 
 - `AGENTS.md` (and `CLAUDE.md`, which loads it): a person says "set me up with ismail" and a link; the agent reads

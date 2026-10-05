@@ -19,6 +19,12 @@ SCALES = {'major': [0, 2, 4, 5, 7, 9, 11], 'minor': [0, 2, 3, 5, 7, 8, 10],
 ROMAN = ['i', 'ii', 'iii', 'iv', 'v', 'vi', 'vii']
 PROGRESSIONS = {'major': [['I', 'V', 'vi', 'IV'], ['I', 'vi', 'IV', 'V'], ['I', 'IV', 'vi', 'V']],
                 'minor': [['i', 'VI', 'III', 'VII'], ['i', 'VI', 'VII', 'i'], ['i', 'iv', 'VI', 'V']]}
+# a classical or sacred piece moves by function (tonic, predominant, dominant) and its phrases close on cadences;
+# the last two bars are V I (authentic) or, for the second reading, IV I (the plagal "amen")
+CLASSICAL = {'major': [['I', 'IV', 'V', 'I'], ['I', 'vi', 'ii', 'V'], ['I', 'ii', 'V', 'I']],
+             'minor': [['i', 'iv', 'V', 'i'], ['i', 'VI', 'iv', 'V'], ['i', 'iv', 'VII', 'III']]}
+SOFT = re.compile(r'\b(gentle|gently|soft\w*|quiet\w*|calm\w*|peaceful|tender\w*|hushed|prayerful|meditative|'
+                  r'slow\w*|reverent\w*|contemplative|serene)\b', re.I)
 # every loop starts on the tonic and the second and third avoid the relative key's cadence, so a sketch reads in
 # the key asked for (i iv VII III read as G major in a cold-start run)
 DARK = re.compile(r'\b(sad|dark|melanchol\w*|night\w*|lonely|grief|rain\w*|minor|moody|haunt\w*|tense|cold|loss)\b', re.I)
@@ -33,12 +39,17 @@ MOTIF_RHYTHMS = [   # (start beat, length) over two bars of 4/4; none of them on
 REG = {'melody': (62, 84), 'keys': (55, 72), 'harmony': (36, 60), 'counter': (48, 64), 'pad': (45, 62),
        'bass': (28, 50), 'sub': (26, 40), 'chords': (52, 67)}
 REG_VOICE = {('melody', 'strat70_clean'): (57, 79), ('melody', 'emily'): (57, 81), ('bass', 'contrabass'): (31, 48),
-             ('melody', 'violin'): (62, 84), ('keys', 'rhodes'): (52, 72)}
+             ('melody', 'violin'): (62, 84), ('keys', 'rhodes'): (52, 72), ('pad', 'violin'): (62, 79)}
 LEVEL = {('drums', 'kit70'): 7.0, ('bass', 'pbass70'): -9.0, ('bass', 'contrabass'): -6.0, ('sub', 'sub_bass'): -11.0,
          ('keys', 'grand_piano'): -7.0, ('melody', 'grand_piano'): 0.0, ('melody', 'violin'): -1.0,
          ('melody', 'strat70_clean'): 1.0, ('counter', 'cello'): 1.0, ('pad', 'cello'): -3.0,
          ('chords', 'strat70_rhythm'): -3.0, ('harmony', 'grand_piano'): -10.0, ('keys', 'rhodes'): -12.0,
          ('drums', 'rusty'): 5.0, ('melody', 'emily'): 0.0, ('fx', 'crackle'): -6.0}
+# a classical or soft sketch: the tune on top, every other part under it (the dress rehearsal's cello read 17 to
+# 22 dB over the piano melody, and the chord readout named its notes instead of the chords)
+LEVEL_UNDER = {'counter': -9.0, 'pad': -13.0, 'bass': -13.0, 'harmony': -11.0, 'keys': -11.0}
+# 'strings' with no other word: a section, one player a part (there is no ensemble strings voice yet)
+SECTION = {'pad': 'violin', 'counter': 'cello', 'bass': 'contrabass'}
 
 # the three styles a vague brief gets, as specs
 STYLES = {
@@ -67,7 +78,8 @@ INSTRUMENTS = [
     (r'piano|keys', 'keys', 'grand_piano', None),
     (r'violins?|fiddle', 'melody', 'violin', None),
     (r'cellos?', 'counter', 'cello', None),
-    (r'strings|string section|orchestra\w*', 'counter', 'cello', None),
+    (r'strings|string section|string quartet|orchestra\w*', 'section', None,
+     'a string section here is violin and cello (and contrabass when no other bass plays), one player each (no ensemble strings voice yet)'),
     (r'(?:synth |ambient |warm )?pads?', 'pad', 'cello', 'no pad voice yet (a known gap): cello holds the long notes'),
     (r'flute|sax\w*|trumpet|horns?|brass|clarinet|oboe|synth lead|lead synth', 'melody', 'violin',
      'no {word} voice yet: violin plays the line'),
@@ -83,12 +95,16 @@ GENRES = [   # words -> feel, tempo range, the parts a genre brings when the bri
     (r'house|techno|disco|dance|edm|garage', 'four', (120, 126), ['drums', 'bass', 'keys', 'melody'], False),
     (r'jazz\w*|swing', 'jazz', (110, 140), ['drums', 'bass', 'keys', 'melody'], True),
     (r'rock|indie|funk\w*|soul|blues|r&b|band|pop', 'rock', (92, 116), ['drums', 'bass', 'chords', 'melody'], False),
-    (r'ambient|cinematic|film|score|orchestral|classical|chamber|string', None, (66, 80),
+    (r'prelude|postlude|hymn\w*|chorale|church|sacred|chapel|psalm|anthem|requiem|liturg\w*|baroque|classical|'
+     r'chamber|adagio|largo|andante|nocturne|elegy', 'classical', (56, 72), ['melody', 'harmony', 'counter', 'bass'],
+     False),
+    (r'ambient|cinematic|film|score|orchestral|string', None, (66, 80),
      ['melody', 'counter', 'bass', 'keys'], False),
     (r'ballad|solo piano|lullaby', None, (68, 84), ['melody', 'harmony'], False),
 ]
 DEFAULT_VOICE = {'drums': 'kit70', 'bass': 'pbass70', 'keys': 'grand_piano', 'melody': 'grand_piano',
                  'chords': 'strat70_rhythm', 'counter': 'cello', 'harmony': 'grand_piano', 'sub': 'sub_bass'}
+CLASSICAL_VOICE = {'bass': 'contrabass'}
 SECTIONS = {'intro': 'intro', 'verse': 'groove', 'groove': 'groove', 'main': 'groove', 'chorus': 'groove',
             'hook': 'groove', 'drop': 'groove', 'breakdown': 'breakdown', 'break down': 'breakdown',
             'bridge': 'breakdown', 'build': 'build', 'buildup': 'build', 'return': 'groove', 'reprise': 'groove',
@@ -180,7 +196,7 @@ def read_brief(brief):
     text = ' ' + (brief or '') + ' '
     spec = {'bpm': None, 'key': None, 'feel': None, 'bpm_range': None, 'parts': {}, 'form': None, 'dense': 0,
             'blues': False, 'sevenths': False, 'ride': False, 'crisp': False, 'said': [], 'named': False,
-            'removed': []}
+            'removed': [], 'soft': False, 'genre_word': None}
     m = re.search(r'(\d{2,3})\s*bpm', text, re.I)
     if m:
         spec['bpm'] = float(m.group(1))
@@ -189,6 +205,7 @@ def read_brief(brief):
         spec['key'] = m.group(1) + m.group(2) + ' ' + ('minor' if m.group(3) in ('m', 'min', 'minor') else 'major')
     for pat, feel, rng, parts, sev in GENRES:
         if _find(pat, text):
+            spec['genre_word'] = _find(pat, text).group(0).strip().lower()
             spec['feel'], spec['bpm_range'], spec['sevenths'] = feel, rng, sev
             spec['genre_parts'] = parts
             spec['named'] = True
@@ -206,12 +223,17 @@ def read_brief(brief):
             line = f"asked for {word}: " + note.format(word=word) if note else None
             if line and not any(x.lower().split(':')[1:] == line.lower().split(':')[1:] for x in spec['said']):
                 spec['said'].append(line)
-            if role and role not in spec['parts']:
+            if role == 'section':
+                for r, v in SECTION.items():               # in a band, its own bass stays the bass
+                    if r != 'bass' or spec['feel'] in (None, 'classical'):
+                        spec['parts'].setdefault(r, v)
+            elif role and role not in spec['parts']:
                 spec['parts'][role] = voice
             rest = rest[:m.start()] + ' ' * (m.end() - m.start()) + rest[m.end():]   # each word counts once
     spec['ride'] = bool(_find(r'ride', text))
     spec['crisp'] = bool(_find(r'crisp|bright|tight', text))
     spec['blues'] = bool(_find(r'blues\w*|bluesy', text))
+    spec['soft'] = bool(SOFT.search(text))
     if _find(r'sparse|minimal|sparser|simple|less|quiet', text):
         spec['dense'] = -1
     if _find(r'busy|busier|dense|more energy|driving', text):
@@ -222,16 +244,25 @@ def read_brief(brief):
         form.append(SECTIONS[m.group(1).lower()])
     if len(form) >= 2:
         spec['form'] = form[:6]
+    if spec['feel'] == 'classical' and spec['parts'].get('keys') == 'grand_piano' and 'harmony' not in spec['parts']:
+        spec['parts']['harmony'] = spec['parts'].pop('keys')   # a classical piano plays broken chords, not comping
     if spec['named'] and spec['feel'] and 'genre_parts' in spec:
+        filled = []
         for role in spec['genre_parts']:
             if role == 'bass' and 'sub' in spec['parts']:
                 continue
-            spec['parts'].setdefault(role, DEFAULT_VOICE[role])
+            if role not in spec['parts']:
+                spec['parts'][role] = CLASSICAL_VOICE.get(role, DEFAULT_VOICE[role]) if spec['feel'] == 'classical' \
+                    else DEFAULT_VOICE[role]
+                filled.append(role)
+        if spec['feel'] == 'classical' and filled:
+            spec['said'].append(f"filled in for {spec['genre_word']}: " + ', '.join(
+                f"{r} ({spec['parts'][r]})" for r in ROLE_ORDER if r in filled))
     _stand_ins(spec)
     spec['asked'] = sorted(spec['parts'])                    # what the words named, before any default fills in
     if spec['parts'] and 'melody' not in spec['parts']:
         spec['parts']['melody'] = 'grand_piano'               # every sketch carries a tune
-        if spec['named'] and len(spec['parts']) > 2:
+        if spec['named'] and len(spec['parts']) > 2 and 'grand_piano' not in [spec['parts'][r] for r in spec['asked']]:
             spec['said'].append("no instrument was named for the melody: grand_piano plays it")
     if spec['parts'] and 'drums' not in spec['parts'] and spec['feel'] is None and spec['ride']:
         spec['parts']['drums'] = 'kit70'
@@ -328,7 +359,7 @@ def apply_words(base, words):
     if new['dense']:
         spec['dense'] = new['dense']
         changed.append('sparser' if new['dense'] < 0 else 'busier')
-    for k in ('ride', 'crisp', 'blues'):
+    for k in ('ride', 'crisp', 'blues', 'soft'):
         if new[k] and not spec.get(k):
             spec[k] = True
             changed.append(k)
@@ -340,7 +371,7 @@ def style_spec(style):
     st = STYLES[style]
     return {'bpm': None, 'key': None, 'feel': st['feel'], 'bpm_range': st['bpm'], 'parts': dict(st['parts']),
             'form': None, 'dense': 0, 'blues': False, 'sevenths': False, 'ride': False, 'crisp': False, 'said': [],
-            'what': st['what'], 'style': style}
+            'soft': False, 'what': st['what'], 'style': style}
 
 
 # ------------------------------------------------------------------ parts
@@ -566,8 +597,14 @@ def plan_spec(spec, brief='', seed=0, variant=0, bars=None, progression=None, la
     rng = random.Random(f"{seed}:{variant}:{brief}:{sorted(spec['parts'].items())}")
     tonic, mode = parse_key(spec.get('key'), brief)
     lo_b, hi_b = spec.get('bpm_range') or (80, 100)
-    bpm = spec.get('bpm') or rng.randint(lo_b, hi_b)
-    form = spec.get('form')
+    soft, classical = spec.get('soft'), spec.get('feel') == 'classical'
+    if soft:                                                 # gentle, quiet, slow: never a fast reading
+        lo_b, hi_b = min(lo_b, 60), min(hi_b, 76)
+    # the readings sit in order inside the range: sparser the slowest, busier the fastest (a cold run had the
+    # sparser reading fastest)
+    at = {'as asked': 0.5, 'sparser': 0.15, 'busier': 0.85}.get((label or '').split(',')[0])
+    bpm = spec.get('bpm') or (round(lo_b + at * (hi_b - lo_b)) if at is not None else rng.randint(lo_b, hi_b))
+    form = spec.get('form') or (['groove', 'groove', 'outro'] if classical else None)
     if form:
         bars = bars or 4 * len(form)
     elif not bars:
@@ -577,11 +614,17 @@ def plan_spec(spec, brief='', seed=0, variant=0, bars=None, progression=None, la
         secs = [form[min(len(form) - 1, b // per)] for b in range(bars)]
     else:
         secs = ['groove'] * bars
-    prog = progression or PROGRESSIONS[mode][variant % len(PROGRESSIONS[mode])]
+    table = CLASSICAL if classical else PROGRESSIONS
+    prog = progression or table[mode][variant % len(table[mode])]
     if isinstance(prog, str):
         prog = [x for x in re.split(r'[\s,|-]+', prog) if x]
     loop = [chord(s, tonic, mode) for s in prog]
     chords = [loop[i % len(loop)] for i in range(bars - 1)] + [chord('i' if mode == 'minor' else 'I', tonic, mode)]
+    cadence = None
+    if classical and not progression and bars >= 2:          # close on a cadence: V I, or IV I (plagal) for reading b
+        plagal = variant % 3 == 1
+        chords[-2] = chord('iv' if mode == 'minor' else 'IV', tonic, mode) if plagal else chord('V', tonic, mode)
+        cadence = ('iv i' if mode == 'minor' else 'IV I') if plagal else ('V i' if mode == 'minor' else 'V I')
     mmode = ('minor_pent' if mode == 'minor' else 'major_pent') if spec.get('blues') else mode
     k = (variant + len(spec['parts'])) % 3 if spec.get('dense', 0) >= 0 else 3
     rhythm, alt = MOTIF_RHYTHMS[k], MOTIF_RHYTHMS[(k + 1) % 3]
@@ -631,13 +674,18 @@ def plan_spec(spec, brief='', seed=0, variant=0, bars=None, progression=None, la
                 first = secs.index('outro')
                 n = n[:4] + (int(n[4] * (1 - 0.45 * (b - first) / max(1, bars - first))),)
             keep.append(n)
-        parts[role] = {'voice': voice, 'level': LEVEL.get((role, voice), -4.0), 'notes': keep}
+        level = LEVEL.get((role, voice), -4.0)
+        if (classical or soft) and 'melody' in spec['parts'] and role in LEVEL_UNDER:
+            level = min(level, LEVEL_UNDER[role])
+        if soft and role not in ('drums', 'fx'):              # soft dynamics: everything played lighter
+            keep = [n[:4] + (max(24, int(n[4] * 0.8)),) for n in keep]
+        parts[role] = {'voice': voice, 'level': level, 'notes': keep}
     names = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B']
     what = spec.get('what') or (label or 'as asked') + ': ' + ', '.join(
         f"{r} ({v})" for r, v in ((r, spec['parts'][r]) for r in ROLE_ORDER if r in spec['parts']))
     return {'what': what, 'key': f"{names[tonic]} {mode}", 'bpm': bpm, 'bars': bars, 'progression': prog,
             'form': [s for i, s in enumerate(secs) if i == 0 or secs[i - 1] != s] if form else None,
-            'feel': feel, 'parts': parts}
+            'feel': feel, 'soft': bool(soft), 'cadence': cadence, 'parts': parts}
 
 
 def plan(brief, style, key=None, bpm=None, bars=None, progression=None, seed=0, variant=0):
@@ -670,7 +718,8 @@ def specs_for(brief, key=None, bpm=None, n=3, base=None):
             out = []
             for st in ORDER[:n]:
                 s = style_spec(st)
-                s.update({'key': key or spec['key'], 'bpm': bpm or spec['bpm'], 'form': spec['form']})
+                s.update({'key': key or spec['key'], 'bpm': bpm or spec['bpm'], 'form': spec['form'],
+                          'soft': spec['soft']})
                 out.append((st, s))
             return out, said + ["the brief names no genre or instrument: three contrasting styles (piano, chamber, "
                                 "band); sketch again with what the person wants to hear"]
