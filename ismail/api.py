@@ -257,7 +257,8 @@ def _check_voices(spec, P):
     if spec.get('type') == 'code' and spec.get('voice'):
         try:
             mod = voices.load(spec['voice'], P.root if P else None)
-            if spec.get('fn') or not callable(getattr(mod, 'perform', None)):
+            # fn 'voice' (the old help text's default) on a performer voice plays it with perform, as a missing fn does
+            if spec.get('fn') not in (None, 'voice') or not callable(getattr(mod, 'perform', None)):
                 voices.function(spec['voice'], spec.get('fn', 'voice'), P.root if P else None)
         except voices.VoiceError as e:
             raise OpError(f"instrument invalid: {e}")
@@ -798,8 +799,14 @@ def voices_list(project: str = None) -> str:
     from . import sketch as SK
     sc = {v.get('voice') or v['name'] for v in SK.showcase()['voices']}
     mark = lambda n: '*' if n in sc else ' '
-    L = [f"{mark(n)}{n:<16} {o:<9} {s}" for n, o, s in rows]
-    L.append("use: instrument={'type': 'code', 'voice': '<name>', 'fn': 'voice', 'params': {}, 'tail': <seconds>}")
+    def fn(n):
+        try:
+            return (voices.entry_fns(n, _voice_root(project)) or ['?'])[0]
+        except Exception:
+            return '?'
+    L = [f"{mark(n)}{n:<16} {o:<9} fn={fn(n):<8} {s}" for n, o, s in rows]
+    L.append("use: instrument={'type': 'code', 'voice': '<name>', 'fn': '<its fn= above>', 'params': {}, "
+             "'tail': <seconds>} (voice_help(name) lists every function and its params)")
     if prof:
         L += [''] + [f"{mark(n)}{n:<16} {o:<9} {s}" for n, o, s in prof]
         L.append("use: instrument={'type': 'mimic', 'profile': '<name>', 'params': {}, 'tail': <seconds>} "
