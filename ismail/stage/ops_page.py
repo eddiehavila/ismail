@@ -636,8 +636,10 @@ def stage_actor_pose(scene: str, person: str, t: float = None) -> str:
     """Where a person's joints are, in Blender metres (page command: actor_pose): pelvis, spine_03, head, lowerarm_l/r,
     hand_l/r, calf_l/r, foot_l/r. While the user follows them: now. While a take plays on them: at t seconds of the
     take (default: the frame playing). Otherwise: their start pose (stage_actor_start; 'rest' when none), i.e. frame 0
-    of the next Follow. Check contact numerically: the pelvis over the seat top, the hands on the bar top. Page
-    replies {person, joints, start, take, t}."""
+    of the next Follow. Check contact numerically: the pelvis over the seat top, the hands on the bar top. `short`
+    names the limb ends that could not reach their target in that pose and by how many metres (a hand driven past
+    arm's length stops at full reach): {"hand_l": 0.04} means the left hand is 4 cm short of where it was sent. Page
+    replies {person, joints, short, start, take, t}."""
     return page_cmd(scene, 'actor_pose', {'person': person, 't': t}, timeout=30)
 
 

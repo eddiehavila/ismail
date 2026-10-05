@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### The pose read-back says when a limb fell short
+
+- `stage_actor_pose` replies `short`: the limb ends that could not reach their target in that pose, in metres
+  (`{"hand_l": 0.066}`: the left hand stopped 6.6 cm short of where it was sent, at full reach). A hand that cannot
+  reach the bar from a start pose is a number for the agent, not something found in the headset.
+
 ### A brief for a take helper agent
 
 - `references/stage-takes.md`: when the person wants a fast take loop and the scene's agent is busy, a helper agent
