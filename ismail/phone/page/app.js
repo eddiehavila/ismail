@@ -91,10 +91,16 @@ async function tap(what, extra) {
   const j = await send('/api/tap', Object.assign({ what }, extra || {}));
   if (j) toast((SAID[what] || extra && extra.mood || what) + (j.heard && j.heard.of ? ', at ' + j.heard.of : '') + ': sent');
 }
-$('love').onclick = () => tap('love');
+function flash(el) {                        // a tap reads at a glance: the key lights and says SENT
+  const l = el.querySelector('.lbl'); if (!l) return;
+  if (!el.dataset.lbl) el.dataset.lbl = l.textContent;
+  el.classList.add('sent'); l.textContent = 'Sent';
+  clearTimeout(el.flashT); el.flashT = setTimeout(() => { el.classList.remove('sent'); l.textContent = el.dataset.lbl; }, 800);
+}
+$('love').onclick = () => { flash($('love')); tap('love'); };
 $('startset').onclick = () => tap('start_set');
-$('change').onclick = () => tap('change');
-document.querySelectorAll('[data-tap]').forEach((b) => { b.onclick = () => tap(b.dataset.tap); });
+$('change').onclick = () => { flash($('change')); tap('change'); };
+document.querySelectorAll('[data-tap]').forEach((b) => { b.onclick = () => { flash(b); tap(b.dataset.tap); }; });
 document.querySelectorAll('[data-mood]').forEach((b) => { b.onclick = () => tap('mood', { mood: b.dataset.mood }); });
 $('quality').onclick = () => { kbps = kbps === 64 ? 128 : 64; store.set('kbps', kbps); $('quality').textContent = kbps + ' kbps'; if (want) connect(); };
 $('buzzset').onclick = () => { buzzOn = !buzzOn; store.set('buzz', buzzOn); $('buzzset').textContent = buzzOn ? 'Buzz on' : 'Buzz off'; };

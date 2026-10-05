@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### The phone page's keys get icons (Nate: "they could have their own little SVG icons too")
+
+- Love this, change it up, calmer, more energy, quieter, louder, pause and resume set each have an icon drawn to
+  the page's contract (24-unit grid, 2px strokes, square ends), with the word small beneath it. A tap lights the key
+  and reads SENT for a moment, so it can be read at a glance with the phone half out of the pocket.
+
 ### The pose read-back says when a limb fell short
 
 - `stage_actor_pose` replies `short`: the limb ends that could not reach their target in that pose, in metres
