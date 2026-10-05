@@ -20,6 +20,7 @@ POST /voice/perf?scene=&perf=&clip=N&seq=K   a performance clip's audio, chunk K
                          a performance); ...&end=1&at=&seconds=&by= closes clip N: transcribed with word times snapped
                          onto the voice (perform.py) into a `perform_clip` event and performances/<perf>/perf.json
 POST /perf/meta?scene=&perf=   the page merges a performance's meta (person, markers, ended, take)
+GET  /actor/profile?scene=&who=   an actor's profile (rigs.py): rig, named parts, control map presets
 GET  /voice/say?text=&voice=   speech for the headset (speakwright's Kokoro), audio/wav
 POST /snapshot?scene=<name>&tag=<camera>  (png body) -> scenes/<name>/snapshots/<tag>_<time>.png
 POST /save?scene=<name>  -> writes scenes/<name>/edits.json; the previous one moves to scenes/<name>/history/ first
@@ -183,7 +184,7 @@ def save_edits(name, edits):
 CMD_TYPES = {'cue', 'cue_remove', 'cues_clear', 'cues_list', 'waypoint', 'waypoint_remove', 'waypoints_clear', 'waypoints_list', 'waypoint_go', 'sky', 'scene_go', 'scene_list', 'actor_follow', 'trees_reload', 'clock', 'key', 'key_delete', 'anim_save', 'anim_clear', 'timeline', 'growth', 'music', 'take_start', 'take_stop', 'eyecam', 'voice_rec', 'say', 'goto', 'goto_camera', 'focus', 'select', 'deselect', 'highlight', 'marker', 'clear_markers', 'set',
              'light', 'walk', 'look_through', 'snapshot', 'reload', 'undo', 'ask', 'panel', 'panel_close',
              'ack', 'gallery_add', 'drop', 'take_view', 'take_view_clear', 'actor_play', 'actor_stop', 'stream', 'anchor', 'anchor_release',
-             'take_keep_last', 'follow_anchor', 'perform', 'batch'}
+             'take_keep_last', 'follow_anchor', 'perform', 'batch', 'control_set', 'control_map'}
 COND = threading.Condition()
 LIVE = {}                      # scene -> {'state', 'state_t', 'events': [...], 'ev_id', 'cmds': [...], 'cmd_id'}
 
@@ -658,6 +659,20 @@ class Handler(SimpleHTTPRequestHandler):
         if u.path == '/stage':                     # what this server serves: the default scene first
             from .world import default_scene
             return self._json(200, {'scenes': scene_names(), 'default': default_scene(SCENES), 'code': code_version()})
+        if u.path == '/actor/profile':             # an actor's profile: its file beside its body over what the body says
+            from .world import load_world
+            from . import rigs
+            qs = parse_qs(u.query)
+            name, who = qs.get('scene', [''])[0], qs.get('who', [''])[0]
+            if not NAME.match(name) or not NAME.match(who) or not (SCENES / name).is_dir():
+                return self._json(400, {'error': 'bad scene or actor'})
+            src = load_world(SCENES, name).get('assets') or name
+            try:
+                return self._json(200, rigs.profile(SCENES / src / 'actors', who))
+            except FileNotFoundError:
+                return self._json(404, {'error': f'no actor body {src}/actors/{who}.glb'})
+            except ValueError as e:
+                return self._json(400, {'error': str(e)})
         if u.path == '/world':                     # a scene's world.json with defaults (who plays whom, facings, ...)
             from .world import load_world
             name = parse_qs(u.query).get('scene', [''])[0]

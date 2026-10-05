@@ -12,6 +12,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { JOINTS } from './hands.js';
 import { cutout, b2tPos } from './editor.js';
 import { world } from './world.js';
+import { initControl } from './control.js';
 
 // who plays whom, facings, partners and the floor are the scene's (world.json via world.js), not the runtime's
 // where a person stands: the bottom of their stand-in (the band is up on the stage), the room's floor without one
@@ -126,9 +127,17 @@ export function initActors(ed, live) {
         const fwd = rest.ball_l.p.clone().sub(rest.foot_l.p).setY(0).normalize();
         const left = rest.upperarm_l.p.clone().sub(rest.upperarm_r.p).setY(0).normalize();
         return { who, root, bones, rest, fwd, left, cal: handCalibration(bones, rest), local: Object.fromEntries(Object.entries(bones).map(([n, b]) => [n, b.quaternion.clone()])) };
-      }));
+      }).then(async (rig) => { await readProfile(rig); return rig; }));
     }
     return loaded.get(who);
+  }
+
+  // its profile (rigs.py): rig type, named parts, control map presets; a body without one still has its parts. Read
+  // again before a preset is applied (an agent may have just saved it)
+  async function readProfile(rig) {
+    rig.profile = await fetch(`actor/profile?scene=${encodeURIComponent(scn())}&who=${encodeURIComponent(rig.who)}`, { cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : null)).catch(() => null) || rig.profile || { rig: 'unknown', parts: {}, effectors: [], maps: {} };
+    return rig;
   }
 
   // ---- hands: each WebXR joint straight onto its bone, no rest-pose guess. A WebXR joint has -Z along the bone toward
@@ -193,10 +202,15 @@ export function initActors(ed, live) {
     aim(B, C, S.clone().addScaledVector(u, d));
   }
 
-  // ---- one frame of the take onto the rig
-  function pose(st, f) {
+  // ---- one frame of the take onto the rig: the built-in human map, then the control map's drives (control.js)
+  function pose(st, raw) {
+    let f = raw;
     if (st.turn) f = turnFrame(f, st);
     if (st.mirror && st.mirrorN) f = mirrorFrame(f, st);
+    poseBase(st, f);
+    control.apply(st, f, raw);
+  }
+  function poseBase(st, f) {
     const { rig, s, anchor, J } = st, to = st.to || anchor;
     const P = (a) => to.clone().add(new THREE.Vector3(a[0], a[1], a[2]).sub(anchor).multiplyScalar(s));
     for (const [n, q] of Object.entries(rig.local)) rig.bones[n].quaternion.copy(q);   // from rest each frame
@@ -377,7 +391,8 @@ export function initActors(ed, live) {
     const pins = anchors.get(person);
     if (pins) usePins(st, pins);
     playing.set(person, st);
-    live.emit('actor_follow', { person, actor: who, scale: +s.toFixed(2), pinned: pinnedNames(st) });
+    await control.onFollow(person);
+    live.emit('actor_follow', { person, actor: who, scale: +s.toFixed(2), pinned: pinnedNames(st), drives: control.state(person) });
     return { person, actor: who, following: true, scale: +s.toFixed(2) };
   }
   async function cloneRig(r) {                              // a second person on the same actor (couple 3)
@@ -522,6 +537,13 @@ export function initActors(ed, live) {
     return r;
   }
   live.handlers.follow_anchor = (c) => anchor(c);
+  // the control map (control.js): drives per part, on top of the built-in map
+  const rigOf = (person) => {
+    const who = world().actors[person];
+    if (!who) return Promise.reject(new Error('no actor for ' + person + ' (world.json actors)'));
+    return load(who, `scenes/${encodeURIComponent(world().assets || scn())}/`);
+  };
+  const control = initControl(ed, live, { rigOf, readProfile, setWorldQ, twoBone, pinPoint, anchor: (c) => anchor(c), pinsOf: (p) => pinsOf(p) });
   const pinsOf = (person) => { const st = playing.get(person); return st ? pinnedNames(st) : Object.keys(anchors.get(person) || {}).filter((k) => k !== 'legs' && anchors.get(person)[k]); };
-  return { play, stop, follow, setSource, playing, load, pose, canPlay, turnBy, setMode, moveTo, at, setMirror, anchor, pinsOf };
+  return { play, stop, follow, setSource, playing, load, pose, canPlay, turnBy, setMode, moveTo, at, setMirror, anchor, pinsOf, control, rigOf };
 }
