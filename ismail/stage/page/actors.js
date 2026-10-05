@@ -304,10 +304,11 @@ export function initActors(ed, live) {
     if (!who) throw new Error('no actor for ' + person + ' (world.json actors, or pass actor)');
     const base = `scenes/${encodeURIComponent(c.assets || world().assets || scn())}/`;   // a derived scene's bodies: its source's
     const tbase = `scenes/${encodeURIComponent(c.takes || scn())}/takes/${encodeURIComponent(c.take)}/`;
-    const [rig0, meta, txt] = await Promise.all([load(who, base), fetch(tbase + 'meta.json', { cache: 'no-store' }).then((r) => r.json()),
-      fetch(tbase + 'frames.jsonl', { cache: 'no-store' }).then((r) => { if (!r.ok) throw new Error('no take ' + c.take); return r.text(); })]);
+    // c.frames: frames in memory (the last Follow, played back before it is kept: perform.js), with c.meta
+    const [rig0, meta, txt] = await Promise.all([load(who, base), c.frames ? { joints: JOINTS, ...(c.meta || {}) } : fetch(tbase + 'meta.json', { cache: 'no-store' }).then((r) => r.json()),
+      c.frames ? null : fetch(tbase + 'frames.jsonl', { cache: 'no-store' }).then((r) => { if (!r.ok) throw new Error('no take ' + c.take); return r.text(); })]);
     stop({ person });
-    let frames = txt.split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((f) => f.head);
+    let frames = (c.frames || txt.split('\n').filter(Boolean).map((l) => JSON.parse(l))).filter((f) => f.head);
     if (!frames.length) throw new Error('take has no frames');
     // a trimmed take plays only its kept part (actions.js review: Start here / End here; saved in meta.trim)
     const trim = c.trim === null ? null : c.trim || meta.trim;
@@ -342,7 +343,7 @@ export function initActors(ed, live) {
     const h0 = frames[0].head;
     const turn = to && h0.length >= 7 ? turnFor(new THREE.Quaternion(h0[3], h0[4], h0[5], h0[6]), facingOf(ed, person, to)) : null;
     const st = { person, rig, frames, J, s, anchor, to, floor: ground, alignInv: align.clone().invert(), feet: { l: {}, r: {} },
-      t0: performance.now(), loop: c.loop !== false, it, take: c.take, i: 0, rate: c.rate || 1, turn };
+      t0: performance.now(), loop: c.loop !== false, it, take: c.take, i: 0, rate: c.rate || 1, turn, meta };
     playing.set(person, st);
     live.emit('actor_play', { person, actor: who, take: c.take, seconds: +(frames[frames.length - 1].t - frames[0].t).toFixed(1), scale: +s.toFixed(2) });
     return { person, actor: who, frames: frames.length, scale: +s.toFixed(2) };

@@ -12,6 +12,29 @@
 - `python -m ismail.machine history [--song slug] [--since 7d|2026-10-04] [--jobs N]` sums it per song.
 - History starts with this change; jobs before it were never kept.
 
+### A Follow is a performance; stage_batch (S32)
+
+- The Follow button starts a performance and the same button ends it. While someone follows the person, no gesture
+  acts (no travel, menus, phone, thumbs or grabs; a poke still presses a panel), and the Follow panel says so.
+- The mic records from the first moment of every Follow, in clips on the Follow's clock (seconds since it began),
+  uploaded a second at a time so a crash keeps what came in: `<scene>/performances/<id>/clip_<n>.<ext>` and
+  `perf.json` (person, markers, clips with their words). A stopped clip is transcribed with word times, snapped onto
+  the measured voice (whisper starts a phrase's first word up to half a second early, in the silence before it),
+  into a `perform_clip` event with the words on the Follow clock.
+- `stage_perform(scene, action)`: `state`, `stop_clip` (read it while the person goes on), `start_clip`,
+  `next_clip`, `mic_off`, `mark` with a label. The Follow panel has Mic off / Mic on. `stage_performance(scene, perf)`
+  reads a performance as text: markers, clips, each word at its time.
+- While the person performs, `stage_say` shows the line and does not speak it (it would be in the recording);
+  `aloud=True` speaks it. `stage_ask` waits for after the Follow (thumbs are off).
+- After a Follow it plays back on the person first, with the voice, while the card asks Keep / Discard. A take kept
+  from a Follow, or recorded during one, plays its performance's voice with it wherever it plays (meta `performance`,
+  `perf_shift`: where the take's time 0 falls on the Follow clock).
+- `stage_batch(scene, ops)`: many stage ops in one call. The page commands go to the page as one command and run
+  back to back; an op that runs on the server first sends the page commands before it. With `stop_on_error` the
+  first failure stops it and the files changed on the server go back.
+- speakwright (the speech server) answers `response_format=verbose_json` with word times; an older one still gives
+  the text, and the event says the words are missing.
+
 ### The machine board's lock holds under a crowd (M85); one test file is not a heavy run (M86)
 
 - `ismail.machine`: a job waiting in line no longer dies when the board's lock changes hands under it (a holder

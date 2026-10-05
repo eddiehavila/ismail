@@ -212,10 +212,12 @@ export function initXR(ed, desktop) {
   function onPress(s, kind) {
     if (s.grab || s.pull) return;
     if (resting(s)) return;                                             // a limp hand at the side presses nothing
+    const acting = !!(s.src && s.src.hand && st.performing && st.performing());   // perform.js: a hand only presses panels
     if (s.src && s.src.hand && st.near && st.near(s.src.handedness)) return;   // touch.js: the hand is on something
     if (s.src && s.src.hand && st.nearChecks.some((f) => f(s.src.handedness))) return;   // panels.js: the hand is at a panel
     const h = castFrom(s);
     if (h && h.panel) { if (h.button && kind === 'select') { press(h.button); pulse(s, 0.3, 15); } return; }
+    if (acting && !(h && h.extra)) return;
     if (h && h.extra) {
       if (kind === 'select') {
         const api = h.extra.userData.panelApi;
@@ -484,6 +486,7 @@ export function initXR(ed, desktop) {
   function redraw() { dirtyPanel = true; }
   function setNear(fn) { st.near = fn; }
   function setLocked(fn) { st.locked = fn; }
+  function setPerforming(f) { st.performing = f; }                       // perform.js: is the user performing
   function setHandState(H) { st.handState = H; }                       // hands.js state: which hand is resting     // touch.js: the building's fixed parts
   st.nearChecks = [];
   function addNearCheck(fn) { st.nearChecks.push(fn); }
@@ -497,5 +500,5 @@ export function initXR(ed, desktop) {
   function hoverUV(uv) { const b = uv ? buttonAt(uv) : null; if (b !== st.hover) { st.hover = b; dirtyPanel = true; } }       // touch.js: is this hand reaching into something (then it holds, not the ray)
   // scenes.js: after a scene switch, stand where this headset last stood in that scene (or at its start camera)
   const placeInScene = () => { if (xr.isPresenting) enterScene(false); };
-  return { update, panel, panelMesh, placePanel, press, buttons, ctls, drawPanel, setRec, redraw, setNear, setLocked, setHandState, addTarget, removeTarget, pressUV, hoverUV, addNearCheck, placeInScene };
+  return { update, panel, panelMesh, placePanel, press, buttons, ctls, drawPanel, setRec, redraw, setNear, setLocked, setHandState, setPerforming, addTarget, removeTarget, pressUV, hoverUV, addNearCheck, placeInScene };
 }

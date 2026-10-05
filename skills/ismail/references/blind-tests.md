@@ -25,7 +25,7 @@ Put the real sound next to lenses, versions that each change exactly ONE named, 
 
 Per trial, three clips of the same moment: **R** the recording, **A** my instrument with the recording's exact expression copied onto it (its pitch curve, filter or wah curve, level curve), **B** my instrument played by my player model (my own vibrato, bends, dynamics, effect moves). The two lenses separate the two questions: A failing means the instrument or rig is wrong; A passing while B fails means the performance is wrong. Hide which is which, shuffle per trial, and reveal the answers with scores and spectrogram strips only after the user submits.
 
-In a guitar study the blind exam went from 3 of 28 undetected to 20 of 22 in four rounds. Each round's misses named the next fix. The design rules below each cost a round when they were missing.
+In a guitar study the blind exam went from 1 of 16 undetected to 20 of 22 in four rounds (1/16, 3/28, 14/24, 20/22). Each round's misses named the next fix. The design rules below each cost a round when they were missing.
 
 **Climb from the smallest unit.** Start where a miss can be fixed: one note or gesture, then a phrase, then the part
 in the band, then the full mix. The guitar study's single-gesture trials climbed round by round. A full-mix blind
