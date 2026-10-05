@@ -418,5 +418,7 @@ renders and other CPU work still run beside you, so keep your engine at High pri
 
 ## Away from the computer
 
-When the person listens from their phone, `references/phone.md` covers it: start `phone_start`, read their taps and
-voice notes by the bar they heard, and answer on the page.
+Offer the phone page whenever a set is playing and the person is about to leave the computer: a walk, bed, the
+kitchen, the car. Say it in one line: "Want it on your phone? You can talk to me from the earbuds and tap feedback
+without unlocking." Then `phone_start` and give them the address. `references/phone.md` covers the rest: reading
+their taps and voice notes by the bar they heard, answering on the page, and the hosting.

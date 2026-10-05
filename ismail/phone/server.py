@@ -749,6 +749,8 @@ class Handler(BaseHTTPRequestHandler):
         path = u.path
         if path in ('/', '/index.html'):
             return self._file(PAGE / 'index.html')
+        if re.fullmatch(r'/cues/(start|end|sent|error)\.mp3', path):
+            return self._file(PAGE / path[1:])
         if path in ('/app.js', '/sw.js', '/icon.svg', '/manifest.webmanifest'):
             return self._file(PAGE / path[1:])
         if path == '/health':

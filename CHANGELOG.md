@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### The skill says when to offer the phone page, and how it is hosted
+
+- `references/phone.md`: when to offer it (a set plays and the person steps away: a walk, bed, another room), the
+  one line to say, and the hosting (Tailscale today, with what the person installs; the home network later, which
+  needs https for the microphone). SKILL.md's which-tool table and `live.md` point there. Nate asked that the skill
+  know the page exists, not only the code.
+- The earbud cue tones (a note starts, ends, arrived, blocked) are made with ismail on its measured grand piano
+  (`songs/_phone_cues/make_cues.py`), set to -22 LUFS so they sit under the music. The page keeps its synthesized
+  tones as a fallback until the files load.
+
 ### The phone page's keys get icons (Nate: "they could have their own little SVG icons too")
 
 - Love this, change it up, calmer, more energy, quieter, louder, pause and resume set each have an icon drawn to
