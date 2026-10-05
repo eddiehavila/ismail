@@ -176,7 +176,8 @@ def test_priority_from_the_user_puts_a_session_first_in_line_and_heat_still_hold
         machine._held.depth = 1
     vx.join(90)
     bg.join(90)
-    assert got == ['vox', 'tambopata'] and not errors and machine.waiters() == []
+    assert not errors, errors                             # a refusal says why (a flake on Windows CI hid it)
+    assert got == ['vox', 'tambopata'] and machine.waiters() == []
     # a job that does not wait yields to a waiter ahead of it, with the reason (the slot is free here)
     me = __import__('psutil').Process()
     os.makedirs(board / 'waiting', exist_ok=True)
