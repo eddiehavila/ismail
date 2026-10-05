@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Loading without the long stalls (the "parallelograms" on the Quest)
+
+- The Quest has no parallel shader compile, so the room's one precompile (`compileAsync`) stalled a frame for about a
+  second, and the trees' growth shaders, patched after they were staged, all compiled in one drawn frame (1.6 s, 28
+  programs). A stalled XR frame is reprojected: the user saw "vertical parallelograms on each eye".
+- Now, without the extension, `reveal.js` compiles one material per frame before the reveal (the root compiled with the
+  other meshes' materials set aside for the call), and waits for each program's link inside that frame, not at its first
+  draw. With the extension it compiles at once off the frame, as before. `?paced=1` tests the Quest's path on a desktop.
+- A tree's growth shader is patched before it is staged (`patchGrowth(root)`), so it is compiled with the rest.
+
 ### Pinch again to reach what is behind or inside
 
 - In VR, a second pinch at the same point (within about 6 cm, or 4% of the ray's length, and 6 s) takes the next
