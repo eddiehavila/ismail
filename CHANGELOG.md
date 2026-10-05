@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### The stage's security floor, part A (server only)
+
+- Only the stage server makes the person's words: a client posting `voice_message`, `voice_in`, `voice_heard`,
+  `perform_clip` or `perform_clip_in` (or an event that says it is the server) is refused with 403. Before, any client,
+  including a page on another origin with a text/plain POST, could add a "voice note" agents read as the person.
+- A request whose Origin is not this stage (another port, another site, a sandboxed `null`) is refused on every write
+  and on the /live reads; agents send no Origin and the page is same-origin, so neither changes. Behind tailscale serve
+  the page's own .ts.net name is accepted.
+- Unknown Host names get 421 (DNS rebinding): loopback on the server's port, names under .ts.net, the `--host` address,
+  and names listed in `~/.ismail/stage.json` `"hosts"` are answered.
+- `/scenes/` paths with a backslash or a drive colon, or that resolve outside the scenes folder, 404.
+- `/health` counts refusals by reason; server.log has one line per refusal; nothing refused reaches the live log.
+- Not closed yet (part B, pairing): a program on the tailnet or this PC that sends no Origin can still post ordinary
+  events, queue page commands and upload audio. Spec: research/multiplayer/security-floor.md (multiplayer branch).
+
 ### Loading without the long stalls (the "parallelograms" on the Quest)
 
 - The Quest has no parallel shader compile, so the room's one precompile (`compileAsync`) stalled a frame for about a
