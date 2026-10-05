@@ -11,7 +11,8 @@ judges by ear. Read this page, then the playbook it names.
    will see.
 3. **Call `guide`.** For someone who has made nothing with ismail yet, it opens with the first session: two
    sentences on what this is, at most two questions, and sound within minutes (`sketch`).
-4. **Learn who you are talking to.** If you don't know, ask once whether they play or read music. Then use
+4. **Learn who you are talking to.** If you don't know, whether they play or read music goes into the first
+   session's first question ("what is it for, and do you play?"), so they still answer two, not three. Then use
    their language: a trained musician gets bars, voicings and registrations; someone new gets plain words
    (`skills/ismail/references/user-experience.md`).
 5. **Giving back.** When something they made could help others (an instrument, a voice, a fix), ask whether

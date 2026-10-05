@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Setup a novice can sit through (M119, the dress rehearsal)
+
+- `references/setup.md`: say the install takes about five minutes and looks frozen; prefer `uv pip install`
+  (faster, shows progress); warm up the plugin's uvx command before the plugin lines (a first start that builds
+  for minutes can time out); the app restart said once beforehand and done once; what the Allow prompts look like;
+  winget lines runnable as written; reloading PATH inside a desktop app; the play command per OS; and
+  `ISMAIL_SONGS` set to their music home so `guide`'s first-session check and the machine board see their songs.
+- Whether they play or read music rides on the first session's first question: two questions, not three
+  (`AGENTS.md`, `guide`).
+- `machine`'s WAIT text no longer tells an agent to ask someone new to close things: wait quietly and say "the
+  computer is busy, one moment" (a person who runs other work on the machine can still be asked).
+
 ### sketch hears a gentle classical or church brief (M118, the organist's dress rehearsal)
 
 - A classical feel: "prelude", "hymn", "chorale", "church", "sacred", "baroque", "classical", "chamber", "adagio" and
