@@ -28,6 +28,7 @@ import { initCues } from './cues.js';
 import { initAnchors } from './anchor.js';
 import { initPerform } from './perform.js';
 import { loadWorld } from './world.js';
+import { setPickEmit } from './pickcycle.js';
 
 // the scene: ?scene=, else the server's default (scenes/stage.json "default", else its first scene)
 const name = new URLSearchParams(location.search).get('scene')
@@ -55,6 +56,7 @@ const live = initLive(ed, desktop, xr);
 const hands = initHands(ed, xr, live.emit);
 const voice = initVoice(ed, hands, live);
 const touch = initTouch(ed, xr, hands, live.emit);
+setPickEmit(live.emit);   // pickcycle.js: pick_cycle events when a pinch again takes the next thing under it
 const updates = initUpdates(ed, live, hands, voice);
 const exitVR = initExit(ed, hands, live);
 const body = initBody(ed, hands);                  // which way the user's body faces (body-anchored panels)
