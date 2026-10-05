@@ -12,6 +12,19 @@
   session's. Sam's take played anchored by the feet though his hips were pinned to the stool.
 - A recorded voice plays back at a conversational level (about -30 dBFS RMS), not the raw mic level ("super loud").
 
+### Start poses (the person starts from their own pose, the user's motion as changes)
+
+- `stage_actor_start(scene, person, pose, mode)` keeps a start pose in the actor's profile (`actors/<body>.json`
+  "start"): `'rest'`, a frame of a take (`{"take": id, "frame": n}`), or a pose exported from Blender
+  (`{"bones": {name: {"rest": {head, tail, x}, "pose": {head, tail, x}}}}`, Blender metres, rest in armature space,
+  pose in world). With `mode="relative"` (the default) every Follow and every playback starts from it: at GO the
+  person holds the start pose, the head and spine turn as the user's head turns, the hands move as the wrists move
+  (scaled to the body) and turn as they turn, the hips and legs keep the pose. `mode="snap"` keeps the old behaviour.
+  The user held the bar while Sam's hands were up; the film assistant asked for start poses as data.
+- `stage_actor_pose(scene, person, t)` reads the joints back in Blender metres (pelvis, spine, head, elbows, hands,
+  knees, feet): now while following, at `t` of a playing take, otherwise the start pose (frame 0 of the next
+  Follow), so contact can be checked by number.
+
 ### Setup a novice can sit through (M119, the dress rehearsal)
 
 - `references/setup.md`: say the install takes about five minutes and looks frozen; prefer `uv pip install`

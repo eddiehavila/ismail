@@ -126,7 +126,8 @@ export function initActors(ed, live) {
         for (const [n, b] of Object.entries(bones)) rest[n] = { q: b.getWorldQuaternion(new THREE.Quaternion()), p: b.getWorldPosition(new THREE.Vector3()) };
         const fwd = rest.ball_l.p.clone().sub(rest.foot_l.p).setY(0).normalize();
         const left = rest.upperarm_l.p.clone().sub(rest.upperarm_r.p).setY(0).normalize();
-        return { who, root, bones, rest, fwd, left, cal: handCalibration(bones, rest), local: Object.fromEntries(Object.entries(bones).map(([n, b]) => [n, b.quaternion.clone()])) };
+        return { who, root, bones, rest, fwd, left, cal: handCalibration(bones, rest), local: Object.fromEntries(Object.entries(bones).map(([n, b]) => [n, b.quaternion.clone()])),
+          localP: Object.fromEntries(Object.entries(bones).map(([n, b]) => [n, b.position.clone()])) };
       }).then(async (rig) => { await readProfile(rig); return rig; }));
     }
     return loaded.get(who);
@@ -203,11 +204,15 @@ export function initActors(ed, live) {
   }
 
   // ---- one frame of the take onto the rig: the built-in human map, then the control map's drives (control.js)
-  function pose(st, raw) {
+  function prep(st, raw) {                                 // a frame as the person takes it: turned, mirrored
     let f = raw;
     if (st.turn) f = turnFrame(f, st);
     if (st.mirror && st.mirrorN) f = mirrorFrame(f, st);
-    poseBase(st, f);
+    return f;
+  }
+  function pose(st, raw) {
+    const f = prep(st, raw);
+    if (st.start) poseRelative(st, f); else poseBase(st, f);
     control.apply(st, f, raw);
   }
   function poseBase(st, f) {
@@ -362,6 +367,7 @@ export function initActors(ed, live) {
     // his hips were pinned to the stool): the take's own pins (meta.pins, Blender xyz), else this session's
     const pins = c.pins || meta.pins ? pinsFromMeta(c.pins || meta.pins) : anchors.get(person);
     if (pins && (pins.hips || pins.foot_l || pins.foot_r)) usePins(st, pins);
+    await useStart(st, c);
     playing.set(person, st);
     live.emit('actor_play', { person, actor: who, take: c.take, seconds: +(frames[frames.length - 1].t - frames[0].t).toFixed(1), scale: +s.toFixed(2) });
     return { person, actor: who, frames: frames.length, scale: +s.toFixed(2) };
@@ -394,9 +400,11 @@ export function initActors(ed, live) {
       alignInv: align.clone().invert(), feet: { l: {}, r: {} }, t0: performance.now(), it };
     const pins = anchors.get(person);
     if (pins) usePins(st, pins);
+    await useStart(st, c);
     playing.set(person, st);
     await control.onFollow(person);
-    live.emit('actor_follow', { person, actor: who, scale: +s.toFixed(2), pinned: pinnedNames(st), drives: control.state(person) });
+    live.emit('actor_follow', { person, actor: who, scale: +s.toFixed(2), pinned: pinnedNames(st), drives: control.state(person),
+      start: st.start ? st.start.spec : null });
     return { person, actor: who, following: true, scale: +s.toFixed(2) };
   }
   async function cloneRig(r) {                              // a second person on the same actor (couple 3)
@@ -555,6 +563,134 @@ export function initActors(ed, live) {
     return r;
   }
   live.handlers.follow_anchor = (c) => anchor(c);
+  // ---- start poses (for the user at the bar, 2026-10-05: a Follow took his pose at the press, hands down while Sam's
+  // were up). A person can start from a pose of their own (the actor profile's "start", stage_actor_start): in
+  // 'relative' mode they hold it at GO and the user's motion plays as changes from the user's pose at GO (the head
+  // and spine turn as the head turns, the hands move as the wrists move, scaled, the fingers turn as the user's turn,
+  // the hips and legs keep the pose); 'snap' (or no start) is the user's pose, as before. A start pose is:
+  //   'rest'           the body's own rest pose, standing at the person's spot, facing their way
+  //   {take, frame}    a frame of a recorded take, as it plays on them
+  //   {bones: {...}}   a pose from Blender (the armature the statue was baked from): per bone {rest: {head, tail, x}
+  //                    in armature space, pose: {head, tail, x} in world}, Blender metres; each bone takes the world
+  //                    turn from its rest frame to its posed frame, the pelvis goes where the pose has it
+  const b2tV = (v) => new THREE.Vector3(v[0], v[2], -v[1]);
+  function frameQ(e) {                                     // a bone's frame (Blender head, tail, x axis) as a turn
+    const yv = b2tV(e.tail).sub(b2tV(e.head)).normalize(), xv = b2tV(e.x).normalize();
+    xv.sub(yv.clone().multiplyScalar(xv.dot(yv))).normalize();
+    const zv = new THREE.Vector3().crossVectors(xv, yv);
+    return new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(xv, yv, zv));
+  }
+  const ARM = { l: ['upperarm_l', 'lowerarm_l', 'hand_l'], r: ['upperarm_r', 'lowerarm_r', 'hand_r'] };
+  async function startPose(st, spec) {
+    const { rig } = st, pel = rig.bones.pelvis, pose = spec.pose || 'rest';
+    for (const [n, b] of Object.entries(rig.bones)) { b.quaternion.copy(rig.local[n]); b.position.copy(rig.localP[n]); }
+    rig.root.updateMatrixWorld(true);
+    const putPelvis = (w) => { pel.parent.updateMatrixWorld(true); pel.position.copy(pel.parent.worldToLocal(w.clone())); pel.updateMatrixWorld(true); };
+    if (pose === 'rest') {
+      const fc = facingOf(ed, st.person, st.to, null);
+      const yaw = fc ? new THREE.Quaternion().setFromUnitVectors(rig.fwd, fc.clone().setY(0).normalize()) : new THREE.Quaternion();
+      putPelvis(new THREE.Vector3(st.to.x, st.floor + rig.rest.pelvis.p.y - rig.rest.foot_l.p.y, st.to.z));
+      setWorldQ(pel, yaw.multiply(rig.rest.pelvis.q));
+    } else if (pose.take) {
+      const tbase = `scenes/${encodeURIComponent(pose.scene || scn())}/takes/${encodeURIComponent(pose.take)}/`;
+      const [meta, txt] = await Promise.all([fetch(tbase + 'meta.json', { cache: 'no-store' }).then((r) => r.json()),
+        fetch(tbase + 'frames.jsonl', { cache: 'no-store' }).then((r) => { if (!r.ok) throw new Error('no take ' + pose.take); return r.text(); })]);
+      const frames = txt.split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((f) => f.head);
+      const fr = frames[Math.max(0, Math.min(frames.length - 1, pose.frame || 0))];
+      if (!fr) throw new Error('take ' + pose.take + ' has no frames');
+      const anchor = new THREE.Vector3(frames[0].head[0], world().floor || 0, frames[0].head[2]);
+      const actorH = rig.rest.head.p.y - rig.rest.foot_l.p.y + 0.08;            // the take's own scale, as play() has it
+      const hs = frames.map((x) => x.head[1]).sort((x, y) => x - y);
+      const ts = THREE.MathUtils.clamp(actorH / Math.max(0.5, hs[Math.floor(hs.length * 0.5)] - anchor.y), 0.6, 1.4);
+      const facing = facingOf(ed, st.person, st.to, null);
+      const tmp = { ...st, s: ts, J: Object.fromEntries((meta.joints || JOINTS).map((n, i) => [n, i])), anchor, pins: null, feet: { l: {}, r: {} },
+        turn: turnFor(new THREE.Quaternion(frames[0].head[3], frames[0].head[4], frames[0].head[5], frames[0].head[6]), facing) };
+      poseBase(tmp, tmp.turn ? turnFrame(fr, tmp) : fr);
+    } else if (pose.bones) {
+      const bs = pose.bones;
+      rig.root.traverse((b) => {                            // parents first
+        const e = b.isBone && bs[b.name];
+        if (!e || !e.rest || !e.pose || !rig.rest[b.name]) return;
+        const turn = frameQ(e.pose).multiply(frameQ(e.rest).invert());
+        setWorldQ(b, turn.multiply(rig.rest[b.name].q.clone()));
+      });
+      if (bs.pelvis && bs.pelvis.pose) putPelvis(b2tV(bs.pelvis.pose.head));
+    } else throw new Error("start pose is 'rest', {take, frame} or {bones: {...}} from Blender");
+    rig.root.updateMatrixWorld(true);
+    const S = { spec, locals: {}, pelvisLocal: pel.position.clone(), handW: {}, handQ: {}, elbowW: {}, fingerQ: {} };
+    for (const [n, b] of Object.entries(rig.bones)) S.locals[n] = b.quaternion.clone();
+    for (const sd of ['l', 'r']) {
+      const [, lo, ha] = ARM[sd];
+      if (!rig.bones[ha]) continue;
+      S.handW[sd] = rig.bones[ha].getWorldPosition(new THREE.Vector3());
+      S.handQ[sd] = rig.bones[ha].getWorldQuaternion(new THREE.Quaternion());
+      S.elbowW[sd] = rig.bones[lo].getWorldPosition(new THREE.Vector3());
+      for (const fg of Object.keys(FINGER_JOINTS)) for (let k = 1; k <= 3; k++) {
+        const b = rig.bones[`${fg}_0${k}_${sd}`];
+        if (b) S.fingerQ[b.name] = b.getWorldQuaternion(new THREE.Quaternion());
+      }
+    }
+    return S;
+  }
+  const qA = (a) => new THREE.Quaternion(a[3], a[4], a[5], a[6]), vA = (a) => new THREE.Vector3(a[0], a[1], a[2]);
+  function poseRelative(st, f) {
+    const { rig, s } = st, S = st.start;
+    for (const [n, q] of Object.entries(S.locals)) rig.bones[n].quaternion.copy(q);
+    rig.bones.pelvis.position.copy(S.pelvisLocal);
+    rig.root.updateMatrixWorld(true);
+    if (!st.ref) st.ref = st.frames ? prep(st, st.frames[0]) : f;   // the user's pose at GO (a take: its first frame)
+    const r = st.ref, I = new THREE.Quaternion();
+    const held = Object.fromEntries(SPINE.map(([n]) => [n, rig.bones[n].getWorldQuaternion(new THREE.Quaternion())]));
+    const D = qA(f.head).multiply(qA(r.head).invert());
+    for (const [n, k] of SPINE) setWorldQ(rig.bones[n], new THREE.Quaternion().slerpQuaternions(I, D, k).multiply(held[n]));
+    for (const [sd, h] of [['l', 'left'], ['r', 'right']]) {
+      const now = f[h], was = r[h];
+      if (!S.handW[sd] || !now || !now.j || !now.j[0] || !was || !was.j || !was.j[0]) continue;   // untracked: the start pose
+      const target = S.handW[sd].clone().add(vA(now.j[0]).sub(vA(was.j[0])).multiplyScalar(s));
+      const [up, lo, ha] = ARM[sd];
+      twoBone(rig, up, lo, ha, target, S.elbowW[sd].clone().add(new THREE.Vector3(0, -0.3, 0)));
+      setWorldQ(rig.bones[ha], qA(now.j[0]).multiply(qA(was.j[0]).invert()).multiply(S.handQ[sd].clone()));
+      for (const [fg, names] of Object.entries(FINGER_JOINTS)) names.forEach((jn, k) => {
+        const b = rig.bones[`${fg}_0${k + 1}_${sd}`], i = st.J[jn];
+        if (!b || !S.fingerQ[b.name] || !now.j[i] || !was.j[i]) return;
+        setWorldQ(b, qA(now.j[i]).multiply(qA(was.j[i]).invert()).multiply(S.fingerQ[b.name].clone()));
+      });
+    }
+  }
+  async function useStart(st, c) {                          // a Follow or a playback: the person's start pose, if any
+    await readProfile(st.rig);
+    const spec = c.start || (st.rig.profile && st.rig.profile.start);
+    st.start = spec && spec.mode !== 'snap' ? await startPose(st, spec) : null;
+    st.ref = null;
+  }
+  // live: actor_pose {person, t}: where their joints are (Blender metres): now while they follow, at t seconds of
+  // the take playing on them, or their start pose when nothing plays
+  const READ = ['pelvis', 'spine_03', 'head', 'lowerarm_l', 'hand_l', 'lowerarm_r', 'hand_r', 'calf_l', 'foot_l', 'calf_r', 'foot_r'];
+  const t2bV = (v) => [+v.x.toFixed(4), +(-v.z).toFixed(4), +v.y.toFixed(4)];
+  const readJoints = (rig) => Object.fromEntries(READ.filter((n) => rig.bones[n]).map((n) => [n, t2bV(rig.bones[n].getWorldPosition(new THREE.Vector3()))]));
+  async function poseOf(c) {
+    const person = c.person, st = playing.get(person);
+    if (st && st.live) return { person, following: true, start: st.start ? st.start.spec : null, joints: readJoints(st.rig) };
+    if (st) {
+      let fr = st.frames[st.i];
+      if (c.t != null) fr = st.frames.reduce((a, b) => (Math.abs(b.t - c.t) < Math.abs(a.t - c.t) ? b : a));
+      pose(st, fr);
+      return { person, take: st.take, t: fr.t, start: st.start ? st.start.spec : null, joints: readJoints(st.rig) };
+    }
+    const it = ed.byName.get(person), who = world().actors[person];
+    if (!who) throw new Error('no actor for ' + person);
+    let rig = await rigOf(person);
+    if ([...playing.values()].some((p) => p.rig === rig)) rig = await cloneRig(rig);
+    await readProfile(rig);
+    const spec = c.start || rig.profile.start || { pose: 'rest' };
+    const w = it ? it.obj.getWorldPosition(new THREE.Vector3()) : new THREE.Vector3();
+    const tmp = { person, rig, s: 1, floor: groundOf(it), to: new THREE.Vector3(w.x, groundOf(it), w.z), J: Object.fromEntries(JOINTS.map((n, i) => [n, i])) };
+    await startPose(tmp, spec);
+    const joints = readJoints(rig);
+    for (const [n, b] of Object.entries(rig.bones)) { b.quaternion.copy(rig.local[n]); b.position.copy(rig.localP[n]); }
+    return { person, start: spec, joints };
+  }
+  live.handlers.actor_pose = (c) => poseOf(c);
   // the control map (control.js): drives per part, on top of the built-in map
   const rigOf = (person) => {
     const who = world().actors[person];

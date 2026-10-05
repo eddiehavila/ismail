@@ -88,6 +88,8 @@ def profile(actors_dir, who):
         own = json.loads(f.read_text(encoding='utf-8'))
         out['parts'] = {**out['parts'], **own.get('parts', {})}
         out['maps'] = own.get('maps', {})
+        if own.get('start'):
+            out['start'] = own['start']
         out['file'] = f.name
     return out
 
@@ -116,6 +118,44 @@ def check_drive(d, parts):
     if mode == 'pin' and d.get('at') is None:
         raise ValueError("pin needs at= an object name, [x, y, z] in Blender metres, or 'here'")
     return {k: v for k, v in d.items() if v is not None}
+
+
+def check_start(pose, mode):
+    """A start pose: 'rest', {take, frame}, or {bones: {name: {rest: {head, tail, x}, pose: {head, tail, x}}}} (Blender
+    metres; rest in armature space, pose in world). Raises ValueError."""
+    if mode not in ('relative', 'snap'):
+        raise ValueError("mode is 'relative' (hold the start pose, the user's motion as changes from GO) or 'snap'")
+    if pose == 'rest':
+        return {'pose': 'rest', 'mode': mode}
+    if isinstance(pose, dict) and pose.get('take'):
+        return {'pose': {'take': str(pose['take']), 'frame': int(pose.get('frame') or 0),
+                         **({'scene': pose['scene']} if pose.get('scene') else {})}, 'mode': mode}
+    if isinstance(pose, dict) and isinstance(pose.get('bones'), dict):
+        def vec(v):
+            return isinstance(v, (list, tuple)) and len(v) == 3 and all(isinstance(x, (int, float)) for x in v)
+        for name, e in pose['bones'].items():
+            for side in ('rest', 'pose'):
+                fr = (e or {}).get(side) or {}
+                if not all(vec(fr.get(k)) for k in ('head', 'tail', 'x')):
+                    raise ValueError(f"bone {name}: {side} needs head, tail and x, each [x, y, z] in Blender metres")
+        if 'pelvis' not in pose['bones']:
+            raise ValueError('a Blender pose needs at least the pelvis (it places the body)')
+        return {'pose': {'bones': pose['bones']}, 'mode': mode}
+    raise ValueError("pose is 'rest', {'take': id, 'frame': n}, or {'bones': {...}} exported from Blender")
+
+
+def save_start(actors_dir, who, start):
+    """Store the start pose in the actor's profile (the previous file kept as <who>.json.prev); None removes it."""
+    f = actors_dir / f'{who}.json'
+    own = json.loads(f.read_text(encoding='utf-8')) if f.is_file() else {}
+    if f.is_file():
+        (actors_dir / f'{who}.json.prev').write_text(f.read_text(encoding='utf-8'), encoding='utf-8')
+    if start is None:
+        own.pop('start', None)
+    else:
+        own['start'] = start
+    f.write_text(json.dumps(own, indent=1), encoding='utf-8')
+    return f
 
 
 def save_map(actors_dir, who, name, m):
