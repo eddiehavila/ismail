@@ -6,7 +6,9 @@
 
 - The page's 5 s beat (clientlog.jsonl) carries `head` (position in Blender metres, yaw and pitch in degrees, yaw 0
   along +Y) and `worstAt`: the head and the triangles and draw calls of the worst frame in those 5 s, so a stall is
-  read against the view it happened in (the frame budget: under 400k triangles and 300 draw calls per view).
+  read against the view it happened in (the frame budget: under 400k triangles and 300 draw calls per view). It also
+  carries `shadowFrames` (frames in the window that re-drew the shadow maps), `playing` (people playing or following)
+  and `eyes` (2 in the headset: triangles and calls count both eyes).
 
 ### Pinch again to reach what is behind or inside
 

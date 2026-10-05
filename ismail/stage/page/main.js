@@ -44,7 +44,7 @@ initReveal(ed);                                    // everything enters a piece 
   for (const t of ['change', 'revealed', 'reloaded', 'switched', 'select']) ed.addEventListener(t, () => { dirty = true; });
   ed.preRender.push(function shadows() {
     const moving = ed.staging() || (window.VR_actors && window.VR_actors.playing.size > 0) || (ed.unlocked && ed.selected);
-    if (dirty || moving || ++n % 72 === 0) { ed.renderer.shadowMap.needsUpdate = true; dirty = false; }
+    if (dirty || moving || ++n % 72 === 0) { ed.renderer.shadowMap.needsUpdate = true; dirty = false; window.VR_shadowFrames = (window.VR_shadowFrames || 0) + 1; }
   });
 }
 // the page starts in the construct (construct.js): VR, voice and the live link work at once, the scene streams in
@@ -304,8 +304,12 @@ setInterval(() => {
   if (!window.VR_log) return;
   const m = performance.memory, inf = ed.renderer.info;
   const pace = { frames: fp.n, worstMs: Math.round(fp.worst), longFrames: fp.long, programs: inf.programs ? inf.programs.length : null,
-    staging: ed.staging ? ed.staging() : false, head: headAt(), worstAt: fp.at };
-  fp.worst = 0; fp.long = 0; fp.n = 0; fp.at = null;
+    staging: ed.staging ? ed.staging() : false, head: headAt(), worstAt: fp.at,
+    // what the frame cost comes from: frames that re-drew the shadow maps (a point light's is six renders of every
+    // caster; they re-draw while anyone plays or follows), and how many people were playing
+    shadowFrames: window.VR_shadowFrames || 0, playing: window.VR_actors ? window.VR_actors.playing.size : 0,
+    eyes: ed.renderer.xr.isPresenting ? 2 : 1 };
+  fp.worst = 0; fp.long = 0; fp.n = 0; fp.at = null; window.VR_shadowFrames = 0;
   window.VR_log('beat', JSON.stringify({ heapMB: m ? Math.round(m.usedJSHeapSize / 1e6) : null, limitMB: m ? Math.round(m.jsHeapSizeLimit / 1e6) : null,
     geo: inf.memory.geometries, tex: inf.memory.textures, tris: inf.render.triangles, calls: inf.render.calls,
     xr: ed.renderer.xr.isPresenting, xrFrames, loaded: ed.loaded, construct: construct.active, ...pace }));
