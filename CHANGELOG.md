@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Takes keep what was said while recording
+
+- A take's audio is transcribed as it lands (`takes/<id>/voice.json`, a `take_voice` event), with word times on the
+  take's clock, snapped onto the measured voice. A take kept from a Follow, or recorded during one, takes its words
+  from the performance's voice clips that fall inside it.
+- `stage_takes(scene, query, person, kept)`: takes newest first with what was said, label and notes; `query` finds
+  takes by their words, label or notes, and shows each hit with its second. `stage_take_note(scene, take, label,
+  note, at)` names a take or adds a note; `stage_take_transcribe(scene, take)` fills in an older take's words. The
+  person asked for it: he says a take's name and notes while recording, and records many takes of one thing.
+
 ### Setup a novice can sit through (M119, the dress rehearsal)
 
 - `references/setup.md`: say the install takes about five minutes and looks frozen; prefer `uv pip install`

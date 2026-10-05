@@ -432,6 +432,70 @@ def stage_actor_map_save(scene: str, person: str, name: str, pins: dict = None, 
             f'presets now: {", ".join(rigs.profile(adir, who)["maps"])}')
 
 
+
+def _scene_dir(scene):
+    d = Path(link.server_for(scene)['scenes']) / scene
+    if not d.is_dir():
+        raise OpError(f'no scene {scene!r}')
+    return d
+
+
+@op()
+def stage_takes(scene: str, query: str = None, person: str = None, kept: bool = None, limit: int = 30) -> str:
+    """A scene's takes, newest first, with what the person said while recording each (the take's own audio, or the
+    voice clips of the performance it came from), its label and notes. query= words that must all appear in what was
+    said, the label or the notes (case-insensitive; matches show the word and its second in the take); person= one
+    person's takes; kept=True only the kept ones. Lines: id, person, seconds, kept, label, what was said (shortened),
+    hits, notes. stage_take_note names a take or adds a note; stage_take_transcribe fills in an older take's words."""
+    from . import takes
+    rows = takes.listing(_scene_dir(scene), query=query, person=person, kept=kept, limit=limit)
+    if not rows:
+        return f'no takes in {scene}' + (f' matching {query!r}' if query else '') + (f' for {person}' if person else '')
+    out = []
+    for r in rows:
+        said = (r['said'][:140] + '...') if len(r['said']) > 140 else r['said']
+        line = (f"{r['id']}  {r['person'] or '-'}  {r['seconds'] or '?'} s{'  KEPT' if r['kept'] else ''}"
+                + (f"  [{r['label']}]" if r['label'] else '') + (f'  said: "{said}"' if said else '  (nothing said)'))
+        if r['hits']:
+            line += '  hits: ' + ', '.join(f'{w}@{t:.1f}s' for w, t in r['hits'])
+        for n in r['notes']:
+            line += f"\n    note{' @' + str(n['at']) + 's' if 'at' in n else ''} ({n.get('by')}): {n.get('text')}"
+        out.append(line)
+    return '\n'.join(out)
+
+
+@op(mutates=True)
+def stage_take_note(scene: str, take: str, label: str = None, note: str = None, at: float = None, sender: str = None) -> str:
+    """Name a take (label=, e.g. what the person called it while recording) and/or add a note (note=, at= seconds on
+    the take's clock if it is about a moment), kept in the take's meta.json and found by stage_takes(query=). sender=
+    who adds it (default "agent")."""
+    from . import takes
+    if label is None and not note:
+        raise OpError('give label= and/or note=')
+    try:
+        m = takes.note(_scene_dir(scene), take, label=label, text=note, at=at, by=sender or 'agent')
+    except FileNotFoundError:
+        raise OpError(f'no take {take!r} in {scene}; stage_takes lists them')
+    return f"{take}: label {m.get('label')!r}, {len(m.get('notes') or [])} notes"
+
+
+@op(mutates=True)
+def stage_take_transcribe(scene: str, take: str) -> str:
+    """Transcribe a take's own audio now (takes recorded before takes were transcribed as they land, or one whose
+    transcription failed): writes takes/<id>/voice.json with the words on the take's clock, snapped onto the
+    measured voice. Needs the speech server (speakwright) running."""
+    from . import takes
+    from .server import stt_words
+    d = _scene_dir(scene) / 'takes' / take
+    try:
+        v = takes.transcribe(d, stt_words)
+    except FileNotFoundError as e:
+        raise OpError(f'{e}; stage_takes lists the takes')
+    except OSError as e:
+        raise OpError(f'the speech server did not answer ({e}); is speakwright running?')
+    return f"{take}: \"{v['text']}\"" + (f" ({len(v['words'])} words)" if v.get('words') else f" ({v.get('words_missing')})")
+
+
 NOT_IN_BATCH = {'stage_batch', 'stage_start', 'stage_stop', 'stage_listen', 'stage_scene_export', 'stage_scene_new',
                 'stage_scene_go'}
 

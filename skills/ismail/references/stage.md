@@ -217,6 +217,9 @@ A person in a headset cannot see your terminal. Contact is part of the interface
   motion becomes his foot's), `touch=True` so they start when ready, `pin` to keep a hand on the bar, `hold` to keep
   a part still, `mimic` for a turn (a fingertip into a tail). Seated is a hips pin plus the legs' drives. When a map
   works, save it to the actor (`stage_actor_map_save`); a "default" map is ready every Follow.
+- **Find takes by what was said.** The person names takes and talks about them while recording; every take keeps
+  those words. `stage_takes(query="glass")` finds them with the second each word was said; `stage_take_note` names
+  a take or adds your own note.
 - **Set up a moment in one call.** `stage_batch(scene, ops=[...])` runs several stage ops in order (seat a person,
   mark the clip, show a card): the page commands land together, and a failure stops the rest.
 - **Say who you are.** Pass `sender=` (your name as the person knows it, e.g. "crossroads film") on `stage_say` and
