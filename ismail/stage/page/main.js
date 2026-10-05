@@ -72,7 +72,8 @@ live.handlers.take_view = (c) => takes4d.show(c);
 live.handlers.take_view_clear = () => takes4d.clear();
 const actors = initActors(ed, live);
 actors.setSource(() => hands.frameNow());   // live follow: the user's body this moment
-live.handlers.actor_follow = (c) => actors.follow(c);
+// countdown: seconds to count before it starts, so the user can take the pose first (the menu's Follow counts 3)
+live.handlers.actor_follow = async (c) => { if (c.countdown) await actions.countdown(c.countdown, c.person); return actors.follow(c); };
 const perform = initPerform(ed, hands, voice, live, () => actors);   // a Follow is a performance (perform.js)
 window.VR_perform = perform;
 xr.setPerforming(() => hands.performing);

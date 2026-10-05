@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Follow counts down first
+
+- The menu's Follow (and Take on a person) counts 3, 2, 1, GO in front of the user, with ticks, before the person
+  starts following: the person holds their pose while the user takes it, and the Follow (and its performance clock)
+  starts from the user's pose at GO. `stage_actor_follow(countdown=)` does the same for an agent. The user's take
+  started from his pose when he pressed Follow, hands down while the man's were up ("kind of makes it impossible").
+
 ### Setup a novice can sit through (M119, the dress rehearsal)
 
 - `references/setup.md`: say the install takes about five minutes and looks frozen; prefer `uv pip install`

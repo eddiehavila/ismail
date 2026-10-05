@@ -359,13 +359,16 @@ def stage_actor_stop(scene: str, person: str, why: str = 'stopped') -> str:
 
 @op(mutates=True)
 def stage_actor_follow(scene: str, person: str, actor: str = None, mode: str = 'place', mirror: bool = False,
-                 assets: str = None) -> str:
+                 assets: str = None, countdown: int = 0) -> str:
     """Make a person move with the person in VR, live, from where they stand (page command: actor_follow). mode:
     place (dances on the spot) | walk (walks as the user walks); mirror reflects left and right. It stops by itself
     when the user goes more than 6 m away. Meant for VR (it reads the live head and hands). Errors: no actor for that
     person, no live body source. Page replies {person, actor, following: true, scale}. Emits: actor_stop (anything
-    already on them), actor_follow; later actor_stop {why: walked_away}."""
-    return page_cmd(scene, 'actor_follow', {'person': person, 'actor': actor, 'mode': mode, 'mirror': mirror, 'assets': assets}, timeout=30)
+    already on them), actor_follow; later actor_stop {why: walked_away}. countdown= seconds counted down in front of
+    the user first (3, 2, 1, GO, with ticks) so they can take the person's pose; the Follow starts from their pose at
+    GO (the menu's Follow and Take count 3). Emits follow_countdown when it begins."""
+    return page_cmd(scene, 'actor_follow', {'person': person, 'actor': actor, 'mode': mode, 'mirror': mirror, 'assets': assets,
+                                            'countdown': countdown or None}, timeout=30 + (countdown or 0))
 
 
 @op(mutates=True)
