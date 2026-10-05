@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Pinch again to reach what is behind or inside
+
+- In VR, a second pinch at the same point (within about 6 cm, or 4% of the ray's length, and 6 s) takes the next
+  thing under it, then the next, round again: along the ray up to the first wall or locked part, and for a finger,
+  every box the fingertip is in, smallest first. It works for selecting and for moving. Each pick among several emits
+  `pick_cycle {how, item, n, of}`. A person's box covered the cup in their hand and the things near them, so a pinch
+  there always gave the person.
 ### A performance always has a way out, and agents hear it while it runs
 
 - The user spent seven minutes inside a performance an agent had started ("I'm basically just stuck in a
