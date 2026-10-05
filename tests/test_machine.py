@@ -140,6 +140,7 @@ def test_priority_from_the_user_puts_a_session_first_in_line_and_heat_still_hold
     import threading
     import time
     monkeypatch.setattr(machine, 'WAIT_POLL_S', 0.05)
+    monkeypatch.setattr(machine, 'METER_S', 0.05)                 # a slot's exit waits up to one meter sample
     with pytest.raises(ValueError, match='the user'):
         machine.set_priority('vox', 3600, by='')
     machine.set_priority('vox', 3600, by='the user', why='finish the voice exams')
@@ -149,7 +150,7 @@ def test_priority_from_the_user_puts_a_session_first_in_line_and_heat_still_hold
     def take(who, what):
         machine._held.depth = 0
         try:
-            with machine.slot('gpu', what, who=who, wait=10):
+            with machine.slot('gpu', what, who=who, wait=60):   # a slow CI runner takes seconds per hand-over
                 got.append(who)
         except machine.MachineBusy as e:
             errors.append(str(e))
@@ -173,8 +174,8 @@ def test_priority_from_the_user_puts_a_session_first_in_line_and_heat_still_hold
         assert 'waiting in line (2)' in b
         assert 'slots are full' in machine.check('gpu', who='crossroads')
         machine._held.depth = 1
-    vx.join(30)
-    bg.join(30)
+    vx.join(90)
+    bg.join(90)
     assert got == ['vox', 'tambopata'] and not errors and machine.waiters() == []
     # a job that does not wait yields to a waiter ahead of it, with the reason (the slot is free here)
     me = __import__('psutil').Process()
