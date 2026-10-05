@@ -29,7 +29,7 @@ function backoff() { retry = Math.min(retry + 1, 6); return 1000 * 2 ** (retry -
 function setPlaying(on) {
   want = on;
   if (on) connect(); else { audio.pause(); audio.removeAttribute('src'); audio.load(); sid = null; }
-  $('play').innerHTML = on ? '&#10073;&#10073; Pause' : '&#9654; Listen';
+  $('play').textContent = on ? 'Stop' : 'Listen'; $('play').classList.toggle('on', on);
   if ('mediaSession' in navigator) navigator.mediaSession.playbackState = on ? 'playing' : 'paused';
 }
 $('play').onclick = () => setPlaying(!want);
@@ -82,12 +82,12 @@ async function flush() {
   }
   store.set('outbox', outbox);
 }
-const SAID = { love: '♥ love', change: 'change it up', energy_up: 'more energy', energy_down: 'calmer', louder: 'louder',
+const SAID = { love: 'love this', change: 'change it up', energy_up: 'more energy', energy_down: 'calmer', louder: 'louder',
   quieter: 'quieter', pause: 'pause the set', resume: 'resume the set', start_set: 'start a set' };
 async function tap(what, extra) {
   buzz([40]);
   const j = await send('/api/tap', Object.assign({ what }, extra || {}));
-  if (j) toast((SAID[what] || extra && extra.mood || what) + (j.heard && j.heard.of ? ' · ' + j.heard.of : '') + ' · sent');
+  if (j) toast((SAID[what] || extra && extra.mood || what) + (j.heard && j.heard.of ? ', at ' + j.heard.of : '') + ': sent');
 }
 $('love').onclick = () => tap('love');
 $('startset').onclick = () => tap('start_set');
@@ -95,8 +95,8 @@ $('change').onclick = () => tap('change');
 document.querySelectorAll('[data-tap]').forEach((b) => { b.onclick = () => tap(b.dataset.tap); });
 document.querySelectorAll('[data-mood]').forEach((b) => { b.onclick = () => tap('mood', { mood: b.dataset.mood }); });
 $('quality').onclick = () => { kbps = kbps === 64 ? 128 : 64; store.set('kbps', kbps); $('quality').textContent = kbps + ' kbps'; if (want) connect(); };
-$('buzzset').onclick = () => { buzzOn = !buzzOn; store.set('buzz', buzzOn); $('buzzset').textContent = buzzOn ? 'buzz on' : 'buzz off'; };
-$('quality').textContent = kbps + ' kbps'; $('buzzset').textContent = buzzOn ? 'buzz on' : 'buzz off';
+$('buzzset').onclick = () => { buzzOn = !buzzOn; store.set('buzz', buzzOn); $('buzzset').textContent = buzzOn ? 'Buzz on' : 'Buzz off'; };
+$('quality').textContent = kbps + ' kbps'; $('buzzset').textContent = buzzOn ? 'Buzz on' : 'Buzz off';
 
 // ---- talk: hold to talk, or tap once to talk hands-free and tap again to send
 const talk = { rec: null, stream: null, chunks: [], down: 0, toggle: false, t: null, sid: null };
@@ -111,19 +111,46 @@ async function micStart() {
   talk.rec.ondataavailable = (e) => { if (e.data.size) talk.chunks.push(e.data); };
   talk.rec.start(250);
   audio.volume = 0.25;
-  $('talk').classList.add('on'); $('talk').textContent = 'Listening…'; buzz([30]);
+  $('talk').classList.add('on'); $('talk').firstChild.textContent = 'Talking'; buzz([30]);
+  meterStart(talk.stream);
 }
 function micStop(sendIt) {
   const r = talk.rec; if (!r) return;
   talk.rec = null; talk.toggle = false;
-  $('talk').classList.remove('on'); $('talk').textContent = 'Hold to talk'; audio.volume = 1;
-  $('talkhint').textContent = 'tap once to talk hands-free, tap again to send';
+  $('talk').classList.remove('on'); $('talk').firstChild.textContent = 'Hold to talk'; audio.volume = 1;
+  $('talkhint').textContent = 'tap once for hands-free, tap again to send';
+  meterStop();
   r.onstop = () => {
     const blob = new Blob(talk.chunks, { type: r.mimeType || 'audio/webm' });
     if (sendIt && blob.size > 1500) upload(blob, talk.sid, talk.t);
     else if (sendIt) toast('too short: hold a little longer');
   };
   r.stop();
+}
+const METER_N = 16;
+$('meter').innerHTML = '<b></b>'.repeat(METER_N);
+const meter = { ctx: null, an: null, src: null, raf: 0 };
+function meterStart(stream) {
+  try {
+    meter.ctx = meter.ctx || new (window.AudioContext || window.webkitAudioContext)();
+    meter.src = meter.ctx.createMediaStreamSource(stream);
+    meter.an = meter.ctx.createAnalyser(); meter.an.fftSize = 1024;
+    meter.src.connect(meter.an);
+    const buf = new Float32Array(meter.an.fftSize), bars = $('meter').children;
+    const tick = () => {
+      meter.an.getFloatTimeDomainData(buf);
+      let p = 0; for (const v of buf) p = Math.max(p, Math.abs(v));
+      const lit = Math.round(Math.max(0, Math.min(1, (20 * Math.log10(p + 1e-6) + 50) / 50)) * METER_N);
+      for (let i = 0; i < METER_N; i++) bars[i].classList.toggle('lit', i < lit);
+      meter.raf = requestAnimationFrame(tick);
+    };
+    tick();
+  } catch (e) {}
+}
+function meterStop() {
+  cancelAnimationFrame(meter.raf);
+  try { meter.src && meter.src.disconnect(); } catch (e) {}
+  [...$('meter').children].forEach((b) => b.classList.remove('lit'));
 }
 const pending = [];
 async function upload(blob, s, t) {
@@ -132,7 +159,7 @@ async function upload(blob, s, t) {
     const r = await fetch(u, { method: 'POST', headers: { 'Content-Type': blob.type }, body: blob });
     const j = await r.json();
     if (!r.ok) throw new Error(j.error);
-    addFeed({ me: true, id: j.id, text: 'voice note' + (j.heard && j.heard.of ? ' at ' + j.heard.of : '') + ': transcribing…' });
+    addFeed({ me: true, id: j.id, ts: new Date().toTimeString().slice(0, 5), text: 'voice note' + (j.heard && j.heard.of ? ' at ' + j.heard.of : '') + ', transcribing' });
     toast('sent'); buzz([30, 60, 30]);
   } catch (e) {
     pending.push([blob, s, t]); toast('offline: the note waits and sends when you are back');
@@ -148,7 +175,7 @@ T.addEventListener('pointerdown', (e) => {
 T.addEventListener('pointerup', () => {
   if (!talk.rec && !talk.down) return;
   const held = Date.now() - talk.down; talk.down = 0;
-  if (held < 400) { talk.toggle = true; $('talkhint').textContent = 'talking hands-free: tap to send'; return; }
+  if (held < 400) { talk.toggle = true; $('talkhint').textContent = 'hands-free: tap to send'; return; }
   if (!talk.toggle) micStop(true);
 });
 T.addEventListener('pointercancel', () => { if (!talk.toggle) micStop(false); });
@@ -158,11 +185,11 @@ T.addEventListener('contextmenu', (e) => e.preventDefault());
 const feedItems = [];
 function addFeed(it) { feedItems.unshift(it); feedItems.splice(12); renderFeed(); }
 function renderFeed() {
-  const caps = (state.captions || []).slice().reverse().map((c) => ({ text: c.text, who: c.who, ts: c.ts }));
+  const caps = (state.captions || []).slice().reverse().map((c) => ({ text: c.text, who: c.who, ts: (c.ts || '').slice(11, 16) }));
   const mine = feedItems.filter((x) => x.me);
   const all = mine.concat(caps).slice(0, 10);
-  $('feed').innerHTML = all.length ? all.map((c) => c.me ? `<div><small>you:</small> ${esc(c.text)}</div>`
-    : `<div>${esc(c.text)} <small>${esc(c.who || '')} ${esc((c.ts || '').slice(11, 16))}</small></div>`).join('') : '<div><small>nothing yet</small></div>';
+  $('feed').innerHTML = all.length ? all.map((c) => `<div><time>${esc(c.ts || '')}</time><span class="${c.me ? 'me' : ''}">${c.me ? 'you: ' : ''}${esc(c.text)}</span></div>`).join('')
+    : '<div><time></time><span class="me">nothing yet</span></div>';
 }
 const clip = { el: null, resume: false };
 function stopClip() {
@@ -188,7 +215,7 @@ function renderPanel() {
   const box = $('panel');
   let h = `<h2>${esc(p.title)}</h2>` + (p.text ? `<p>${esc(p.text)}</p>` : '') + (p.image ? `<img src="${esc(p.image)}">` : '');
   if (p.kind === 'exam') {
-    h += (p.clips || []).map((c, i) => `<div class="clip" data-i="${i}"><button class="playclip" data-url="${esc(c.url)}">&#9654; ${esc(c.label)}</button>`
+    h += (p.clips || []).map((c, i) => `<div class="clip" data-i="${i}"><button class="playclip" data-url="${esc(c.url)}">Play ${esc(c.label)}</button>`
       + (c.note ? `<div class="hint">${esc(c.note)}</div>` : '')
       + (p.chips && p.chips.length ? `<div class="chips">${p.chips.map((w) => `<button data-chip="${esc(w)}">${esc(w)}</button>`).join('')}</div>` : '') + '</div>').join('');
     if (p.choices && p.choices.length) h += `<div class="btns">${p.choices.map((c) => `<button class="choice" data-choice="${esc(c)}">${esc(c)}</button>`).join('')}</div>`;
@@ -222,32 +249,34 @@ function renderOffers() {
 function render() {
   const e = state.engine || {}, h = state.heard || {}, r = state.rec || {};
   $('top').classList.toggle('live', !!e.playing);
-  let lt = e.playing ? 'LIVE' : 'no set playing';
-  if (e.playing && h.of) lt += ' · ' + h.of;
-  if (want && h.behind_s != null) lt += ' · ' + h.behind_s + ' s behind';
-  if (!navigator.onLine) lt = 'offline';
-  $('livetext').textContent = lt;
-  $('rec').className = 'chip' + (r.on ? ' rec' : '');
-  $('rec').textContent = (r.on ? '● rec on' : 'rec off') + (r.why ? ': ' + r.why : '');
-  $('now').textContent = e.now || (e.playing ? 'playing' : 'nothing playing right now');
-  $('next').textContent = e.next ? 'next: ' + e.next : '';
-  $('pinned').hidden = !state.pinned; if (state.pinned) $('pinned').textContent = state.pinned.text;
+  $('livetext').textContent = !navigator.onLine ? 'offline' : e.playing ? (want ? 'live' : 'live, not listening') : 'no set playing';
+  $('rec').classList.toggle('on', !!r.on);
+  $('rectext').innerHTML = (r.on ? 'ON AIR' : 'REC OFF') + (r.why ? ` <small>${esc(r.why)}</small>` : '');
+  const m = /bar (\d+)(?: beat ([\d.]+))?/.exec(h.of || '');
+  $('bar').innerHTML = m ? `BAR ${m[1]}<span>.${esc(Math.floor(+(m[2] || 1)))}</span>` : 'BAR <span>---</span>';
+  $('behind').textContent = want && h.behind_s != null ? '+' + h.behind_s.toFixed(1) + ' s' : '--';
+  $('now').textContent = e.now || (e.playing ? 'playing' : 'nothing playing');
+  $('next').textContent = e.next || '--';
+  $('pinned').hidden = !state.pinned;
+  if (state.pinned) $('pinned').innerHTML = `<span class="cap">Since you left</span>${esc(state.pinned.text)}`;
   const caps = state.captions || [], lastc = caps[caps.length - 1];
   const fresh = lastc && (!state.pinned || lastc.text !== state.pinned.text);
-  $('last').hidden = !fresh; if (fresh) $('last').innerHTML = esc(lastc.text) + ` <small>${esc(lastc.who || '')} ${esc((lastc.ts || '').slice(11, 16))}</small>`;
+  $('last').hidden = !fresh;
+  if (fresh) $('last').innerHTML = `<span class="cap">${esc(lastc.who || 'DJ')} ${esc((lastc.ts || '').slice(11, 16))}</span>${esc(lastc.text)}`;
   $('startset').hidden = !!e.playing;
   document.querySelectorAll('[data-mood]').forEach((b) => b.classList.toggle('sel', b.dataset.mood === state.mood));
   $('agentbtns').innerHTML = (state.buttons || []).map((b) => `<button data-btn="${esc(b.id)}">${esc(b.label)}</button>`).join('');
   $('agentbtns').querySelectorAll('[data-btn]').forEach((b) => { b.onclick = () => tap('button:' + b.dataset.btn); });
+  $('agentwrap').hidden = !(state.buttons || []).length;
   const ls = state.listening || [];
-  $('listening').innerHTML = ls.length ? 'listening: ' + esc(ls.join(', ')) : '<span class="warn">no agent listening: your notes wait in the inbox</span>';
+  $('listening').innerHTML = ls.length ? 'listening: ' + esc(ls.join(', ')) : '<span class="warn">nobody listening: notes wait in the inbox</span>';
   (state.voice || []).forEach((v) => { const it = feedItems.find((x) => x.id === v.id); if (it && v.state.startsWith('waiting')) it.text = 'voice note: ' + v.state; });
   renderFeed(); renderPanel(); renderOffers(); mediaSession();
 }
 function onCmd(c) {
   if (c.type === 'caption') { toast(c.text); if (c.buzz) buzz([150, 80, 150]); }
   else if (c.type === 'buzz') buzz(c.pattern);
-  else if (c.type === 'heard') { const it = feedItems.find((x) => x.id === c.ref); if (it) it.text = '“' + c.text + '”'; else addFeed({ me: true, id: c.ref, text: '“' + c.text + '”' }); }
+  else if (c.type === 'heard') { const it = feedItems.find((x) => x.id === c.ref); if (it) it.text = '“' + c.text + '”'; else addFeed({ me: true, id: c.ref, ts: new Date().toTimeString().slice(0, 5), text: '“' + c.text + '”' }); }
   else if (c.type === 'offer' && c.offer && c.offer.auto && document.visibilityState === 'visible') {
     const a = document.createElement('a'); a.href = c.offer.url + '?dl=1'; a.download = c.offer.name; document.body.appendChild(a); a.click(); a.remove(); toast('downloading ' + c.offer.name);
   }

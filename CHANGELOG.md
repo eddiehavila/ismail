@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### The phone page, designed (Nate: "check the style" with the taste skill)
+
+- A deliberate look instead of the dark default: a field radio for one hand at night. The bar you hear is a tape
+  counter, recording is an ON AIR lamp, the keys are labelled hardware keys (Archivo condensed, JetBrains Mono for the
+  counter and the log, one accent derived from the name), and nothing is a symbol glyph Android could draw as emoji.
+- The talk key shows your microphone's level while it records, so you can see it hears you. The DJ log has a time
+  column. The mood control is a four-step selector, and the DJ's own buttons sit in their own section.
+
 ### Loading without the long stalls (the "parallelograms" on the Quest)
 
 - The Quest has no parallel shader compile, so the room's one precompile (`compileAsync`) stalled a frame for about a
