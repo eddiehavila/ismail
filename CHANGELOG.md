@@ -9,6 +9,45 @@
   every box the fingertip is in, smallest first. It works for selecting and for moving. Each pick among several emits
   `pick_cycle {how, item, n, of}`. A person's box covered the cup in their hand and the things near them, so a pinch
   there always gave the person.
+### A performance always has a way out, and agents hear it while it runs
+
+- The user spent seven minutes inside a performance an agent had started ("I'm basically just stuck in a
+  performance"): its Follow had no panel, its voice was one clip transcribed only at the end, and nothing he said
+  reached the agents. Now:
+  - an agent's Follow (`stage_actor_follow`) opens the Follow panel too (Stop, Mic off);
+  - `stage_perform(action="stop")` ends the whole performance: the Follow, and a take recording with it;
+  - the person can always end it: both thumbs down held 1.5 s (the HUD says so), or saying "stop the performance"
+    (or "stop the recording", "end performance"), which the server turns into the same stop;
+  - a clip cuts itself at the first pause after 6 s, or at 25 s, with no gap (the next starts before it stops), so
+    its words arrive while the performance goes on; a clip with no voice in it is not sent to the speech server;
+  - a clip's words (`perform_clip` with text) reach `stage_listen`, the text first.
+- A take made in a performance plays its recorded voice only on the person it was recorded for:
+  `stage_actor_play(voice=)` True plays it on another body too, False keeps it silent. One clip sounds once, however
+  many bodies play the take and however often it is played (a dance take on six dancers, played twice, built up "a din
+  of just me").
+
+### Follow counts down first
+
+- The menu's Follow (and Take on a person) counts 3, 2, 1, GO in front of the user, with ticks, before the person
+  starts following: the person holds their pose while the user takes it, and the Follow (and its performance clock)
+  starts from the user's pose at GO. `stage_actor_follow(countdown=)` does the same for an agent. The user's take
+  started from his pose when he pressed Follow, hands down while the man's were up ("kind of makes it impossible").
+- A played take honours the pins: the ones it was made with (kept in its meta as `pins`, Blender xyz), else the
+  session's. Sam's take played anchored by the feet though his hips were pinned to the stool.
+- A recorded voice plays back at a conversational level (about -30 dBFS RMS), not the raw mic level ("super loud").
+
+### Start poses (the person starts from their own pose, the user's motion as changes)
+
+- `stage_actor_start(scene, person, pose, mode)` keeps a start pose in the actor's profile (`actors/<body>.json`
+  "start"): `'rest'`, a frame of a take (`{"take": id, "frame": n}`), or a pose exported from Blender
+  (`{"bones": {name: {"rest": {head, tail, x}, "pose": {head, tail, x}}}}`, Blender metres, rest in armature space,
+  pose in world). With `mode="relative"` (the default) every Follow and every playback starts from it: at GO the
+  person holds the start pose, the head and spine turn as the user's head turns, the hands move as the wrists move
+  (scaled to the body) and turn as they turn, the hips and legs keep the pose. `mode="snap"` keeps the old behaviour.
+  The user held the bar while Sam's hands were up; the film assistant asked for start poses as data.
+- `stage_actor_pose(scene, person, t)` reads the joints back in Blender metres (pelvis, spine, head, elbows, hands,
+  knees, feet): now while following, at `t` of a playing take, otherwise the start pose (frame 0 of the next
+  Follow), so contact can be checked by number.
 
 ### Setup a novice can sit through (M119, the dress rehearsal)
 

@@ -142,3 +142,35 @@ def test_control_ops_reach_the_page(stage):
             OPS['stage_cmd'](scene='room', type='control_set')
     finally:
         page.stop = True
+
+
+def test_a_start_pose_is_kept_with_the_body(stage):
+    d = _body(stage)
+    out = OPS['stage_actor_start'](scene='room', person='person_bar_lean', pose={'take': '20261005_175000_sam', 'frame': 12})
+    assert 'take 20261005_175000_sam frame 12, relative' in out
+    assert json.loads(OPS['stage_actor_profile'](scene='room', person='person_bar_lean'))['start'] == {
+        'pose': {'take': '20261005_175000_sam', 'frame': 12}, 'mode': 'relative'}
+    fr = {'head': [0, 0, 1], 'tail': [0, 0, 1.1], 'x': [1, 0, 0]}
+    out = OPS['stage_actor_start'](scene='room', person='person_bar_lean', pose={'bones': {'pelvis': {'rest': fr, 'pose': fr}}}, mode='snap')
+    assert 'a Blender pose of 1 bones, snap' in out
+    got = _get(stage['port'], 'actor/profile?scene=room&who=bf_sam')[1]
+    assert got['start']['pose']['bones']['pelvis']['pose']['tail'] == [0, 0, 1.1] and got['start']['mode'] == 'snap'
+    for kw, msg in [({'mode': 'slow'}, "mode is 'relative'"), ({'pose': 'lean'}, "pose is 'rest'"),
+                    ({'pose': {'bones': {'pelvis': {'rest': fr}}}}, 'pose needs head, tail and x'),
+                    ({'pose': {'bones': {'head': {'rest': fr, 'pose': fr}}}}, 'at least the pelvis')]:
+        with pytest.raises(OpError, match=msg):
+            OPS['stage_actor_start'](scene='room', person='person_bar_lean', **kw)
+    OPS['stage_actor_start'](scene='room', person='person_bar_lean', clear=True)
+    assert 'start' not in json.loads((d / 'bf_sam.json').read_text(encoding='utf-8'))
+    assert 'stage_actor_start' in __import__('ismail.api', fromlist=['MUTATING']).MUTATING
+
+
+def test_the_pose_read_back_reaches_the_page(stage):
+    page = FakePage(stage['port'], 'room')
+    try:
+        OPS['stage_actor_pose'](scene='room', person='person_bar_lean', t=2.5)
+        assert (page.seen[-1]['type'], page.seen[-1]['person'], page.seen[-1]['t']) == ('actor_pose', 'person_bar_lean', 2.5)
+        with pytest.raises(OpError, match='stage_actor_pose'):
+            OPS['stage_cmd'](scene='room', type='actor_pose')
+    finally:
+        page.stop = True

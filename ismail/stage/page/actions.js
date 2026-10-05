@@ -10,6 +10,7 @@
 import * as THREE from 'three';
 
 const IDLE_METRE_SECONDS = 25;
+const FOLLOW_COUNTDOWN_S = 3;          // a Follow from the menu counts down first (the user, 2026-10-05: see below)
 const IDLE_MENU_METRE_SECONDS = 60;   // while its menu is up the user may be reading it (14 s at 1.7 m was too quick)
 
 export function initActions(ed, hands, panels, live, takes) {
@@ -32,6 +33,48 @@ export function initActions(ed, hands, panels, live, takes) {
     p.y = head.y - 0.18;
     return p;
   }
+  // ---- a countdown before a Follow starts (the user, 2026-10-05, in a kept take: the Follow took its offset from
+  // his pose the moment he pressed it, hands down on the bar, while Sam's were up and to the right: "kind of makes it
+  // impossible"). The person stays as they are while the numbers count, so the user can take their pose; at GO the
+  // Follow starts from where the user is then (and the performance clock with it), with a higher tick
+  const cdCanvas = document.createElement('canvas');
+  cdCanvas.width = 256; cdCanvas.height = 256;
+  const cdTex = new THREE.CanvasTexture(cdCanvas);
+  cdTex.colorSpace = THREE.SRGBColorSpace;
+  const cdSprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: cdTex, depthTest: false, transparent: true, toneMapped: false }));
+  cdSprite.renderOrder = 999; cdSprite.visible = false; cdSprite.scale.set(0.16, 0.16, 1);
+  ed.scene.add(cdSprite);
+  function cdDraw(text, go) {
+    const g = cdCanvas.getContext('2d');
+    g.clearRect(0, 0, 256, 256);
+    g.fillStyle = go ? 'rgba(22,163,74,0.9)' : 'rgba(16,18,22,0.85)';
+    g.beginPath(); g.arc(128, 128, 120, 0, Math.PI * 2); g.fill();
+    g.fillStyle = '#fff'; g.font = `bold ${go ? 92 : 150}px system-ui, sans-serif`; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.fillText(text, 128, 136);
+    cdTex.needsUpdate = true;
+  }
+  function cdPlace() {                       // in front of the user, a little below the eyes, where they look
+    const h = camera.getWorldPosition(new THREE.Vector3()), f = camera.getWorldDirection(new THREE.Vector3());
+    cdSprite.position.copy(h).addScaledVector(f, 0.7).y -= 0.08;
+  }
+  async function countdown(seconds = FOLLOW_COUNTDOWN_S, person = '') {
+    const n = Math.max(0, Math.round(seconds));
+    if (!n) return;
+    live.emit('follow_countdown', { person, seconds: n });
+    cdSprite.visible = true;
+    const follow = setInterval(cdPlace, 30);
+    try {
+      for (let k = n; k > 0; k--) {
+        cdDraw(String(k), false); cdPlace();
+        if (takes.ear && takes.ear.tick) takes.ear.tick(false);
+        await new Promise((res) => setTimeout(res, 1000));
+      }
+      cdDraw('GO', true); cdPlace();
+      if (takes.ear && takes.ear.tick) takes.ear.tick(true);
+      setTimeout(() => { cdSprite.visible = false; }, 600);
+    } finally { clearInterval(follow); }
+  }
+
   // takes kept for a thing (name -> take id): the newest take named after it whose meta says kept
   const kept = new Map();
   const scn = () => ed.sceneName;                      // live: scenes.js can switch it
@@ -222,6 +265,7 @@ export function initActions(ed, hands, panels, live, takes) {
         else if (a === '📌 Pin' && window.VR_waypoints) { window.VR_waypoints.pinObject(it); ed.setStatus('pinned ' + ed.label(it) + ': say the note'); break; }   // the next voice note is its note
         else if (a === '◆ Key' && takes.clock) { takes.clock.show(true); takes.clock.key(it.name); }   // clock.js: a key at the playhead
         else if (a === '● Take') {                              // a person follows the user while the take records
+          if (canAct(it)) { ed.select(null, 'menu'); await countdown(FOLLOW_COUNTDOWN_S, it.name); }
           if (canAct(it)) await takes.actors.follow({ person: it.name }).catch(() => null);
           takes.start(it.name);
           if (canAct(it)) { followPanel(it); ed.select(null, 'menu'); break; }
@@ -231,6 +275,8 @@ export function initActions(ed, hands, panels, live, takes) {
           const r = await takes.stop(); await review(it, r);
         }
         else if (a === '◎ Follow' && takes.actors) {
+          ed.select(null, 'menu');                                // the menu goes; the numbers count; GO starts it
+          await countdown(FOLLOW_COUNTDOWN_S, it.name);
           const ok = await takes.actors.follow({ person: it.name }).then(() => true).catch((e) => {
             live.emit('voice_error', { where: 'actor follow', error: String(e.message || e) }); return false; });
           if (ok) { followPanel(it); ed.select(null, 'menu'); break; }
@@ -300,5 +346,5 @@ export function initActions(ed, hands, panels, live, takes) {
       ed.select(null, 'idle');
     }
   }
-  return { update, show, touchUse };
+  return { update, show, touchUse, countdown, followPanel };
 }
