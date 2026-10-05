@@ -197,3 +197,19 @@ def test_the_stream_plays_and_knows_the_bar_heard(phone):
     assert 'behind_s' in h and h.get('bar', 0) >= 5 and h['of'].startswith('bar ')
     st = P.phone_status()
     assert 'phone server' in st and 'engine: playing' in st
+
+
+def test_a_short_note_that_is_a_command_acts_as_one(phone):
+    """Nate, 10-05: the Dime 3 earbud's one button takes the voice note, and the voice does the rest out and about."""
+    ph, base, _ = phone
+    since = ph.seq
+    assert ph.voice_command('Love this!', 'v1', {'of': 'bar 9'}) == 'love'
+    assert ph.voice_command('okay, change it up please', 'v2') == 'change'
+    assert ph.voice_command('stop listening', 'v3') == 'stop_listening'
+    assert ph.voice_command('I love this part but change it up soon', 'v4') is None    # a real note stays a note
+    lines = json.loads(P.phone_listen('dj', since=since, wait=0))['lines']
+    assert [(x['kind'], x['what']) for x in lines] == [('tap', 'love'), ('tap', 'change'), ('control', 'stop_listening')]
+    assert lines[0]['via'] == 'voice' and lines[0]['id'] == 'v1' and lines[0]['heard']['of'] == 'bar 9'
+    assert any(c['type'] == 'stop_listening' for c in ph.cmds)
+    page = urllib.request.urlopen(base + '/app.js', timeout=5).read().decode()
+    assert "h('pause', () => { if (want && keysOn) return keyNote();" in page and 'CUES' in page

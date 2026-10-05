@@ -52,6 +52,12 @@ TAPS = {'love': 'loves this: cut a highlight here', 'change': 'change it up now'
         'energy_down': 'calmer', 'louder': 'louder', 'quieter': 'quieter', 'pause': 'pause the set (gracefully)',
         'resume': 'resume the set', 'start_set': 'start a set', 'rewind': 'rewound 30 s to hear that again'}
 MOODS = ('calm', 'steady', 'lift', 'peak')
+# a short voice note that is only a command acts as one (earbuds give one button, so the voice does the rest);
+# the words still reach the agent as voice_text, and the act carries via='voice' and the note's id
+VOICE_CMDS = [(r'stop (?:listening|the stream|streaming)', 'stop_listening'), (r'(?:i )?love (?:this|that|it)', 'love'),
+              (r'change it up', 'change'), (r'more energy', 'energy_up'), (r'calmer|calm (?:it )?down', 'energy_down'),
+              (r'louder', 'louder'), (r'quieter|softer', 'quieter'), (r'pause the set', 'pause'),
+              (r'resume the set', 'resume')]
 STATUS = re.compile(r'live ([\d.]+) BPM (\d+)/4 \| heard bar (\d+)(?: beat ([\d.]+))? \((\d+) s\) \| '
                     r'mixed ahead ([\d.]+) s')
 
@@ -449,7 +455,7 @@ class Phone:
         rec = self.post({'kind': 'voice', 'id': vid, 'file': str(f), 'state': 'transcribing', 'sid': sid,
                          'heard': self.heard(sid, t)})
         self.voice_state[vid] = 'queued'
-        self.voice_q.append((vid, f))
+        self.voice_q.append((vid, f, rec['heard'], sid))
         return rec
 
     def _transcriber(self):
@@ -457,7 +463,7 @@ class Phone:
             if not self.voice_q:
                 time.sleep(0.3)
                 continue
-            vid, f = self.voice_q[0]
+            vid, f, heard, sid = self.voice_q[0]
             why = self._cpu_busy()
             if why:
                 self.voice_state[vid] = 'waiting: ' + why
@@ -473,6 +479,24 @@ class Phone:
             self.voice_state.pop(vid, None)
             self.post({'kind': 'voice_text', 'id': vid, 'text': text})
             self.cmd('heard', ref=vid, text=text)
+            self.voice_command(text, vid, heard, sid)
+
+    def voice_command(self, text, vid=None, heard=None, sid=None):
+        """A note of at most six words that is a command (VOICE_CMDS) acts as one. -> the act or None."""
+        words = re.sub(r'[^\w\s]', ' ', (text or '').lower()).split()
+        if not words or len(words) > 6:
+            return None
+        said = ' '.join(w for w in words if w not in ('please', 'okay', 'ok', 'hey', 'dj', 'now', 'just'))
+        for pat, act in VOICE_CMDS:
+            if re.fullmatch(pat, said):
+                if act == 'stop_listening':
+                    self.cmd('stop_listening', ref=vid)
+                    self.post({'kind': 'control', 'what': act, 'via': 'voice', 'id': vid, 'sid': sid})
+                else:
+                    self.post({'kind': 'tap', 'what': act, 'means': TAPS[act], 'via': 'voice', 'id': vid, 'sid': sid,
+                               'heard': heard or {}})
+                return act
+        return None
 
     def _cpu_busy(self):
         try:

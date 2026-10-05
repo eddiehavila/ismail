@@ -32,7 +32,7 @@ function setPlaying(on) {
   $('play').textContent = on ? 'Stop' : 'Listen'; $('play').classList.toggle('on', on);
   if ('mediaSession' in navigator) navigator.mediaSession.playbackState = on ? 'playing' : 'paused';
 }
-$('play').onclick = () => setPlaying(!want);
+$('play').onclick = () => { setPlaying(!want); if (want && keysOn) armMic(); };
 $('golive').onclick = () => { if (!want) return setPlaying(true); connect(0); toast('back to live'); };
 $('back').onclick = () => { want = true; connect(30); send('/api/tap', { what: 'rewind' }, true); toast('30 s back'); };
 ['error', 'ended'].forEach((ev) => audio.addEventListener(ev, () => { if (want) setTimeout(() => want && connect(), backoff()); }));
@@ -53,8 +53,10 @@ function mediaSession() {
   if (mediaSession.done) return;
   mediaSession.done = true;
   const h = (a, f) => { try { ms.setActionHandler(a, f); } catch (err) {} };
-  h('play', () => setPlaying(true));
-  h('pause', () => setPlaying(false));
+  // earbuds: the Dime 3 sends only play/pause (double and triple presses change the volume in the bud), so while
+  // the set plays a press is a voice note, and "stop listening" said in a note stops the stream
+  h('play', () => { if (want && keysOn) return keyNote(); setPlaying(true); cue('start'); });
+  h('pause', () => { if (want && keysOn) return keyNote(); setPlaying(false); });
   h('nexttrack', () => tap('change'));
   h('previoustrack', () => tap('love'));
   h('seekbackward', () => $('back').onclick());
@@ -100,6 +102,42 @@ $('quality').textContent = kbps + ' kbps'; $('buzzset').textContent = buzzOn ? '
 
 // ---- talk: hold to talk, or tap once to talk hands-free and tap again to send
 const talk = { rec: null, stream: null, chunks: [], down: 0, toggle: false, t: null, sid: null };
+// ---- earbud button and the tones you hear in your pocket
+let keysOn = store.get('keys', true), noteTimer = 0;
+function wav(parts) {                       // [[freq, ms], ...] -> a data: URI of a short 16-bit tone sequence
+  const sr = 22050, n = parts.reduce((a, [, ms]) => a + Math.round(sr * ms / 1000), 0);
+  const b = new DataView(new ArrayBuffer(44 + 2 * n)); let o = 44;
+  const str = (i, t) => [...t].forEach((c, k) => b.setUint8(i + k, c.charCodeAt(0)));
+  str(0, 'RIFF'); b.setUint32(4, 36 + 2 * n, true); str(8, 'WAVEfmt '); b.setUint32(16, 16, true); b.setUint16(20, 1, true);
+  b.setUint16(22, 1, true); b.setUint32(24, sr, true); b.setUint32(28, sr * 2, true); b.setUint16(32, 2, true); b.setUint16(34, 16, true);
+  str(36, 'data'); b.setUint32(40, 2 * n, true);
+  for (const [f, ms] of parts) {
+    const m = Math.round(sr * ms / 1000);
+    for (let i = 0; i < m; i++) { const env = Math.min(1, i / 200, (m - i) / 400); b.setInt16(o, f ? Math.sin(2 * Math.PI * f * i / sr) * 9000 * env : 0, true); o += 2; }
+  }
+  let bin = ''; new Uint8Array(b.buffer).forEach((x) => { bin += String.fromCharCode(x); });
+  return 'data:audio/wav;base64,' + btoa(bin);
+}
+const CUES = { start: wav([[660, 90], [0, 30], [990, 120]]), end: wav([[990, 90], [0, 30], [660, 120]]),
+  sent: wav([[1320, 60], [0, 50], [1320, 60]]), error: wav([[220, 260]]) };
+function cue(name) { try { const a = new Audio(CUES[name]); a.volume = 0.7; a.play().catch(() => {}); } catch (e) {} }
+async function armMic() {
+  if (talk.stream && talk.stream.active) return true;
+  try {
+    talk.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+    $('talkhint').textContent = 'earbud ready: press to talk, press again to send';
+    return true;
+  } catch (e) { $('talkhint').textContent = 'the microphone is blocked: the earbud cannot take notes'; return false; }
+}
+async function keyNote() {
+  if (audio.paused && want) audio.play().catch(() => {});
+  if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
+  if (talk.rec) { micStop(true); return; }
+  if (!talk.stream || !talk.stream.active) { cue('error'); buzz([300]); toast('open the page once to let the earbud take notes'); return; }
+  await micStart();
+}
+$('keysset').onclick = () => { keysOn = !keysOn; store.set('keys', keysOn); $('keysset').textContent = keysOn ? 'Earbud: talk' : 'Earbud: play'; if (keysOn && want) armMic(); };
+$('keysset').textContent = keysOn ? 'Earbud: talk' : 'Earbud: play';
 async function micStart() {
   if (talk.rec) return;
   try {
@@ -113,6 +151,8 @@ async function micStart() {
   audio.volume = 0.25;
   $('talk').classList.add('on'); $('talk').firstChild.textContent = 'Talking'; buzz([30]);
   meterStart(talk.stream);
+  cue('start');
+  clearTimeout(noteTimer); noteTimer = setTimeout(() => { if (talk.rec) micStop(true); }, 60000);
 }
 function micStop(sendIt) {
   const r = talk.rec; if (!r) return;
@@ -120,6 +160,7 @@ function micStop(sendIt) {
   $('talk').classList.remove('on'); $('talk').firstChild.textContent = 'Hold to talk'; audio.volume = 1;
   $('talkhint').textContent = 'tap once for hands-free, tap again to send';
   meterStop();
+  clearTimeout(noteTimer); cue('end');
   r.onstop = () => {
     const blob = new Blob(talk.chunks, { type: r.mimeType || 'audio/webm' });
     if (sendIt && blob.size > 1500) upload(blob, talk.sid, talk.t);
@@ -160,9 +201,9 @@ async function upload(blob, s, t) {
     const j = await r.json();
     if (!r.ok) throw new Error(j.error);
     addFeed({ me: true, id: j.id, ts: new Date().toTimeString().slice(0, 5), text: 'voice note' + (j.heard && j.heard.of ? ' at ' + j.heard.of : '') + ', transcribing' });
-    toast('sent'); buzz([30, 60, 30]);
+    toast('sent'); buzz([30, 60, 30]); setTimeout(() => cue('sent'), 350);
   } catch (e) {
-    pending.push([blob, s, t]); toast('offline: the note waits and sends when you are back');
+    pending.push([blob, s, t]); toast('offline: the note waits and sends when you are back'); cue('error');
   }
 }
 setInterval(() => { if (navigator.onLine && pending.length) { const p = pending.splice(0); p.forEach((x) => upload(...x)); } if (outbox.length) flush(); }, 8000);
@@ -276,6 +317,7 @@ function render() {
 function onCmd(c) {
   if (c.type === 'caption') { toast(c.text); if (c.buzz) buzz([150, 80, 150]); }
   else if (c.type === 'buzz') buzz(c.pattern);
+  else if (c.type === 'stop_listening') { if (want) { setPlaying(false); cue('end'); toast('stopped listening: press the earbud or Listen to start again'); } }
   else if (c.type === 'heard') { const it = feedItems.find((x) => x.id === c.ref); if (it) it.text = '“' + c.text + '”'; else addFeed({ me: true, id: c.ref, ts: new Date().toTimeString().slice(0, 5), text: '“' + c.text + '”' }); }
   else if (c.type === 'offer' && c.offer && c.offer.auto && document.visibilityState === 'visible') {
     const a = document.createElement('a'); a.href = c.offer.url + '?dl=1'; a.download = c.offer.name; document.body.appendChild(a); a.click(); a.remove(); toast('downloading ' + c.offer.name);
@@ -289,11 +331,13 @@ async function poll() {
       const j = await r.json();
       state = j;
       if (!first) (j.cmds || []).forEach(onCmd);
-      since = j.cmd; first = false;
+      since = j.cmd; first = false; poll.wait = 0;
       render();
     } catch (e) {
       $('livetext').textContent = navigator.onLine ? 'the server does not answer, retrying' : 'offline';
-      await new Promise((ok) => setTimeout(ok, 4000));
+      poll.wait = Math.min(30000, (poll.wait || 2000) * 2);          // back off: a phone in a pocket keeps its battery
+      await new Promise((ok) => setTimeout(ok, poll.wait));
+      continue;
     }
   }
 }

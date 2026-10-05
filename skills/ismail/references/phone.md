@@ -43,6 +43,20 @@ watch the routed file with your harness's file watcher, so a line wakes you even
 Voice notes are transcribed by the speech server on this machine. While the CPU is over the governor's limit they
 wait in a queue: taps still arrive at once, and the page tells them their note is waiting.
 
+## Earbuds and the voice, phone in the pocket
+
+Earbuds send one media key: play/pause (on Skullcandy's Dime 3, double and triple presses only change the volume
+in the bud, and a long press opens the phone's assistant). So, while a set plays and "Earbud: talk" is on:
+- a press starts a voice note (a rising tone; the music ducks) and the next press sends it (a falling tone, then a
+  short chirp when it has arrived); a note stops itself after 60 s;
+- a short note that is only a command acts as one: "stop listening" stops the stream (a press starts it again),
+  "love this", "change it up", "more energy", "calmer", "louder", "quieter", "pause the set", "resume the set" arrive
+  as taps with `via: 'voice'` and the note's `id`. The words also arrive as `voice_text`: act once, not twice.
+- the microphone is opened when they press Listen on the page and held while it plays, so a press can record with
+  the screen off. If the phone blocks that, a low tone says so.
+
+Only `phone_listen` counts as listening on the page; watching the inbox file does not show them anyone is there.
+
 ## What you can put on the page
 
 - `phone_now(now=, next=, recording_why=)`: the title, next up, and why recording is on or off. The page always
