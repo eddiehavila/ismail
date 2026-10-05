@@ -379,6 +379,42 @@ def stage_performance(scene: str, perf: str = None) -> str:
     return out
 
 
+
+@op(mutates=True)
+def stage_actor_profile(scene: str, actor: str, save_map: str = None, map: dict = None) -> str:
+    """An actor's profile (actor= the body's name, e.g. bf_sam; world.json actors says who plays whom): the rig type
+    read from its body, its named parts (bone chains, parents first; arms and legs can reach), and the control maps
+    saved for it. The profile lives beside the body (scenes/<scene>/actors/<actor>.json), so it goes wherever the body
+    goes. save_map= a name and map= {"pins": {"hips": "<seat>"}, "drives": [{part, mode, joint, ...}]} stores a
+    preset (the previous file kept as .json.prev); "default" applies by itself when a Follow starts.
+    stage_control_map(preset=) applies one."""
+    from . import rigs
+    from .world import load_world
+    d = Path(link.server_for(scene)['scenes'])
+    src = load_world(d, scene).get('assets') or scene
+    adir = d / src / 'actors'
+    try:
+        prof = rigs.profile(adir, actor)
+    except FileNotFoundError:
+        raise OpError(f'no body {src}/actors/{actor}.glb; world.json actors names the bodies: {load_world(d, scene).get("actors")}')
+    if save_map is None:
+        if map is not None:
+            raise OpError("map= needs save_map= (the preset's name)")
+        return json.dumps(prof, indent=1)
+    if not isinstance(map, dict) or not (map.get('drives') or map.get('pins')):
+        raise OpError('map= {"pins": {...}, "drives": [...]} with at least one of them')
+    try:
+        drives = [rigs.check_drive(x, prof['parts']) for x in map.get('drives', [])]
+    except ValueError as e:
+        raise OpError(str(e))
+    pins = map.get('pins') or {}
+    if set(pins) - {'hips', 'foot_l', 'foot_r', 'feet'}:
+        raise OpError("pins are hips, foot_l, foot_r or feet")
+    f = rigs.save_map(adir, actor, save_map, {**({'pins': pins} if pins else {}), **({'drives': drives} if drives else {})})
+    return (f'saved map {save_map!r} in {f} ({len(drives)} drives, pins: {", ".join(pins) or "none"}); '
+            f'presets now: {", ".join(rigs.profile(adir, actor)["maps"])}')
+
+
 NOT_IN_BATCH = {'stage_batch', 'stage_start', 'stage_stop', 'stage_listen', 'stage_scene_export', 'stage_scene_new',
                 'stage_scene_go'}
 

@@ -131,9 +131,10 @@ export function initActions(ed, hands, panels, live, takes) {
         // a Follow is a performance (perform.js): the voice records with it and gestures are off, so the panel says so
         // and its buttons are poked
         const pf = takes.perform ? takes.perform.state() : { performing: false };
+        const ctl = takes.actors.control ? takes.actors.control.summary(it.name) : '';   // control.js drives
         const mic = pf.performing ? (pf.mic ? `🎙 Your voice records with it (clip ${pf.clip.n}).` : '🎙 Mic off.') : '';
         const r = await panels.show({ panel_id: cur, title: (rec ? '● Recording: ' : 'Performing: ') + ed.label(it),
-          text: (pinned.length ? '📌 pinned: ' + pinned.join(', ') + '. ' : '') + mic + ' Gestures are off: poke the buttons.',
+          text: (pinned.length ? '📌 pinned: ' + pinned.join(', ') + '. ' : '') + (ctl ? '🎛 ' + ctl + '. ' : '') + mic + ' Gestures are off: poke the buttons.',
           buttons: [rec ? '■ Stop take' : '■ Stop', '⟲ Turn him', st.mirror ? '⇄ Mirror: on' : '⇄ Mirror: off',
             st.mode === 'walk' ? '📍 Dance in place' : '🚶 Walk with me', pinned.includes('hips') ? '📌 Unpin hips' : '📌 Pin hips',
             ...(pf.performing ? [pf.mic ? '🎙 Mic off' : '🎙 Mic on'] : []), ...(rec ? [] : ['⇲ Move him here'])],
