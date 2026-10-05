@@ -206,6 +206,9 @@ nudges you, follow it.
   the disk. Heavy jobs wait while a drive is under 15 GB free or commit under 6 GB; `machine_disk` shows where the
   space went. To free space, move finished intermediates (caches, old renders, uncut takes) into the project's
   `_reclaim/` folder and tell the user: nobody deletes, the user clears `_reclaim`.
+  While a live set is on air, GPU jobs and Blender renders wait until it ends (a temporary rule, "only for now
+  during sets": `machine on-air` shows it; only the user lifts it). Register Blender honestly: a `--cpu` Blender
+  render waits too.
   `run --wait 30m` (or `slot(..., wait=)`) stands in line for a slot instead of being refused. Every finished job
   leaves a line in the board's history (what, which song, how long it waited, its exit, CPU seconds, peak memory, the
   GPU's load and the machine's state at its start): `python -m ismail.machine history --song <slug> --since 7d` sums

@@ -8,6 +8,16 @@
   runs it from a brief (scene, who, goal, setup, takes, the stage tools it may use, trial moves only, when to stop,
   what to hand back). The person asked for it so the loop never waits on a busy agent.
 
+### A set on air comes first, for now (ledger:M127, hq:D-11)
+
+- While a live engine is on the board, the governor holds GPU jobs and Blender renders (also those registered as
+  `--cpu`: blender, eevee, cycles) until the set ends: two real dropouts in a set tonight came from renders that
+  started beside it. Audio renders and other CPU jobs still run. The board shows ON AIR and the policy.
+- It is a policy, not a hard rule: `python -m ismail.machine on-air --policy set_first|off --by '<who>'`. Nate's
+  words: "only for now during sets"; revisit after the laptop's repaste or a faster engine. `render_first` (the
+  render runs when it is a burden and the DJ pauses the set, announcing it) is named as the future direction and
+  refused until it is built.
+
 ### The phone page from the earbuds (Nate: "control everything through voice ... without taking the phone out")
 
 - While a set plays, the earbud's press takes a voice note and the next press sends it, with tones you hear in your

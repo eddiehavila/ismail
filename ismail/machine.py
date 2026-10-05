@@ -33,6 +33,7 @@ import ctypes
 import json
 import os
 import shutil
+import re
 import subprocess
 import sys
 import threading
@@ -60,6 +61,15 @@ COMMIT_FLOOR_GB = 6.0              # no new heavy job while less commit than thi
 MEM_OVER = 1.25                    # a running job past its declared memory by this much is flagged
 MEM_OVER_MIN_GB = 0.5              # ... and by at least this much (a small render's estimate is not worth a flag)
 JOB_NOTE_S = 15.0                  # a running job writes its memory to its board file this often
+# What wins when a live set is on air and a render wants the machine (ledger:M127, hq:D-11). Nate, 2026-10-05, after
+# two real dropouts in a set: GPU jobs and Blender renders wait while a set plays, "only for now during sets". It is a
+# temporary rule: revisit when the laptop is repasted (the GPU heat) or a faster engine lands.
+# Policies: 'set_first' (today: the set wins, those renders wait), 'off' (no rule), 'render_first' (the future
+# direction, not built: the render runs when the governor judges it a burden and the DJ is asked to pause the set
+# gracefully, announcing it). The policy is a board file (on_air.json), set with `machine on-air --policy ...`.
+ON_AIR_POLICIES = ('set_first', 'off', 'render_first')
+ON_AIR_DEFAULT = 'set_first'
+ON_AIR_HELD = re.compile(r'blender|eevee|cycles', re.I)   # CPU jobs that are renders on the GPU in all but name
 
 
 class MachineBusy(RuntimeError):
@@ -437,12 +447,53 @@ def duration_s(text):
     return v * (unit or 60)
 
 
-def check(kind, mem_gb=0.0, _jobs=None, who=None, since=None, me=None, disk_gb=0.0, disk_path=None, disk_hint=''):
+def on_air_policy():
+    """-> {policy, by, why, at}: what wins when a live set is on air (ledger:M127). Default 'set_first'."""
+    try:
+        with open(os.path.join(board_dir(), 'on_air.json'), encoding='utf8') as f:
+            got = json.load(f)
+        if got.get('policy') in ON_AIR_POLICIES:
+            return got
+    except (OSError, ValueError):
+        pass
+    return {'policy': ON_AIR_DEFAULT, 'by': 'the default (hq:D-11)', 'why': 'renders wait while a set is on air'}
+
+
+def set_on_air_policy(policy, by, why=''):
+    if policy not in ON_AIR_POLICIES:
+        raise ValueError(f"policy: one of {', '.join(ON_AIR_POLICIES)}")
+    if policy == 'render_first':
+        raise ValueError("render_first is the future direction in hq:D-11 (the render runs when it is a burden and the "
+                         "DJ pauses the set, announcing it); it is not built yet: use set_first or off")
+    if not by:
+        raise ValueError("by: who decided (the user)")
+    rec = {'policy': policy, 'by': by, 'why': why, 'at': time.time()}
+    os.makedirs(board_dir(), exist_ok=True)
+    with open(os.path.join(board_dir(), 'on_air.json'), 'w', encoding='utf8') as f:
+        json.dump(rec, f)
+    return rec
+
+
+def _on_air_why(kind, what, cmd, js):
+    """While a live set is on air under 'set_first', a GPU job or a Blender render waits until the set ends."""
+    live = [j for j in js if j['kind'] == 'live']
+    if not live or on_air_policy()['policy'] != 'set_first':
+        return ''
+    if kind != 'gpu' and not ON_AIR_HELD.search(' '.join([what or ''] + [os.path.basename(str(c)) for c in cmd or []])):
+        return ''
+    return (f"a live set is on air ({'; '.join(_describe(j) for j in live)}): GPU jobs and Blender renders wait until it "
+            f"ends (Nate's temporary rule, hq:D-11 ledger:M127; it held two dropouts' worth of renders). Wait in line "
+            f"(`run --wait`); only the user lifts it (`python -m ismail.machine on-air --policy off --by ...`)")
+
+
+def check(kind, mem_gb=0.0, _jobs=None, who=None, since=None, me=None, disk_gb=0.0, disk_path=None, disk_hint='',
+          what=None, cmd=None):
     """-> '' when a `kind` job ('gpu' or 'cpu') of mem_gb may start now, else why not and what to do. who/since:
     the asking job's place in the line (a job that is not waiting stands at the back of it, now). disk_gb: what it
-    writes, on disk_path's drive (and the songs folder's and the working directory's)."""
+    writes, on disk_path's drive (and the songs folder's and the working directory's). what/cmd: the job, so a
+    Blender render registered as cpu still waits while a set is on air."""
     js = jobs() if _jobs is None else _jobs
-    why = [w for w in (_disk_why(disk_gb, disk_path, disk_hint), _memory_why(js)) if w]
+    why = [w for w in (_disk_why(disk_gb, disk_path, disk_hint), _memory_why(js), _on_air_why(kind, what, cmd, js)) if w]
     hot = gpu_trouble(gpu())
     if hot:
         why.append(f"the GPU is {hot}: the machine is hot (CPU and GPU share one cooler), no new heavy job until it cools")
@@ -688,7 +739,7 @@ def _record(job, wait_s, state, meter, outcome):
 
 @contextlib.contextmanager
 def slot(kind, what, est_s=None, mem_gb=0.0, who=None, force=False, threads=THREADS, wait=None, disk_gb=0.0,
-         disk_path=None, disk_hint=''):
+         disk_path=None, disk_hint='', cmd=None):
     """Hold a heavy-job slot while the block runs. Re-entrant: a job inside a job of this thread (a fit that
     renders) runs in the slot it already holds. Raises MachineBusy with what to do when it may not start; with
     wait (seconds) it stands in line until it may, then raises only if the wait runs out. disk_gb: about what it
@@ -713,7 +764,7 @@ def slot(kind, what, est_s=None, mem_gb=0.0, who=None, force=False, threads=THRE
             with _board_lock():
                 why = '' if force or kind == 'live' else check(kind, mem_gb, who=who, since=since, me=wid,
                                                                disk_gb=disk_gb, disk_path=disk_path,
-                                                               disk_hint=disk_hint)
+                                                               disk_hint=disk_hint, what=what, cmd=cmd)
                 if not why or not deadline or time.time() >= deadline:
                     if why:
                         raise MachineBusy(f"not starting {kind} job '{what}': {why}. Retry when that clears (the "
@@ -816,6 +867,11 @@ def board():
     if pr:
         L.append(f"priority: {pr['who']} goes first in line until {time.strftime('%H:%M', time.localtime(pr['until']))}"
                  f" (given by {pr['by']}" + (f": {pr['why']}" if pr.get('why') else '') + ")")
+    if any(j['kind'] == 'live' for j in js):
+        pol = on_air_policy()
+        L.append(f"ON AIR: a live set plays; policy {pol['policy']} (by {pol['by']}): "
+                 + ("GPU jobs and Blender renders wait until it ends (temporary, hq:D-11)" if pol['policy'] == 'set_first'
+                    else "no hold"))
     ws = waiters()
     if ws:
         L.append(f"waiting in line ({len(ws)}):")
@@ -1031,6 +1087,10 @@ def main(argv=None):
     h.add_argument('--song', default=None)
     h.add_argument('--since', default=None, help='a date (2026-10-04) or a span back from now (7d, 12h)')
     h.add_argument('--jobs', type=int, default=0, help='also list the last N jobs')
+    oa = sub.add_parser('on-air', help="what wins while a live set is on air: on-air --policy set_first|off --by 'the user'")
+    oa.add_argument('--policy', default=None, choices=ON_AIR_POLICIES)
+    oa.add_argument('--by', default=None, help='who decided (the user)')
+    oa.add_argument('--why', default='')
     dk = sub.add_parser('disk', help='where the disk went: songs folders and their growth, _reclaim, the pagefile')
     dk.add_argument('--top', type=int, default=12, help='how many songs folders to list')
     a = ap.parse_args(argv)
@@ -1062,6 +1122,15 @@ def main(argv=None):
     if a.cmd == 'disk':
         print(disk_text(a.top))
         return 0
+    if a.cmd == 'on-air':
+        if a.policy:
+            try:
+                set_on_air_policy(a.policy, a.by, a.why)
+            except ValueError as e:
+                ap.error(str(e))
+        pol = on_air_policy()
+        print(f"on air: policy {pol['policy']} (by {pol['by']}" + (f": {pol['why']}" if pol.get('why') else '') + ")")
+        return 0
     if a.cmd != 'run':
         print(board())
         return 0
@@ -1079,7 +1148,7 @@ def main(argv=None):
         ap.error(str(e))
     try:
         with slot(kind, a.what or ' '.join(cmd)[:80], est_s=est_s, mem_gb=a.mem,
-                  force=a.force, threads=None, wait=wait_s, disk_gb=a.disk) as job:
+                  force=a.force, threads=None, wait=wait_s, disk_gb=a.disk, cmd=cmd) as job:
             before = _children_cpu_now()
             p = subprocess.Popen(cmd)
             try:
