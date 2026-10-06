@@ -28,6 +28,7 @@ import { initCues } from './cues.js';
 import { initAnchors } from './anchor.js';
 import { initPerform } from './perform.js';
 import { loadWorld } from './world.js';
+import { setPickEmit } from './pickcycle.js';
 
 // the scene: ?scene=, else the server's default (scenes/stage.json "default", else its first scene)
 const name = new URLSearchParams(location.search).get('scene')
@@ -55,6 +56,7 @@ const live = initLive(ed, desktop, xr);
 const hands = initHands(ed, xr, live.emit);
 const voice = initVoice(ed, hands, live);
 const touch = initTouch(ed, xr, hands, live.emit);
+setPickEmit(live.emit);   // pickcycle.js: pick_cycle events when a pinch again takes the next thing under it
 const updates = initUpdates(ed, live, hands, voice);
 const exitVR = initExit(ed, hands, live);
 const body = initBody(ed, hands);                  // which way the user's body faces (body-anchored panels)
@@ -72,7 +74,16 @@ live.handlers.take_view = (c) => takes4d.show(c);
 live.handlers.take_view_clear = () => takes4d.clear();
 const actors = initActors(ed, live);
 actors.setSource(() => hands.frameNow());   // live follow: the user's body this moment
-live.handlers.actor_follow = (c) => actors.follow(c);
+// countdown: seconds to count before it starts, so the user can take the pose first (the menu's Follow counts 3)
+// an agent's Follow opens the Follow panel too (Stop, Mic off): one an agent began had none, and the user was stuck
+// inside its performance for seven minutes (2026-10-05)
+live.handlers.actor_follow = async (c) => {
+  if (c.countdown) await actions.countdown(c.countdown, c.person);
+  const r = await actors.follow(c);
+  const it = ed.byName.get(c.person);
+  if (it) actions.followPanel(it);
+  return r;
+};
 const perform = initPerform(ed, hands, voice, live, () => actors);   // a Follow is a performance (perform.js)
 window.VR_perform = perform;
 xr.setPerforming(() => hands.performing);
@@ -99,9 +110,23 @@ live.handlers.panel = (c) => panels.show(c);
 live.handlers.panel_close = (c) => panels.close(c.panel_id, 'closed by Claude');
 // a take during a performance takes its voice from the performance (its clips, linked in the take's meta);
 // otherwise the mic records the whole take
+// the pins a take was made with go in its meta, so it plays back seated wherever it plays (actors.js play)
+// ... and the Follow's mirror, so it plays back the way it was made
+const takeMeta = (id, body) => fetch(`take/meta?scene=${encodeURIComponent(ed.sceneName)}&take=${encodeURIComponent(id)}`, {
+  method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).catch(() => {});
+const pinMeta = (person, id) => {
+  if (!person || !id) return;
+  const pins = actors.pinsMeta(person);
+  takeMeta(id, { ...(pins ? { pins } : {}), mirror: actors.mirrorOf(person) });
+};
+live.onEmit((type, d) => {                         // the mirror turned on or off while a take records on that person
+  if (type === 'actor_mirror' && d && hands.rec.on && hands.rec.id && hands.rec.name === d.person) takeMeta(hands.rec.id, { mirror: !!d.mirror });
+});
+const keepLast = (n) => hands.keepLast(n).then((r) => { pinMeta(r.person, r.id); return r; });
 const startTake = (name) => {
   const r = hands.startTake(name);
   if (r && !r.already) {
+    pinMeta(name, r.id);
     const link = perform.attachTake(r.id, hands.rec.t0);
     if (link) fetch(`take/meta?scene=${encodeURIComponent(ed.sceneName)}&take=${encodeURIComponent(r.id)}`, { method: 'POST',
       headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(link) }).catch(() => {});
@@ -110,6 +135,13 @@ const startTake = (name) => {
   return r;
 };
 const stopTake = async () => { const r = await hands.stopTake(); if (r && r.id) voice.takeAudioStop(); return r; };
+// a performance's way out (perform.js stopAll): the take recording with it, then the Follow (whose actor_stop ends the
+// performance below)
+perform.setStopAll(async (person, by) => {
+  const take = hands.rec.on ? await stopTake().catch(() => null) : null;
+  actors.stop({ person, why: 'stopped: ' + by });
+  return { stopped: person, by, take: take && take.id ? take.id : null };
+});
 live.handlers.take_start = (c) => startTake(c.name || '');
 xr.setHandState(hands.state);
 // every Follow is a performance (perform.js) and is buffered in memory on the performance's clock (hands.js); after
@@ -118,9 +150,9 @@ live.onEmit((type, d) => {
   if (type === 'actor_follow' && d) { const p = perform.start(d.person); hands.shadowStart(d.person, p.t0, p); }
   else if (type === 'actor_stop' && d && d.live) { hands.shadowStop(); perform.stop(); }
 });
-live.handlers.take_keep_last = (c) => hands.keepLast(c.name || null);
+live.handlers.take_keep_last = (c) => keepLast(c.name || null);
 const actions = initActions(ed, hands, panels, live, { start: (n) => startTake(n), stop: () => stopTake(), recording: () => hands.rec.on,
-  keepLast: (n) => hands.keepLast(n), discardLast: () => hands.discardLast(), lastFollow: () => hands.lastFollowInfo(),
+  keepLast: (n) => keepLast(n), discardLast: () => hands.discardLast(), lastFollow: () => hands.lastFollowInfo(),
   lastFollowData: () => hands.lastFollowData(), perform,
   get actors() { return actors; }, get view() { return takes4d; }, get ear() { return voice.EAR; }, get clock() { return stageClock; } });   // defined below; used on a menu press
 live.handlers.take_stop = () => stopTake();

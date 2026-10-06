@@ -184,7 +184,7 @@ def save_edits(name, edits):
 CMD_TYPES = {'cue', 'cue_remove', 'cues_clear', 'cues_list', 'waypoint', 'waypoint_remove', 'waypoints_clear', 'waypoints_list', 'waypoint_go', 'sky', 'scene_go', 'scene_list', 'actor_follow', 'trees_reload', 'clock', 'key', 'key_delete', 'anim_save', 'anim_clear', 'timeline', 'growth', 'music', 'take_start', 'take_stop', 'eyecam', 'voice_rec', 'say', 'goto', 'goto_camera', 'focus', 'select', 'deselect', 'highlight', 'marker', 'clear_markers', 'set',
              'light', 'walk', 'look_through', 'snapshot', 'reload', 'undo', 'ask', 'panel', 'panel_close',
              'ack', 'gallery_add', 'drop', 'take_view', 'take_view_clear', 'actor_play', 'actor_stop', 'stream', 'anchor', 'anchor_release',
-             'take_keep_last', 'follow_anchor', 'perform', 'batch', 'control_set', 'control_map', 'key_interp'}
+             'take_keep_last', 'follow_anchor', 'actor_pose', 'perform', 'batch', 'control_set', 'control_map', 'key_interp'}
 COND = threading.Condition()
 LIVE = {}                      # scene -> {'state', 'state_t', 'events': [...], 'ev_id', 'cmds': [...], 'cmd_id'}
 
@@ -843,10 +843,17 @@ class Handler(SimpleHTTPRequestHandler):
                 by = qs.get('by', ['page'])[0][:40]
                 server_event(name, {'type': 'perform_clip_in', 'perf': perf_id, 'clip': n, 'at': at, 'seconds': secs, 'by': by})
                 files = sorted(d.glob(f'clip_{n}.*'))
+                quiet = 'quiet' in qs                              # the page heard nothing in it
                 perform.set_clip(d, {'n': n, 'at': at, 'seconds': secs, 'by': by, 'file': files[0].name if files else None,
-                                     'state': 'transcribing'})
-                threading.Thread(target=perform.transcribe_clip, daemon=True,
-                                 args=(d, n, at, secs, by, stt_words, lambda ev: server_event(name, ev))).start()
+                                     'state': 'quiet' if quiet else 'transcribing'})
+
+                def heard(ev, name=name, perf_id=perf_id):
+                    server_event(name, ev)
+                    said = perform.asks_stop(ev.get('text'))
+                    if said:                                       # "stop the performance": always a way out
+                        server_cmd(name, {'type': 'perform', 'action': 'stop', 'by': f'voice: "{said}"', 'perf': perf_id})
+                stt = (lambda audio, fn: {'text': '', 'words': []}) if quiet else stt_words
+                threading.Thread(target=perform.transcribe_clip, daemon=True, args=(d, n, at, secs, by, stt, heard)).start()
                 return self._json(200, {'ok': True})
             ext = {'audio/webm': 'webm', 'audio/ogg': 'ogg', 'audio/mp4': 'm4a', 'audio/wav': 'wav'}.get(
                 (self.headers.get('Content-Type') or '').split(';')[0].strip(), 'webm')

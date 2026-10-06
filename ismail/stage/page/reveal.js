@@ -11,13 +11,15 @@
 //               never blinks; the old lights hand over to the new in the last frame (same count: no recompile)
 //     pop       small things grow in over a fifth of a second (no material change: free on the GPU)
 //     order     'near' (structure first, then nearest first) | 'none'
-//   Before the first piece shows, every shader the root needs is compiled off the frame (compileAsync, parallel
-//   compile on the Quest), and textures go up to the GPU one per frame. Then at most a few meshes and a capped
-//   vertex count are revealed per frame, never faster than minS allows.
+//   Before the first piece shows, every shader the root needs is compiled: off the frame where the GPU compiles in
+//   parallel (KHR_parallel_shader_compile), else a few materials per frame (the Quest has no parallel compile: one
+//   compile of a whole room stalled a frame for a second, and a stalled XR frame is the "vertical parallelograms on
+//   each eye"). Textures go up to the GPU one per frame. Then at most a few meshes and a capped vertex count are
+//   revealed per frame, never faster than minS allows.
 import * as THREE from 'three';
 
 const QUEST = /OculusBrowser|Quest/i.test(navigator.userAgent);
-const BUDGET = QUEST ? { perFrame: 2, verts: 24000, texPerFrame: 1 } : { perFrame: 12, verts: 400000, texPerFrame: 4 };
+const BUDGET = QUEST ? { perFrame: 2, verts: 24000, texPerFrame: 1, compileMs: 4 } : { perFrame: 12, verts: 400000, texPerFrame: 4, compileMs: 12 };
 
 export const meshKey = (o) => {                // stable across re-exports: the owning item's name and the mesh's own
   let p = o, item = '';
@@ -39,6 +41,27 @@ export function initReveal(ed) {
     return [...out];
   }
 
+  // one material's programs per call (or a few cached ones): the root compiled with every other mesh's material set
+  // aside for the call (compile() prepares every material under the root, and only the root's lights must be as they
+  // will be drawn); sync, so nothing is drawn in between
+  function compileSome(job) {
+    const t0 = performance.now();
+    do {
+      const batch = new Set(job.comp.splice(0, 1));
+      const kept = [];
+      job.root.traverse((o) => { if ((o.isMesh || o.isPoints || o.isLine) && o.material && !batch.has(o)) { kept.push([o, o.material]); o.material = null; } });
+      try {
+        // the driver links in the background and the first draw waits for it: asking for the uniforms waits here,
+        // inside this frame's budget, not in the frame that shows the piece
+        for (const m of ed.renderer.compile(job.root, ed.camera, ed.scene)) {
+          const pr = ed.renderer.properties.get(m).currentProgram;
+          if (pr) pr.getUniforms();
+        }
+      } catch (e) { console.warn('[reveal] compile', e); }
+      for (const [o, m] of kept) o.material = m;
+    } while (job.comp.length && performance.now() - t0 < BUDGET.compileMs);
+  }
+
   function step() {
     const now = performance.now();
     for (let i = pops.length - 1; i >= 0; i--) {                // small things grow in (easeOutBack, 0.85 -> 1)
@@ -48,6 +71,7 @@ export function initReveal(ed) {
     }
     const job = jobs[0];
     if (!job) return;
+    if (job.comp.length) { compileSome(job); return; }           // shaders first, paced (no parallel compile)
     if (job.tex.length) {                                        // textures first, a few per frame
       for (let n = 0; n < BUDGET.texPerFrame && job.tex.length; n++) {
         const t = job.tex.shift();
@@ -111,13 +135,30 @@ export function initReveal(ed) {
       root.traverse((o) => { if (o.isLight && o.visible) { newLights.push(o); o.visible = false; } });
       (opts.oldRoot || { traverse() {} }).traverse((o) => { if (o.isLight && o.visible) oldLights.push(o); });
     }
-    // every program this root needs, compiled before any of it is drawn (lights as they will be during the reveal)
-    try { await ed.renderer.compileAsync(root, ed.camera, ed.scene); } catch (e) { console.warn('[reveal] compile', e); }
+    // every program this root needs, compiled before any of it is drawn (lights as they will be during the reveal):
+    // at once off the frame where the GPU compiles in parallel, else one material (one representative mesh) at a time
+    const comp = [];
+    if (parallel()) {
+      try { await ed.renderer.compileAsync(root, ed.camera, ed.scene); } catch (e) { console.warn('[reveal] compile', e); }
+    } else {
+      const seen = new Set();
+      root.traverse((o) => {
+        if (!(o.isMesh || o.isPoints || o.isLine) || !o.material) return;
+        const k = [o.material].flat().map((m) => m.uuid).join('+') + (o.isSkinnedMesh ? 's' : '') + (o.isInstancedMesh ? 'i' : '') +
+          (o.morphTargetInfluences ? 'm' : '') + (o.receiveShadow ? 'r' : '');
+        if (!seen.has(k)) { seen.add(k); comp.push(o); }
+      });
+    }
     return new Promise((resolve) => {
-      jobs.push({ root, parent, queue, total: queue.length, done: 0, tex: texturesOf(root), minS: opts.minS ?? (QUEST ? 6 : 1.5),
+      jobs.push({ root, parent, queue, comp, total: queue.length, done: 0, tex: texturesOf(root), minS: opts.minS ?? (QUEST ? 6 : 1.5),
         replace: opts.replace || null, newLights, oldLights, pop: opts.pop !== false && !opts.replace,
         order: opts.order || 'near', resolve, t0: performance.now(), started: 0 });
     });
   };
   ed.staging = () => jobs.length > 0;
+  let par = null;
+  function parallel() {
+    if (par === null) par = !!(ed.renderer.extensions && ed.renderer.extensions.has('KHR_parallel_shader_compile'));
+    return par && !ed.forcePacedCompile && !/[?&]paced=1/.test(location.search);   // ?paced=1: the Quest's path on a desktop
+  }
 }

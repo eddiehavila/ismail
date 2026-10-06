@@ -54,7 +54,7 @@ def test_two_cpu_slots_and_a_live_engine_holds_one(board):
         with machine.slot('cpu', 'render a'):
             machine._held.depth = 0
             assert 'cpu slots are full' in machine.check('cpu')
-            assert machine.check('gpu') == ''
+            assert 'a live set is on air' in machine.check('gpu')       # hq:D-11: the set first, for now
             machine._held.depth = 1
         machine._held.depth = 1
 
@@ -377,3 +377,27 @@ def test_machine_disk_lists_the_songs_their_growth_and_reclaim(board, tmp_path):
     assert sorted(os.listdir(board / 'disk')) == ['2000-01-01.json', __import__('time').strftime('%Y-%m-%d') + '.json']
     assert 'songs/' in api.OPS['machine_disk']()
 
+
+
+def test_while_a_set_is_on_air_gpu_jobs_and_blender_renders_wait(board):
+    """ledger:M127, hq:D-11 (Nate 2026-10-05, after two real dropouts): GPU and Blender renders wait while a set plays,
+    "only for now during sets"; a policy, so 'render_first' can come later."""
+    assert machine.check('gpu') == '' and machine.check('cpu', what='crossfade export', cmd=['blender', '-b']) == ''
+    with machine.slot('live', 'live engine set', threads=None):
+        machine._held.depth = 0
+        assert 'a live set is on air' in machine.check('gpu')
+        assert 'a live set is on air' in machine.check('cpu', what='crossfade street polish', cmd=['C:/B/blender.exe', '-b'])
+        assert 'on air' in machine.check('cpu', what='eevee contact sheet')
+        assert 'on air' not in machine.check('cpu', what='render song')            # an audio render is not held
+        assert 'ON AIR' in machine.board() and 'set_first' in machine.board()
+        machine.set_on_air_policy('off', by='the user', why='test')
+        assert 'on air' not in machine.check('gpu')
+        with pytest.raises(ValueError, match='not built yet'):
+            machine.set_on_air_policy('render_first', by='the user')
+        with pytest.raises(ValueError, match='by'):
+            machine.set_on_air_policy('set_first', by=None)
+        machine.set_on_air_policy('set_first', by='the user')
+        assert 'a live set is on air' in machine.check('gpu')
+        machine._held.depth = 1
+    assert machine.check('gpu') == ''                                              # the set ended
+    assert machine.main(['on-air']) == 0

@@ -27,7 +27,7 @@ HEARD_WAIT_S = 6             # a note no listener took by then is unheard
 PAGE_FRESH_S = 120           # the headset page posts state about once a minute while it is lifted
 NOBODY = 'Nobody is listening right now. I saved your note.'
 HOOK_EVENTS = ('entered_vr', 'left_vr', 'voice_note', 'voice_unheard')
-INBOX_TYPES = {'voice_in', 'voice_message', 'voice_heard', 'headset', 'vr_exit', 'scene_switched'}
+INBOX_TYPES = {'voice_in', 'voice_message', 'voice_heard', 'headset', 'vr_exit', 'scene_switched', 'perform_clip'}
 ANSWERS = {'ack', 'say', 'ask'}
 
 LOCK = threading.Lock()
@@ -113,6 +113,10 @@ def on_events(scene, evs):
         t = e.get('type')
         if e.get('page'):                          # posted by a page (the server's own events carry none)
             page_alive(scene)
+        if t == 'perform_clip':                    # what they say inside a performance: the text first, no word list
+            x = inbox_add(scene, {'type': t, 'text': e.get('text'), **{k: v for k, v in e.items() if k not in ('words', 'text', 'type')}}) \
+                if (e.get('text') or '').strip() else None
+            continue
         x = inbox_add(scene, e) if t in INBOX_TYPES else None
         if t == 'headset' and e.get('state') in ('entered VR', 'on'):
             with LOCK:
