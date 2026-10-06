@@ -147,10 +147,14 @@ def phone_say(text: str, speak: bool = False, pin: bool = False, buzz: bool = Fa
 
 @op()
 def phone_now(now: str = None, next: str = None, recording_why: str = None, mood: str = None,
-              sender: str = None) -> str:
+              now_mark: str = None, next_mark: str = None, sender: str = None) -> str:
     """What the page shows as now playing and next up (default: read from the engine), and why recording is on or
-    off (the page always shows whether it is). '' clears a field. mood: set the mood chip (calm, steady, lift, peak)."""
-    return _call('now', now=now, next=next, recording_why=recording_why, mood=mood, who=sender)
+    off (the page always shows whether it is). '' clears a field. mood: set the mood chip (calm, steady, lift, peak).
+    now_mark/next_mark: a small mark beside the piece, so they know what they are hearing: 'loved' (one they loved
+    before, played again), 'replay' (played earlier, back again), 'new' (just made). Set it on every chapter change;
+    without one the page shows a heart when they tapped Love this while that piece played."""
+    return _call('now', now=now, next=next, recording_why=recording_why, mood=mood, now_mark=now_mark,
+                 next_mark=next_mark, who=sender)
 
 
 @op()

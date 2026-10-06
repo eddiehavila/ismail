@@ -54,6 +54,7 @@ TAPS = {'love': 'loves this: cut a highlight here', 'change': 'change it up now'
 MOODS = ('calm', 'steady', 'lift', 'peak')
 # a short voice note that is only a command acts as one (earbuds give one button, so the voice does the rest);
 # the words still reach the agent as voice_text, and the act carries via='voice' and the note's id
+MARKS = ('loved', 'replay', 'new')   # a piece they loved before, one the DJ plays again, one just made
 PAGE_OPEN_S = 60.0          # a page that asked for its state this recently is open (it long-polls every 20 s)
 VOICE_CMDS = [(r'stop (?:listening|the stream|streaming)', 'stop_listening'), (r'(?:i )?love (?:this|that|it)', 'love'),
               (r'change it up', 'change'), (r'more energy', 'energy_up'), (r'calmer|calm (?:it )?down', 'energy_down'),
@@ -187,11 +188,18 @@ class Phone:
         self.cmds = []
         self.view = {'now': None, 'next': None, 'rec_why': None, 'mood': None, 'captions': [], 'pinned': None,
                      'buttons': [], 'panels': [], 'offers': []}
+        saved = {}
         try:
             saved = json.loads((HOME / 'state.json').read_text(encoding='utf8'))
             self.view.update({k: saved[k] for k in ('now', 'next', 'rec_why', 'mood', 'buttons', 'pinned') if k in saved})
         except (OSError, ValueError):
             pass
+        self.view.setdefault('marks', {})         # piece text -> 'loved' | 'replay' | 'new' (the DJ's, phone_now)
+        try:
+            self.view['marks'] = dict(saved.get('marks') or {})
+        except NameError:
+            pass
+        self.taps = collections.deque(self._recent_taps(), maxlen=60)   # what they loved and asked for, newest last
         self.files = {}                            # token -> path (only what an op offered is served)
         self.page_seen = 0.0                       # the last time an open page asked for its state
         self.engine = None                         # the playing engine's parsed status
@@ -217,6 +225,43 @@ class Phone:
         except (OSError, ValueError, KeyError, IndexError):
             return 0
 
+    def _recent_taps(self):
+        """The last taps and moods from the inbox, so a restarted server still shows what they asked for."""
+        try:
+            with open(HOME / 'inbox.jsonl', 'rb') as f:
+                f.seek(max(0, os.path.getsize(f.name) - 200_000))
+                lines = f.read().decode('utf8', 'replace').splitlines()[1:]
+        except OSError:
+            return []
+        out = []
+        for line in lines:
+            try:
+                r = json.loads(line)
+            except ValueError:
+                continue
+            if r.get('kind') in ('tap', 'mood'):
+                out.append(self._tap_item(r))
+        return out[-60:]
+
+    @staticmethod
+    def _tap_item(r):
+        return {'ts': r.get('ts'), 'what': r.get('what') or 'mood', 'mood': r.get('mood'),
+                'of': (r.get('heard') or {}).get('of'), 'now': r.get('now')}
+
+    def now_text(self):
+        e = self.engine
+        return self.view['now'] or (', '.join(e['playing']) if e and e['playing'] else None)
+
+    def mark(self, text):
+        """How a piece stands with them: the DJ's mark (phone_now now_mark/next_mark), else 'loved' when they tapped
+        Love this while it played."""
+        if not text:
+            return None
+        m = self.view['marks'].get(text)
+        if m:
+            return m
+        return 'loved' if any(t['what'] == 'love' and t.get('now') == text for t in self.taps) else None
+
     def routes(self):
         out = [HOME / 'inbox.jsonl']
         if self.route:
@@ -238,6 +283,8 @@ class Phone:
                 except OSError as e:
                     print(f'[phone] inbox {p}: {e}', flush=True)
             self.cond.notify_all()
+            if rec.get('kind') in ('tap', 'mood'):
+                self.taps.append(self._tap_item(rec))
         self._hooks(rec)
         return rec
 
@@ -284,7 +331,8 @@ class Phone:
     def save(self):
         try:
             (HOME / 'state.json').write_text(json.dumps({k: self.view[k] for k in ('now', 'next', 'rec_why', 'mood',
-                                                                                    'buttons', 'pinned')}), encoding='utf8')
+                                                                                    'buttons', 'pinned', 'marks')}),
+                                             encoding='utf8')
         except OSError:
             pass
 
@@ -542,9 +590,14 @@ class Phone:
         agents = sorted(w for w, at in self.agents.items() if now - at < 90)
         rec = {'on': bool(e and e.get('recording')), 'file': e.get('recording') if e else None,
                'why': self.view['rec_why']}
-        return {'engine': {'playing': bool(e), 'bpm': e['bpm'] if e else None,
-                           'now': self.view['now'] or (', '.join(e['playing']) if e and e['playing'] else None),
-                           'next': self.view['next'] or (e['next'] if e else None)},
+        now_t, next_t = self.now_text(), self.view['next'] or (e['next'] if e else None)
+        today = time.strftime('%Y-%m-%d')
+        tally = collections.Counter(x['what'] for x in self.taps if (x['ts'] or '').startswith(today))
+        moods = [x for x in self.taps if x['what'] == 'mood']
+        return {'engine': {'playing': bool(e), 'bpm': e['bpm'] if e else None, 'now': now_t, 'next': next_t,
+                           'now_mark': self.mark(now_t), 'next_mark': self.mark(next_t)},
+                'taps': list(self.taps)[-8:][::-1], 'tally': dict(tally),
+                'asked_mood': moods[-1] if moods else None,
                 'rec': rec, 'mood': self.view['mood'], 'captions': self.view['captions'][-6:],
                 'pinned': self.view['pinned'], 'buttons': self.view['buttons'], 'panels': self.view['panels'],
                 'offers': self.view['offers'][-4:], 'listening': agents,
@@ -635,14 +688,26 @@ class Agent:
                 out += f" (not spoken: the speech server does not answer: {e})"
         return out
 
-    def op_now(self, now=None, next=None, recording_why=None, mood=None, who=None):
-        v = self.ph.view
+    def op_now(self, now=None, next=None, recording_why=None, mood=None, now_mark=None, next_mark=None, who=None):
+        v, ph = self.ph.view, self.ph
         for k, val in (('now', now), ('next', next), ('rec_why', recording_why), ('mood', mood)):
             if val is not None:
                 v[k] = val or None
-        self.ph.save()
-        self.ph.cmd('view')
-        return f"now={v['now']!r} next={v['next']!r} recording_why={v['rec_why']!r} mood={v['mood']!r}"
+        for text, m in ((ph.now_text(), now_mark), (v['next'], next_mark)):
+            if m is None or not text:
+                continue
+            if m and m not in MARKS:
+                raise ValueError(f"now_mark/next_mark: one of {MARKS}, or '' to clear")
+            if m:
+                v['marks'][text] = m
+            else:
+                v['marks'].pop(text, None)
+        while len(v['marks']) > 200:
+            v['marks'].pop(next(iter(v['marks'])))
+        ph.save()
+        ph.cmd('view')
+        return (f"now={v['now']!r} ({ph.mark(ph.now_text()) or 'no mark'}) next={v['next']!r} "
+                f"({ph.mark(v['next']) or 'no mark'}) recording_why={v['rec_why']!r} mood={v['mood']!r}")
 
     def _wait_answer(self, pid, wait):
         if not wait:
@@ -787,7 +852,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._file(PAGE / 'index.html')
         if re.fullmatch(r'/cues/(start|end|sent|error)\.mp3', path):
             return self._file(PAGE / path[1:])
-        if path in ('/app.js', '/sw.js', '/icon.svg', '/manifest.webmanifest'):
+        if path in ('/app.js', '/sw.js', '/icon.svg', '/manifest.webmanifest', '/icon-192.png', '/icon-512.png',
+                    '/icon-maskable.png', '/apple-touch-icon.png'):
             return self._file(PAGE / path[1:])
         if path == '/health':
             return self._json(200, {'ok': True, 'engine': bool(self.ph.engine), 'inbox': self.ph.seq})
@@ -863,14 +929,15 @@ class Handler(BaseHTTPRequestHandler):
                         return self._json(400, {'error': f'mood: one of {MOODS}'})
                     ph.view['mood'] = m
                     ph.save()
-                    rec = ph.post({'kind': 'mood', 'mood': m, 'sid': sid, 'heard': ph.heard(sid, t)})
+                    rec = ph.post({'kind': 'mood', 'mood': m, 'sid': sid, 'heard': ph.heard(sid, t),
+                                   'now': ph.now_text()})
                 elif what.startswith('button:'):
                     bid = what[7:]
                     lab = next((b['label'] for b in ph.view['buttons'] if b['id'] == bid), bid)
                     rec = ph.post({'kind': 'button', 'id': bid, 'label': lab, 'sid': sid, 'heard': ph.heard(sid, t)})
                 elif what in TAPS:
                     rec = ph.post({'kind': 'tap', 'what': what, 'means': TAPS[what], 'sid': sid,
-                                   'heard': ph.heard(sid, t)})
+                                   'heard': ph.heard(sid, t), 'now': ph.now_text()})
                 else:
                     return self._json(400, {'error': f'what: one of {sorted(TAPS)}, mood, button:<id>'})
                 ph.cmd('view')

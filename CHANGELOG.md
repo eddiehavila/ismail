@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### The phone page: momentary keys and a tap history, notes that never cut off, installable (Nate, 10-06)
+
+- Nate: a key "stays pressed even once that has been sent ... when I press it again, I'm unpressing the button".
+  Every key is momentary now (Love this no longer rests in the accent, the mood detents flash SENT instead of
+  staying selected), and the page lists what he asked for: each tap and mood with its time and the piece that
+  played, today's count, and the mood he asked for the next chapter. The server keeps it (it survives a reload or
+  a restart).
+- Now and next carry a small mark: a heart for a piece he loved, a loop for one played again, NEW for one just made.
+  `phone_now(now_mark=, next_mark=)` sets it; without it a love tap during that piece shows the heart.
+- "The voice recording should not cut me off": notes stopped at 60 s mid-sentence. They now run until his press,
+  30 s of quiet, or 10 minutes (a warning 20 s before).
+- Installable from Chrome, after his tooler PWA: PNG icons (192, 512, maskable; `python -m ismail.phone.make_icons`
+  redraws them from icon.svg), an Install app button when Chrome offers it, and optional notifications for what
+  the DJ says while the app is in the background.
+
 ### The phone page picks the set back up after a reload, and a spoken answer reaches an open page
 
 - On Nate's walk (2026-10-06) the page reloaded (the phone dropped it while locked, or it was reopened): the stream
