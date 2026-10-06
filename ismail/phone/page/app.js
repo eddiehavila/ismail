@@ -73,6 +73,23 @@ $('back').onclick = () => { want = true; connect(30); send('/api/tap', { what: '
 audio.addEventListener('playing', () => { if (want) keyState('play', 'stop', 'Stop'); });
 ['waiting', 'stalled'].forEach((x) => audio.addEventListener(x, () => { if (want) keyState('play', 'wait', 'Stop', 'wait'); }));
 audio.addEventListener('timeupdate', () => { if (audio.currentTime > lastT + 0.2) { lastT = audio.currentTime; lastAdvance = Date.now(); } });
+// the stream's gaps, measured (Nate 10-06 14:56: "dropouts ... is that the stream due to buffering ... or CPU ... a
+// profiler"): every stall the browser reports and every freeze (sound not advancing for over 1.5 s) is logged with
+// its length, whether a voice note was recording, the playback rate and the network, so phone_timeline shows each gap
+const gap = { at: 0, kind: '', note: false };
+function gapStart(kind) { if (!want || gap.at) return; gap.at = Date.now(); gap.kind = kind; gap.note = !!talk.rec; }
+function gapEnd() {
+  if (!gap.at) return;
+  const ms = Date.now() - gap.at, c = navigator.connection || {};
+  if (ms >= 300) ev('stall', { cause: gap.kind, ms, during_note: gap.note || !!talk.rec, rate: audio.playbackRate,
+    net: c.effectiveType || '', downlink: c.downlink, mic: talk.stream ? (micSrc === 'phone' ? 'phone' : 'earbuds') : 'closed' });
+  gap.at = 0;
+}
+['waiting', 'stalled'].forEach((x) => audio.addEventListener(x, () => gapStart(x)));
+audio.addEventListener('playing', gapEnd);
+audio.addEventListener('timeupdate', () => { if (gap.at && gap.kind === 'freeze' && Date.now() - lastAdvance < 300) gapEnd(); });
+setInterval(() => { if (want && !audio.paused && !clip.el && Date.now() - lastAdvance > 1500) gapStart('freeze'); }, 500);
+try { navigator.mediaDevices.addEventListener('devicechange', () => ev('route', { during_note: !!talk.rec })); } catch (e) {}
 setInterval(() => {                     // a stream that stops moving reconnects (wifi dropped, server restarted)
   if (want && !clip.el && Date.now() - lastAdvance > 12000) { lastAdvance = Date.now(); $('livetext').textContent = 'reconnecting'; connect(); }
 }, 3000);
@@ -271,7 +288,7 @@ $('micsrc').textContent = micSrc === 'phone' ? 'Record: phone mic' : 'Record: ea
 async function micStart() {
   if (talk.rec) return;
   try {
-    if (!talk.stream || !talk.stream.active) talk.stream = await openMic();
+    if (!talk.stream || !talk.stream.active) { const t0 = Date.now(); talk.stream = await openMic(); talk.openMs = Date.now() - t0; }
   } catch (e) {
     cue('error'); buzz([300]);
     toast(document.hidden ? 'the phone would not open the mic with the screen off: turn it on, or set Mic: kept open' : 'the microphone is blocked: allow it for this page');
@@ -279,7 +296,7 @@ async function micStart() {
   }
   const mime = ['audio/webm;codecs=opus', 'audio/ogg;codecs=opus', 'audio/mp4'].find((m) => window.MediaRecorder && MediaRecorder.isTypeSupported(m)) || '';
   talk.chunks = []; talk.t = heardNow(); talk.sid = sid; talk.started = Date.now(); talk.end = 'press';
-  ev('note_start');
+  ev('note_start', { mic: micSrc, open_ms: talk.openMs || 0, kept: micKeep });
   talk.rec = new MediaRecorder(talk.stream, mime ? { mimeType: mime } : undefined);
   talk.rec.ondataavailable = (e) => { if (e.data.size) talk.chunks.push(e.data); };
   talk.rec.start(250);
