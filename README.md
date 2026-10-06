@@ -68,7 +68,7 @@ Everything goes in as text (notes, instrument patches, effect chains, automation
 
 One set of operations, three ways in:
 
-- **MCP server** for Claude Code, Cursor or any MCP client: `ismail mcp` (stdio, 203 tools: 108 for music and live play, 78 `stage_*` for the VR stage, 17 `phone_*` for the phone page)
+- **MCP server** for Claude Code, Cursor or any MCP client: `ismail mcp` (stdio, 207 tools: 108 for music and live play, 82 `stage_*` for the VR stage, 17 `phone_*` for the phone page)
 - **CLI**: `ismail -p <project> <op> [args]` (same as `python -m ismail ...`)
 - **Python**: `from ismail import api`
 

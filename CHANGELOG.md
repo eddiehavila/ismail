@@ -10,6 +10,30 @@
 - live_status says STARVING (the bar, the track, the seconds of render work before it against the seconds until it
   sounds) when the line, earliest-needed first at the measured rates, cannot keep up.
 
+### Docs: where the machine board lives; 207 tools (S54, hq:D-30)
+
+- setup.md and development.md say the board follows `ISMAIL_SONGS` (`<ISMAIL_SONGS>/_machine`, or
+  `ISMAIL_MACHINE_DIR`): right for a stranger, a trap for a test on a shared machine (first-run dress rehearsal 2).
+- The README counts 207 MCP tools (82 `stage_*`).
+
+### The governor holds a run to its threads and pauses a job far past its memory (ledger:M153, M154, hq:D-30)
+
+- `machine run` pins its command to as many cores as its threads (the highest cores no other job holds; children
+  inherit it, and the meter sets it again on a child that changed it), and the thread variables now include Numba's
+  and Rayon's. A `run --cpu` at 2 threads used about 5 cores, because CTranslate2 ignores the BLAS variables.
+- A job at 3 times its `--mem` while less than 10 GB of commit is free (or 15% of the commit limit, if smaller) has its processes paused, never killed: the
+  board says SUSPENDED: OVER and how to go on, `python -m ismail.machine resume <job id, pid or name>`, after which
+  it is not paused again. 10-06: an ffmpeg declared 3 GB and took 37 GB during a live set.
+- The board reads a job's file again when its meter is replacing it (Windows), so a running job never drops off
+  the board for a moment.
+- A docstring's `D:\ismail` made an invalid escape warning; it reads D:/ismail now.
+
+### render stands in line when the machine is busy (ledger:M152, hq:D-30)
+
+- A plain `render` refused on WAIT and told a newcomer's agent "force=True only if the user says so" (first-run dress
+  rehearsal 2). It now waits in line up to `wait='10m'` (the default), says how long it waited, and `wait='0'`
+  refuses at once as before.
+
 ### phone_route survives a restart (ledger:M157, hq:D-30)
 
 - The route is kept in the phone's state.json and loaded again when the server starts (when its folder still
