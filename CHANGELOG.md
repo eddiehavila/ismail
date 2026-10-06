@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Docs: where the machine board lives; 207 tools (S54, hq:D-30)
+
+- setup.md and development.md say the board follows `ISMAIL_SONGS` (`<ISMAIL_SONGS>/_machine`, or
+  `ISMAIL_MACHINE_DIR`): right for a stranger, a trap for a test on a shared machine (first-run dress rehearsal 2).
+- The README counts 207 MCP tools (82 `stage_*`).
+
 ### phone_route survives a restart (ledger:M157, hq:D-30)
 
 - The route is kept in the phone's state.json and loaded again when the server starts (when its folder still
