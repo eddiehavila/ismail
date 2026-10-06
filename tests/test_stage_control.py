@@ -7,6 +7,7 @@ import pytest
 
 from ismail.api import OPS, OpError
 from ismail.stage import rigs
+from ismail.stage import world as W
 from test_stage import FakePage, _get, stage  # noqa: F401  (the fixture)
 
 HUMAN_BONES = ['Root', 'pelvis', 'spine_01', 'spine_02', 'spine_03', 'neck_01', 'head',
@@ -188,3 +189,40 @@ def test_a_start_pose_is_shown_now_on_an_open_page(stage):
         assert (page.seen[-1]['type'], page.seen[-1]['person']) == ('actor_rest', 'person_bar_lean')
     finally:
         page.stop = True
+
+
+def test_load_sets_define_unload_and_tell_an_open_page(stage):
+    sc = stage['scenes']
+    (sc / 'room' / 'manifest.json').write_text(json.dumps({'objects': {
+        'person_couple_1_m': {}, 'person_couple_1_f': {}, 'bar_counter': {}}}), encoding='utf-8')
+    OPS['stage_world'](scene='room', world={'actors': {'person_couple_1_m': 'bf_jo', 'cyrus': 'cyrus'}})
+    with pytest.raises(OpError, match=r'band_\* match no node and no person'):
+        OPS['stage_set_define'](scene='room', name='dancers', items=['person_couple_*', 'band_*'])
+    out = OPS['stage_set_define'](scene='room', name='dancers', items=['person_couple_*'], note='six dancers')
+    assert 'load set dancers in room: 2 (person_couple_1_f, person_couple_1_m)' in out
+    OPS['stage_set_define'](scene='room', name='band', items=['cyrus'])          # a person with no node yet
+    with pytest.raises(OpError, match="no load set 'bar'"):
+        OPS['stage_set_load'](scene='room', name='bar', loaded=False)
+    out = OPS['stage_set_load'](scene='room', name='dancers', loaded=False)       # no page open: the next load
+    assert out.startswith('dancers unloaded in room') and 'next load' in out
+    assert W.load_world(sc, 'room')['unloaded'] == ['dancers']
+    got = json.loads(OPS['stage_sets'](scene='room'))
+    assert got['dancers']['unloaded'] and got['dancers']['note'] == 'six dancers' and not got['band']['unloaded']
+    assert got['dancers']['matches'] == {'person_couple_*': ['person_couple_1_f', 'person_couple_1_m']}
+    page = FakePage(stage['port'], 'room')
+    try:
+        out = OPS['stage_set_load'](scene='room', name='dancers')
+        assert out.startswith('dancers loaded in room; the page:')
+        c = page.seen[-1]
+        assert (c['type'], c['name'], c['loaded'], c['set']['items']) == ('load_set', 'dancers', True, ['person_couple_*'])
+        assert W.load_world(sc, 'room')['unloaded'] == []
+        OPS['stage_set_load'](scene='room', name='band', loaded=False)
+        out = OPS['stage_set_define'](scene='room', name='band', remove=True)   # unloaded: loaded back first
+        assert 'removed the load set band' in out and page.seen[-1]['loaded'] is True
+        assert set(W.load_world(sc, 'room')['sets']) == {'dancers'}
+    finally:
+        page.stop = True
+    with pytest.raises(OpError, match='not in sets'):
+        OPS['stage_world'](scene='room', world={'sets': {}, 'unloaded': ['ghosts']})
+    with pytest.raises(OpError, match='at least one item'):
+        OPS['stage_world'](scene='room', world={'sets': {'x': {'items': []}}})

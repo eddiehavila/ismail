@@ -270,6 +270,7 @@ export function initLive(ed, desktop, xr) {
       selection: sel ? { ...desc(sel), ...tf(ed.blenderTransform(sel)) } : null,
       changed, carried, lights, materials,
       unsaved: ed.dirty(),
+      sets: window.VR_sets ? window.VR_sets.state() : null,   // load sets: which are unloaded (loadsets.js)
       edit_counts: Object.fromEntries(Object.entries(edits).map(([k, v]) => [k, Object.keys(v).length])),
       undo_depth: ed.undoStack.length,
       walk: desktop.walk.on ? { floor_z: rn(desktop.walk.floorY, 3), eye_above_floor: rn(p.y - desktop.walk.floorY, 3),
