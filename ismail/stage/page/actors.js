@@ -13,6 +13,7 @@ import { JOINTS } from './hands.js';
 import { cutout, b2tPos } from './editor.js';
 import { world } from './world.js';
 import { initControl } from './control.js';
+import { mixTake } from './interp.js';
 
 // who plays whom, facings, partners and the floor are the scene's (world.json via world.js), not the runtime's
 // where a person stands: the bottom of their stand-in (the band is up on the stage), the room's floor without one
@@ -103,6 +104,7 @@ const STEP_AT = 0.22, STEP_S = 0.28, LIFT = 0.07;
 // toward it (direction only, so sitting lower or higher does not sink or lift him) and the hands drive the arms; the
 // feet plant in front of the seat (a seated pose) or on their own pins. The head clearly away from the seat
 // (PIN_AWAY_M for PIN_AWAY_MS) lets go for that follow.
+const GAP_S = 0.25;                                  // playback: samples further apart than this are held, not mixed
 const SEAT_ABOVE = 0.09, SEAT_FOOT = 0.42, LEAN_MAX = 0.9, PIN_AWAY_M = 0.7, PIN_AWAY_MS = 600;
 const Y = new THREE.Vector3(0, 1, 0);
 
@@ -502,7 +504,11 @@ export function initActors(ed, live) {
       let t = t0 + (performance.now() - st.t0) / 1000 * st.rate;
       if (t > T) { if (!st.loop) { stop({ person: st.person }); continue; } st.t0 = performance.now(); t = t0; st.i = 0; st.feet = { l: {}, r: {} }; }
       while (st.i < st.frames.length - 1 && st.frames[st.i + 1].t <= t) st.i++;
-      pose(st, st.frames[st.i]);
+      // between the two samples around t, not the last one held (interp.js mixTake); a gap over GAP_S (tracking lost,
+      // a cut) is held, not swept across
+      const fa = st.frames[st.i], fb = st.frames[st.i + 1];
+      if (fb && fb.t - fa.t < GAP_S && t > fa.t) st.mix = mixTake(fa, fb, (t - fa.t) / (fb.t - fa.t), st.mix);
+      pose(st, fb && fb.t - fa.t < GAP_S && t > fa.t ? st.mix : fa);
     }
   }
   ed.preRender.push(update);
