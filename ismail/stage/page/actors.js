@@ -325,12 +325,15 @@ export function initActors(ed, live) {
   async function play(c) {
     const person = c.person, who = c.actor || world().actors[person];
     if (!who) throw new Error('no actor for ' + person + ' (world.json actors, or pass actor)');
+    const gone = unloadedOf(person);
+    if (gone) throw new Error(`${person} is in the unloaded set ${gone}: load it first (stage_set_load)`);
     const base = `scenes/${encodeURIComponent(c.assets || world().assets || scn())}/`;   // a derived scene's bodies: its source's
     const tbase = `scenes/${encodeURIComponent(c.takes || scn())}/takes/${encodeURIComponent(c.take)}/`;
     // c.frames: frames in memory (the last Follow, played back before it is kept: perform.js), with c.meta
     const [rig0, meta, txt] = await Promise.all([load(who, base), c.frames ? { joints: JOINTS, ...(c.meta || {}) } : fetch(tbase + 'meta.json', { cache: 'no-store' }).then((r) => r.json()),
       c.frames ? null : fetch(tbase + 'frames.jsonl', { cache: 'no-store' }).then((r) => { if (!r.ok) throw new Error('no take ' + c.take); return r.text(); })]);
     stop({ person });
+    if (unloadedOf(person)) throw new Error(`${person}'s set ${unloadedOf(person)} was unloaded while the take loaded`);
     unrest(person);
     let frames = (c.frames || txt.split('\n').filter(Boolean).map((l) => JSON.parse(l))).filter((f) => f.head);
     if (!frames.length) throw new Error('take has no frames');
@@ -388,6 +391,8 @@ export function initActors(ed, live) {
   async function follow(c) {
     const person = c.person, who = c.actor || world().actors[person];
     if (!who) throw new Error('no actor for ' + person + ' (world.json actors, or pass actor)');
+    const gone = unloadedOf(person);
+    if (gone) throw new Error(`${person} is in the unloaded set ${gone}: load it first (stage_set_load)`);
     if (!source) throw new Error('no live body source');
     const rig0 = await load(who, `scenes/${encodeURIComponent(c.assets || world().assets || scn())}/`);
     stop({ person });
@@ -450,19 +455,20 @@ export function initActors(ed, live) {
   }
   async function rest(person) {
     if (playing.has(person) || !world().actors[person]) return null;
+    if (unloadedOf(person)) { unrest(person); return null; }   // in an unloaded set (loadsets.js): no body at all
     const rig0 = await rigOf(person);
     await readProfile(rig0);
     const spec = rig0.profile && rig0.profile.start;
     const it = ed.byName.get(person);
     if (!spec || spec.idle === false || !it) { unrest(person); if (it) it.obj.visible = true; return null; }
-    if (playing.has(person)) return null;                 // a play began while the profile loaded
+    if (playing.has(person) || unloadedOf(person)) return null;   // a play began, or its set went, while it loaded
     const r = resting.get(person) || { rig: await cloneRig(rig0) };
     const w = it.obj.getWorldPosition(new THREE.Vector3()), floor = groundOf(it);
     const align = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, -1), r.rig.fwd);
     const tmp = { person, rig: r.rig, s: 1, floor, to: new THREE.Vector3(w.x, floor, w.z), alignInv: align.invert(),
       feet: { l: {}, r: {} }, J: Object.fromEntries(JOINTS.map((n, i) => [n, i])) };
     await startPose(tmp, spec);
-    if (playing.has(person)) return null;
+    if (playing.has(person) || unloadedOf(person)) return null;   // a play began, or its set was unloaded, meanwhile
     r.spec = spec;
     resting.set(person, r);
     scene.add(r.rig.root);
@@ -551,6 +557,8 @@ export function initActors(ed, live) {
   ed.preRender.push(update);
   const canPlay = (person) => !!world().actors[person];
   const setSource = (fn) => { source = fn; };
+  let unloadedOf = () => null;                              // loadsets.js: the unloaded set a person is in, or null
+  const setUnloaded = (fn) => { unloadedOf = fn; };
   // where a playing take is now (its own clock, seconds) and its span
   const at = (person) => { const st = playing.get(person); return st && st.frames ? { t: st.frames[st.i].t, t0: st.frames[0].t, t1: st.frames[st.frames.length - 1].t } : null; };
   // the mirror of each person's latest Follow (kept after it stops: the take kept from it plays the same way)
@@ -761,5 +769,5 @@ export function initActors(ed, live) {
   };
   const control = initControl(ed, live, { rigOf, readProfile, setWorldQ, twoBone, pinPoint, anchor: (c) => anchor(c), pinsOf: (p) => pinsOf(p) });
   const pinsOf = (person) => { const st = playing.get(person); return st ? pinnedNames(st) : Object.keys(anchors.get(person) || {}).filter((k) => k !== 'legs' && anchors.get(person)[k]); };
-  return { play, stop, follow, setSource, playing, load, pose, canPlay, turnBy, setMode, moveTo, at, setMirror, anchor, pinsOf, control, rigOf, pinsMeta, mirrorOf };
+  return { play, stop, follow, setSource, playing, load, pose, canPlay, turnBy, setMode, moveTo, at, setMirror, anchor, pinsOf, control, rigOf, pinsMeta, mirrorOf, setUnloaded, rest, unrest };
 }

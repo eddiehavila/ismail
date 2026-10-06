@@ -239,6 +239,107 @@ def stage_world(scene: str, scenes: str = None, world: dict = None) -> str:
     return f'wrote {f}: ' + json.dumps(worldmod.load_world(d, scene), separators=(', ', ': '))
 
 
+def _set_members(d, scene, items):
+    """The scene's node names (manifest.json) and people (world.json actors) each pattern of a load set matches."""
+    import fnmatch
+    names = []
+    m = d / scene / 'manifest.json'
+    if m.is_file():
+        try:
+            names = list((json.loads(m.read_text(encoding='utf-8')) or {}).get('objects') or {})
+        except ValueError:
+            names = []
+    people = list(worldmod.load_world(d, scene).get('actors') or {})
+    return {p: sorted({n for n in names + people if fnmatch.fnmatchcase(n, p)}) for p in items}
+
+
+@op()
+def stage_sets(scene: str, scenes: str = None) -> str:
+    """The scene's load sets (world.json sets): each one's items (node names or globs), what they match in the scene
+    (nodes from manifest.json, people from world.json actors), its note, and whether it is unloaded. See
+    stage_set_define and stage_set_load."""
+    d = _scenes_dir(scenes) if scenes else Path(link.server_for(scene)['scenes'])
+    w = worldmod.load_world(d, scene)
+    un = set(w.get('unloaded') or [])
+    out = {n: {'unloaded': n in un, 'note': s.get('note'), 'items': s['items'],
+               'matches': _set_members(d, scene, s['items'])} for n, s in (w.get('sets') or {}).items()}
+    return json.dumps(out, indent=1) if out else f'no load sets in {scene} (stage_set_define makes one)'
+
+
+@op(mutates=True)
+def stage_set_define(scene: str, name: str, items: list = None, note: str = None, remove: bool = False,
+                     scenes: str = None) -> str:
+    """Name a load set: a group of the room (the dancers, the band, the bar people) that can be unloaded to keep the
+    Quest light while work goes on elsewhere, and loaded again (stage_set_load). items: node names or globs
+    ('person_couple_*'); a matched group carries its children, and matched people (world.json actors) neither play,
+    follow nor rest while unloaded. note: what the set is in the film, shown on its placeholder (default
+    'unloaded: N in the film'). remove=True drops the set (loading it first if it was unloaded). Every item must match
+    a node or a person. Saved in world.json sets (the old one kept in history/)."""
+    d = _scenes_dir(scenes) if scenes else Path(link.server_for(scene)['scenes'])
+    if not (d / scene).is_dir():
+        raise OpError(f'no scene {scene!r} in {d}')
+    w = worldmod.load_world(d, scene)
+    sets = dict(w.get('sets') or {})
+    un = list(w.get('unloaded') or [])
+    if remove:
+        if name not in sets:
+            raise OpError(f'no load set {name!r} in {scene} (sets: {", ".join(sets) or "none"})')
+        was = name in un
+        sets.pop(name)
+        w['sets'], w['unloaded'] = sets, [x for x in un if x != name]
+        worldmod.save_world(d, scene, w)
+        return f'removed the load set {name} from {scene}' + (_set_now(scene, name, True) if was else '')
+    if not items:
+        raise OpError('items: the node names or globs in the set, e.g. ["person_couple_*"]')
+    items = [items] if isinstance(items, str) else list(items)
+    got = _set_members(d, scene, items)
+    none = [p for p, v in got.items() if not v]
+    if none:
+        raise OpError(f'{", ".join(none)} match no node and no person in {scene} (stage_sets lists the sets; node '
+                      'names are the Blender object names)')
+    sets[name] = {'items': items, **({'note': note} if note else {})}
+    w['sets'] = sets
+    try:
+        f = worldmod.save_world(d, scene, w)
+    except ValueError as e:
+        raise OpError(str(e))
+    n = sorted({x for v in got.values() for x in v})
+    more = ', ...' if len(n) > 12 else ''
+    return f'load set {name} in {scene}: {len(n)} ({", ".join(n[:12])}{more}); saved in {f}'
+
+
+@op(mutates=True)
+def stage_set_load(scene: str, name: str, loaded: bool = True, scenes: str = None) -> str:
+    """Unload a load set (loaded=False) or load it again (loaded=True, the default). Unloaded: its meshes are not
+    drawn, cast no shadow, and at the next load are never compiled or uploaded (on an open page, what only the set
+    used is freed on the GPU now); the people in it stop and neither play, follow nor rest; a ghost box around each
+    member and a label with the set's name stand in its place. Loaded: it comes back a piece at a time. Saved in
+    world.json unloaded, so it holds across reloads; an open page changes now (page command load_set) and replies
+    with what it hid or showed ({name, items, persons, meshes, tris, freed}). Emits: set_unloaded / set_loaded
+    {name, items, persons, meshes, tris}."""
+    d = _scenes_dir(scenes) if scenes else Path(link.server_for(scene)['scenes'])
+    w = worldmod.load_world(d, scene)
+    sets = w.get('sets') or {}
+    if name not in sets:
+        raise OpError(f'no load set {name!r} in {scene} (sets: {", ".join(sets) or "none"}; stage_set_define makes one)')
+    was = list(w.get('unloaded') or [])
+    un = [x for x in was if x != name] + ([] if loaded else [name])
+    if un != was:
+        w['unloaded'] = un
+        worldmod.save_world(d, scene, w)
+    return f'{name} {"loaded" if loaded else "unloaded"} in {scene}' + _set_now(scene, name, loaded, sets[name])
+
+
+def _set_now(scene, name, loaded, spec=None):
+    """Tell an open page (best effort: with no page open it applies at the next load)."""
+    try:
+        r = link.page_cmd(scene, 'load_set', {'name': name, 'loaded': loaded, **({'set': spec} if spec else {})},
+                          timeout=20)
+        return '; the page: ' + (r if isinstance(r, str) else json.dumps(r, separators=(', ', ': ')))
+    except Exception:                                      # noqa: BLE001  (no page open, or an older page)
+        return '; the page takes it at its next load'
+
+
 BRIDGE = Path(__file__).resolve().parent / 'bridge' / 'blender_bridge.py'
 
 
