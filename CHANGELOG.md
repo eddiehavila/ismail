@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Takes play smoothly between their samples
+
+- Take playback poses the frame between the two recorded samples around each render frame (positions lerp,
+  quaternions nlerp the short way), instead of holding each sample until the next. A take recorded at 19.8 Hz
+  (Nate's dance, 20261005_122454) played at 72 fps held the right wrist still on 73% of frames, then jumped
+  (95th percentile 46 mm); mixed, 5% still and 21 mm. Samples more than 0.25 s apart (tracking lost) are held.
+  Only what posing reads is mixed (head, hands), into a reused buffer: 32 microseconds a person a frame on the desktop.
 ### Load sets: unload a group of the room, with a placeholder
 
 - `stage_set_define` names a group of the room (node names or globs, and people), `stage_set_load` unloads it or
