@@ -373,3 +373,95 @@ def _report(fails, warns, oks, n):
             if fails else f"READY: {n} clips" + (f", {len(warns)} warning{'s' * (len(warns) != 1)} to read" if warns else ''))
     return [head] + [f"FAIL {x}" for x in dict.fromkeys(fails)] + [f"WARN {x}" for x in dict.fromkeys(warns)] + \
         [f"ok   {x}" for x in oks]
+
+
+# ------------------------------------------------------------------ the blind crop check (a pre-exam gate)
+# Nate's "90 degree rotation" (https://newsbubbles.github.io/rotation/): when one sense plateaus, rotate which one
+# measures. A spectrogram is an image an eye reads well; after vox:r41 he saw in one look a tell 40 rounds of 1D
+# numbers missed, and vox's work/eye_crops.py made it a gate: the same window cut from the real and the made clip of
+# each pair, side by side in a random order, the key hidden. If the agent can pick the real side from the picture,
+# the person will hear it too: the round is not ready (Voice picked 15 of 16 on r44-r45; chance is about 3 in 10,000).
+
+def _crop_image(ax, y, sr, t0, t1, top_hz=16000):
+    import matplotlib.mlab as mlab
+    m = y.mean(axis=1) if y.ndim > 1 else y
+    S, f, t = mlab.specgram(m, NFFT=1024, Fs=sr, noverlap=896)
+    S = 10 * np.log10(S + 1e-20)
+    k = (t >= t0) & (t <= t1)
+    if not k.any():
+        raise ValueError(f"window {t0:.2f}-{t1:.2f} s is outside the clip ({len(m) / sr:.2f} s)")
+    ax.imshow(S[:, k], origin='lower', aspect='auto', cmap='magma', vmin=-150, vmax=-40,
+              extent=[t[k][0], t[k][-1], 0, f[-1]])
+    ax.set_ylim(0, min(top_hz, sr / 2))
+    ax.set_xticks([])
+    ticks = [x for x in (0, 4000, 8000, 12000, 16000) if x <= min(top_hz, sr / 2)]
+    ax.set_yticks(ticks)
+    ax.set_yticklabels([f"{x // 1000}k" if x else '0' for x in ticks], fontsize=7)
+
+
+def eye_crops(pairs, out, windows=None, n_windows=3, width_s=0.35, seed=0):
+    """pairs: [[real, made], ...] (paths); windows: per pair, [[t0, t1], ...] in seconds (a word +-60 ms), else
+    n_windows evenly through the shorter clip. Writes out/q01.png ... ("1" and "2" in a random order),
+    out/questions.json (no side) and out/key.json (hidden: do not open it before answers.json is written).
+    -> the number of crop pairs."""
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    import soundfile as sf
+    os.makedirs(out, exist_ok=True)
+    rng = np.random.default_rng(seed)
+    key, qs, n = [], [], 0
+    for i, pr in enumerate(pairs):
+        ys = [sf.read(str(p), dtype='float64') for p in pr]
+        dur = min(len(y) / sr for y, sr in ys)
+        ws = (windows[i] if windows and i < len(windows) and windows[i] else
+              [[c - width_s / 2, c + width_s / 2] for c in np.linspace(dur * 0.15, dur * 0.85, n_windows)])
+        for t0, t1 in ws:
+            t0, t1 = max(0.0, float(t0)), min(dur, float(t1))
+            order = [0, 1] if rng.random() < 0.5 else [1, 0]
+            fig, axs = plt.subplots(1, 2, figsize=(6, 2.6), dpi=100)
+            for ax, side, lab in zip(axs, order, ('1', '2')):
+                y, sr = ys[side]
+                _crop_image(ax, y, sr, t0, t1)
+                ax.set_title(lab, fontsize=10)
+            fig.tight_layout()
+            n += 1
+            fig.savefig(os.path.join(out, f"q{n:02d}.png"))
+            plt.close(fig)
+            key.append({'q': n, 'pair': i + 1, 't0': round(t0, 3), 't1': round(t1, 3),
+                        'real': '1' if order[0] == 0 else '2'})
+            qs.append({'q': n, 'pair': i + 1, 't0': round(t0, 3), 't1': round(t1, 3)})
+    with open(os.path.join(out, 'key.json'), 'w', encoding='utf8') as f:
+        json.dump(key, f, indent=1)
+    with open(os.path.join(out, 'questions.json'), 'w', encoding='utf8') as f:
+        json.dump(qs, f, indent=1)
+    return n
+
+
+def eye_score(out, answers):
+    """answers: {q: '1' | '2'} (which side looks real), written before key.json is opened. -> (ready, lines): not
+    ready when the picks beat chance at p < 0.05 (one-sided binomial)."""
+    import math
+    with open(os.path.join(out, 'answers.json'), 'w', encoding='utf8') as f:
+        json.dump({str(k): str(v) for k, v in answers.items()}, f, indent=1)
+    with open(os.path.join(out, 'key.json'), encoding='utf8') as f:
+        key = {str(k['q']): k for k in json.load(f)}
+    picked = {str(k): str(v) for k, v in answers.items() if str(k) in key}
+    n = len(picked)
+    if not n:
+        raise ValueError(f"no answers for the questions in {out} (keys are question numbers, values '1' or '2')")
+    hits = sum(1 for q, v in picked.items() if key[q]['real'] == v)
+    p = sum(math.comb(n, k) for k in range(hits, n + 1)) / 2 ** n
+    missing = len(key) - n
+    lines = [f"blind crop check: picked the real side in {hits} of {n} (chance would give {n / 2:g}; p = {p:.4f})"
+             + (f"; {missing} unanswered" if missing else '')]
+    tells = sorted({key[q]['pair'] for q, v in picked.items() if key[q]['real'] == v})
+    if p < 0.05:
+        lines[0] = 'NOT READY: ' + lines[0]
+        lines.append(f"the picture gives the real side away (pairs {', '.join(map(str, tells))}): the person will "
+                     f"likely hear it too. Look at the crops again for what you read (a smooth top end, a missing "
+                     f"band, a boundary early or late), zoom two ways (time-sharp and frequency-sharp) to find where, "
+                     f"and fix that before the round")
+    else:
+        lines[0] = 'READY: ' + lines[0]
+    return p >= 0.05, lines

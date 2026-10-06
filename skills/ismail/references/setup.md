@@ -76,7 +76,8 @@ Pick the first route that fits:
 **Make a home for their music**: a folder they can find again (Documents/ismail or Music/ismail). Tell them where
 it is. Every song lives in its own subfolder there. Then point ismail at it with the `ISMAIL_SONGS` environment
 variable, or ismail looks for songs next to the installed package: the first-session check (`guide`) and the
-machine board (`machine`) won't see their songs.
+machine board (`machine`) won't see their songs. The board lives in `<ISMAIL_SONGS>/_machine` (or
+`ISMAIL_MACHINE_DIR`), so every agent on this computer that uses the same songs folder shares one board.
 - **Windows:** `setx ISMAIL_SONGS "%USERPROFILE%\Documents\ismail"` (new processes see it: the app restart
   above picks it up).
 - **macOS and Linux:** `export ISMAIL_SONGS=~/Documents/ismail` in their shell profile; for an MCP client also put

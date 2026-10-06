@@ -27,6 +27,22 @@ source or a key file it loads, formats, lengths or order that follow the key), o
 don't read. `phone_exam` runs it itself. A WARN is a likely tell: fix it, or say why it can't be fixed. The round trip
 leaves one answer line marked `preflight`: skip it when scoring.
 
+### The blind crop check: can you tell from the picture?
+
+Before a real-against-made round, look first (Nate's "90 degree rotation": when one sense plateaus, rotate which
+one measures; a spectrogram is an image an eye reads well). `exam_eye_crops(pairs=[[real, made], ...], out=...)`
+cuts the same window from both clips of each pair (a word plus 60 ms either side, when you pass `windows`) and puts
+them side by side as "1" and "2" in a random order, with the key in a file you do not open. Look at each crop, pick
+the side that looks real, and score it with `exam_eye_score(out, {1: '2', ...})`. If you beat chance (it says NOT
+READY), the picture gives it away and the person will most likely hear it too: find what you saw and fix that
+first. Voice picked 15 of 16 on vox:r44-r45 (chance is about 3 in 10,000) before the person's ear did.
+
+Two habits make the crops useful. Zoom two ways: a time-sharp view (short frames) shows a boundary early or late
+(the "is" in vox ended 50 to 200 ms early in 14 of 29 takes); a frequency-sharp view (long frames) shows the
+texture of the top end (the synth was smooth above 4 kHz where the voice looked "like smoke plumes"). And after the
+person answers, show them the spectrograms (a reveal on the page), with their marks: their eye on the picture finds
+the next measurement faster than any statistic.
+
 ### On the phone
 
 When the person is away from the desk, `phone_exam(title, clips, question, chips, choices, key=, secrets=)` puts the
