@@ -9,7 +9,7 @@
 
 **A DAW for AI agents. It can't hear, so it reads. And it plays live.**
 
-Your agent writes the song as notes, sounds and code, reads back what it made, and then performs it: DJ decks, transitions, requests taken while the music plays.
+Your agent writes the song as notes, sounds and code, reads back what it made, and then performs it: DJ decks, transitions, requests taken while the music plays. Away from the desk, the set goes in your pocket: a phone page you listen to with the screen off and talk back to through your earbuds.
 
 <!-- mcp-name: io.github.newsbubbles/ismail -->
 
@@ -68,7 +68,7 @@ Everything goes in as text (notes, instrument patches, effect chains, automation
 
 One set of operations, three ways in:
 
-- **MCP server** for Claude Code, Cursor or any MCP client: `ismail mcp` (stdio, 200 tools: 108 for music and live play, 78 `stage_*` for the VR stage, 14 `phone_*` for the phone page)
+- **MCP server** for Claude Code, Cursor or any MCP client: `ismail mcp` (stdio, 203 tools: 108 for music and live play, 78 `stage_*` for the VR stage, 17 `phone_*` for the phone page)
 - **CLI**: `ismail -p <project> <op> [args]` (same as `python -m ismail ...`)
 - **Python**: `from ismail import api`
 
@@ -350,6 +350,32 @@ live_start(bpm) -> live_track(track, instrument, fx) -> live_queue([{track, note
 
 The skill reference `skills/ismail/references/live.md` has the method for running a set: read the audience,
 steer with small edits, queue a runway before every question, build and drop.
+
+## The phone page: the set in your pocket
+
+`phone_start` serves a small page on your own private network (Tailscale today) that you open on your phone:
+the live set plays with the screen off, and you talk back without unlocking. It is the main channel when you are
+away from the desk: a walk, bed, the kitchen, a day spent on your phone instead of at the computer.
+
+- **Listen** with the screen off; the stream reconnects by itself after a dropout or a server update, and catches up
+  when it falls behind the room.
+- **Talk back**: press the earbud (or hold the big key) to record a voice note; it is transcribed and reaches the
+  agent with the bar and the minute you were hearing. Short notes are commands ("love this", "louder", "stop
+  listening").
+- **Tap feedback**: love this, change it up, calmer, more energy, louder, quieter, the mood for the next chapter. The
+  page keeps a list of what you asked for, and marks a piece you loved when it comes back.
+- **Answer exams and questions** from the agent: blind ear tests (`phone_exam`, checked by `exam_check` before you
+  see it), yes or no, panels with buttons, downloads.
+- **The agent sets the mood of the page** to the music (`phone_vibe`: colours, the face of the titles, a blurred
+  cover or render behind it, rain, particles or a glow on the beat), within contrast limits that keep it readable.
+- **Bars or time**: read the set as bars, like a DAW, or as minutes and seconds.
+- **Installs as an app** from Chrome, with optional notifications for what the DJ says.
+- **Agents see what happened, on one clock**: every tap, note and page action (Listen, downloads, where you
+  scrolled, which device) with the bar and piece playing, so "that bit" can be found (`phone_timeline`). It all
+  stays on your computer.
+
+The agent offers the page when a set plays and you step away. The method is in
+`skills/ismail/references/phone.md`.
 
 ## Music videos (optional)
 
