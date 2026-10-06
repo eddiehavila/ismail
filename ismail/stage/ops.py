@@ -239,6 +239,107 @@ def stage_world(scene: str, scenes: str = None, world: dict = None) -> str:
     return f'wrote {f}: ' + json.dumps(worldmod.load_world(d, scene), separators=(', ', ': '))
 
 
+def _set_members(d, scene, items):
+    """The scene's node names (manifest.json) and people (world.json actors) each pattern of a load set matches."""
+    import fnmatch
+    names = []
+    m = d / scene / 'manifest.json'
+    if m.is_file():
+        try:
+            names = list((json.loads(m.read_text(encoding='utf-8')) or {}).get('objects') or {})
+        except ValueError:
+            names = []
+    people = list(worldmod.load_world(d, scene).get('actors') or {})
+    return {p: sorted({n for n in names + people if fnmatch.fnmatchcase(n, p)}) for p in items}
+
+
+@op()
+def stage_sets(scene: str, scenes: str = None) -> str:
+    """The scene's load sets (world.json sets): each one's items (node names or globs), what they match in the scene
+    (nodes from manifest.json, people from world.json actors), its note, and whether it is unloaded. See
+    stage_set_define and stage_set_load."""
+    d = _scenes_dir(scenes) if scenes else Path(link.server_for(scene)['scenes'])
+    w = worldmod.load_world(d, scene)
+    un = set(w.get('unloaded') or [])
+    out = {n: {'unloaded': n in un, 'note': s.get('note'), 'items': s['items'],
+               'matches': _set_members(d, scene, s['items'])} for n, s in (w.get('sets') or {}).items()}
+    return json.dumps(out, indent=1) if out else f'no load sets in {scene} (stage_set_define makes one)'
+
+
+@op(mutates=True)
+def stage_set_define(scene: str, name: str, items: list = None, note: str = None, remove: bool = False,
+                     scenes: str = None) -> str:
+    """Name a load set: a group of the room (the dancers, the band, the bar people) that can be unloaded to keep the
+    Quest light while work goes on elsewhere, and loaded again (stage_set_load). items: node names or globs
+    ('person_couple_*'); a matched group carries its children, and matched people (world.json actors) neither play,
+    follow nor rest while unloaded. note: what the set is in the film, shown on its placeholder (default
+    'unloaded: N in the film'). remove=True drops the set (loading it first if it was unloaded). Every item must match
+    a node or a person. Saved in world.json sets (the old one kept in history/)."""
+    d = _scenes_dir(scenes) if scenes else Path(link.server_for(scene)['scenes'])
+    if not (d / scene).is_dir():
+        raise OpError(f'no scene {scene!r} in {d}')
+    w = worldmod.load_world(d, scene)
+    sets = dict(w.get('sets') or {})
+    un = list(w.get('unloaded') or [])
+    if remove:
+        if name not in sets:
+            raise OpError(f'no load set {name!r} in {scene} (sets: {", ".join(sets) or "none"})')
+        was = name in un
+        sets.pop(name)
+        w['sets'], w['unloaded'] = sets, [x for x in un if x != name]
+        worldmod.save_world(d, scene, w)
+        return f'removed the load set {name} from {scene}' + (_set_now(scene, name, True) if was else '')
+    if not items:
+        raise OpError('items: the node names or globs in the set, e.g. ["person_couple_*"]')
+    items = [items] if isinstance(items, str) else list(items)
+    got = _set_members(d, scene, items)
+    none = [p for p, v in got.items() if not v]
+    if none:
+        raise OpError(f'{", ".join(none)} match no node and no person in {scene} (stage_sets lists the sets; node '
+                      'names are the Blender object names)')
+    sets[name] = {'items': items, **({'note': note} if note else {})}
+    w['sets'] = sets
+    try:
+        f = worldmod.save_world(d, scene, w)
+    except ValueError as e:
+        raise OpError(str(e))
+    n = sorted({x for v in got.values() for x in v})
+    more = ', ...' if len(n) > 12 else ''
+    return f'load set {name} in {scene}: {len(n)} ({", ".join(n[:12])}{more}); saved in {f}'
+
+
+@op(mutates=True)
+def stage_set_load(scene: str, name: str, loaded: bool = True, scenes: str = None) -> str:
+    """Unload a load set (loaded=False) or load it again (loaded=True, the default). Unloaded: its meshes are not
+    drawn, cast no shadow, and at the next load are never compiled or uploaded (on an open page, what only the set
+    used is freed on the GPU now); the people in it stop and neither play, follow nor rest; a ghost box around each
+    member and a label with the set's name stand in its place. Loaded: it comes back a piece at a time. Saved in
+    world.json unloaded, so it holds across reloads; an open page changes now (page command load_set) and replies
+    with what it hid or showed ({name, items, persons, meshes, tris, freed}). Emits: set_unloaded / set_loaded
+    {name, items, persons, meshes, tris}."""
+    d = _scenes_dir(scenes) if scenes else Path(link.server_for(scene)['scenes'])
+    w = worldmod.load_world(d, scene)
+    sets = w.get('sets') or {}
+    if name not in sets:
+        raise OpError(f'no load set {name!r} in {scene} (sets: {", ".join(sets) or "none"}; stage_set_define makes one)')
+    was = list(w.get('unloaded') or [])
+    un = [x for x in was if x != name] + ([] if loaded else [name])
+    if un != was:
+        w['unloaded'] = un
+        worldmod.save_world(d, scene, w)
+    return f'{name} {"loaded" if loaded else "unloaded"} in {scene}' + _set_now(scene, name, loaded, sets[name])
+
+
+def _set_now(scene, name, loaded, spec=None):
+    """Tell an open page (best effort: with no page open it applies at the next load)."""
+    try:
+        r = link.page_cmd(scene, 'load_set', {'name': name, 'loaded': loaded, **({'set': spec} if spec else {})},
+                          timeout=20)
+        return '; the page: ' + (r if isinstance(r, str) else json.dumps(r, separators=(', ', ': ')))
+    except Exception:                                      # noqa: BLE001  (no page open, or an older page)
+        return '; the page takes it at its next load'
+
+
 BRIDGE = Path(__file__).resolve().parent / 'bridge' / 'blender_bridge.py'
 
 
@@ -496,8 +597,103 @@ def stage_take_transcribe(scene: str, take: str) -> str:
     return f"{take}: \"{v['text']}\"" + (f" ({len(v['words'])} words)" if v.get('words') else f" ({v.get('words_missing')})")
 
 
+def _take_dir(scene, take):
+    d = _scene_dir(scene) / 'takes' / take
+    if not (d / 'frames.jsonl').is_file():
+        raise OpError(f'no take {take!r} in {scene}; stage_takes lists them')
+    return d
+
+
+@op()
+def stage_take_sync(scene: str, takes: list, bpm: float, loops: bool = False, bars: list = None, top: int = 4) -> str:
+    """How takes keep time with a song and with each other (no page needed). Per take: its pulse (the period of its
+    main repeating motion from the head and wrists, and how clear it is, 0 to 1), its own BPM, the playback rate that
+    puts the pulse on 1/2, 1, 2 or 4 beats of bpm and its length in bars at that rate, its first low point (the down of
+    a bounce) in beats, and the seam when it wraps (jump in cm and in typical steps, per channel). Per pair: the lag of
+    the second behind the first in beats, and how well their movement matches (0 to 1). loops=True: for each take,
+    the best whole-bar windows to cut as loops (bars=[2, 3, 4], top=4), scored by a clear pulse on the beat, a small
+    seam, enough movement and little travel on the floor; give one to stage_take_loop(start=, end=)."""
+    from . import takesync
+    if isinstance(takes, str):
+        takes = [takes]
+    if not takes or not bpm or bpm <= 0:
+        raise OpError('takes=[take id, ...] and bpm= the song tempo')
+    dirs = [_take_dir(scene, t) for t in takes]
+    try:
+        if loops:
+            res = {d.name: takesync.best_loops(d, bpm, bars=tuple(bars or (2, 3, 4)), top=top) for d in dirs}
+            out = []
+            for name, rows in res.items():
+                out.append(f'{name}: ' + ('no window with a clear pulse' if not rows else ''))
+                out += [f"  {r['start']}-{r['end']} s ({r['bars']} bars): score {r['score']}, pulse {r['pulse_beats']} beat "
+                        f"{r['pulse_off_pct']}% off, clarity {r['clarity']}, seam {r['seam_x_step']}x a step, "
+                        f"{r['energy_m_s']} m/s, drift {r['drift_m']} m" for r in rows]
+            return '\n'.join(out)
+        res = takesync.measure(dirs, bpm)
+    except ValueError as e:
+        raise OpError(str(e))
+    out = [f'at {bpm} BPM:']
+    for r in res['takes']:
+        sm = r.pop('seam')
+        out.append(f"{r.pop('take')}: " + ', '.join(f'{k} {v}' for k, v in r.items()))
+        out.append('   seam: ' + '; '.join(f"{k} {v['jump_cm']} cm ({v['x_step']}x a step), speed jump {v['speed_jump_cm_s']} cm/s"
+                                       for k, v in sm.items()))
+    out += [f"pair {p['a']} / {p['b']}: lag {p['lag_beats']} beats, movement match {p['match']}" for p in res['pairs']]
+    return '\n'.join(out)
+
+
 @op(mutates=True)
-def stage_actor_start(scene: str, person: str, pose: str | dict = 'rest', mode: str = 'relative', clear: bool = False) -> str:
+def stage_take_loop(scene: str, take: str, name: str, start: float = None, end: float = None, bpm: float = None,
+                    bars: list = None, blend: float = 0.4) -> str:
+    """Cut a window of a take into a new silent take that loops without a jump: the last blend seconds (0.4, tuned
+    with the user) cross-fade into the frames just before start, so the wrap is continuous in position and speed.
+    start/end in the take's seconds; or bpm= (and bars=[2, 3, 4]) to take the best whole-bar window that
+    stage_take_sync(loops=True) would list first. blend=0: a plain window. The new take is <timestamp>_<name> beside
+    the source, without its performance link (no borrowed voice), its trim or its label; it plays with
+    stage_actor_play(take=, loop=True). Returns its id, the window and the seam after the blend."""
+    from . import takesync
+    src = _take_dir(scene, take)
+    try:
+        picked = None
+        if start is None or end is None:
+            if not bpm:
+                raise OpError('give start= and end= (seconds), or bpm= to pick the best whole-bar window')
+            rows = takesync.best_loops(src, bpm, bars=tuple(bars or (2, 3, 4)), top=1)
+            if not rows:
+                raise OpError(f'no whole-bar window of {take} has a clear pulse at {bpm} BPM; give start= and end=')
+            picked = rows[0]
+            start, end = picked['start'], picked['end']
+        tid, m, sm = takesync.cut(src, name, float(start), float(end), blend=float(blend))
+    except ValueError as e:
+        raise OpError(str(e))
+    why = f" (best window: {picked['bars']} bars, score {picked['score']})" if picked else ''
+    return (f"{tid}: {take} {start}-{end} s{why}, {m['frames']} frames, {m['seconds']} s, blend {m['loop_blend_s']} s; "
+            'seam ' + '; '.join(f"{k} {v['jump_cm']} cm ({v['x_step']}x a step)" for k, v in sm.items()))
+
+
+@op(mutates=True)
+def stage_take_warp(scene: str, take: str, name: str, bpm: float, bars: int = 2, sub: float = 1.0) -> str:
+    """Put a take's hits on the beat: a new silent take of exactly bars bars at bpm (a loop), its time warped
+    piecewise-linearly so each hit (an accent: a hand or the head stopping or turning hard, at least 0.6 beat apart)
+    lands on the nearest beat (sub=0.5: half beat), no segment under 0.75x or over 1.33x speed, resampled at 30 Hz
+    with the frames between samples mixed. Cut the window first (stage_take_loop) so the take is about bars long
+    (refused when more than 2x off). Hits and knots go in its meta.beat_warp. To keep it on the song as it plays:
+    stage_actor_play(take=, loop=True, at_music=<the song second of its first frame>). Returns its id and where the
+    hits landed in grid units."""
+    from . import takesync
+    src = _take_dir(scene, take)
+    try:
+        tid, m, bw = takesync.warp(src, name, float(bpm), bars=int(bars), sub=float(sub))
+    except ValueError as e:
+        raise OpError(str(e))
+    snapped = len(bw['knots_src']) - 2
+    return (f"{tid}: {take} -> {bars} bars at {bpm} BPM ({m['seconds']} s, {m['frames']} frames at 30 Hz); "
+            f"{len(bw['hits_src_s'])} hits, {snapped} snapped; hits at grid units {bw['hits_on_grid_units']}")
+
+
+@op(mutates=True)
+def stage_actor_start(scene: str, person: str, pose: str | dict = 'rest', mode: str = 'relative', clear: bool = False,
+                      idle: bool = True) -> str:
     """A person's start pose, saved in their actor's profile (actors/<body>.json "start"), used by every Follow and
     every playback of a take on them. mode 'relative': at GO (after the countdown) they hold the start pose and the
     user's motion plays as changes from the user's pose at GO (head and spine turn as the head turns, hands move as
@@ -508,22 +704,36 @@ def stage_actor_start(scene: str, person: str, pose: str | dict = 'rest', mode: 
     space (bone.head_local, bone.tail_local, bone.matrix_local x axis) and pose in world (armature.matrix_world @
     pose_bone.head / .tail / x axis of armature.matrix_world @ pose_bone.matrix), the pelvis at least. Each bone takes
     the world turn from its rest frame to its posed frame, the pelvis goes where the pose has it. clear=True removes
-    it. stage_actor_pose reads the joints back. The page reads it at the next Follow or playback."""
+    it. idle=True (the default): the person also rests in it whenever nothing plays on them, at load and after every
+    stop, instead of the statue baked into the scene; idle=False keeps the statue. stage_actor_pose reads the joints
+    back. The page reads it at the next Follow or playback, and re-poses the resting person now if the page is open."""
     from . import rigs
     adir, who = _body_of(scene, person)
     if not (adir / f'{who}.glb').is_file():
         raise OpError(f'{person} is played by {who}, but there is no {adir.parent.name}/actors/{who}.glb')
     if clear:
         f = rigs.save_start(adir, who, None)
+        _rest_now(scene, person)
         return f'removed the start pose of {who} (plays {person}) in {f}'
     try:
-        start = rigs.check_start(pose, mode)
+        start = rigs.check_start(pose, mode, idle)
     except ValueError as e:
         raise OpError(str(e))
     f = rigs.save_start(adir, who, start)
+    rested = _rest_now(scene, person)
     what = 'rest' if start['pose'] == 'rest' else (f"take {start['pose']['take']} frame {start['pose']['frame']}"
                                                   if 'take' in start['pose'] else f"a Blender pose of {len(start['pose']['bones'])} bones")
-    return f"start pose of {who} (plays {person}): {what}, {mode}; saved in {f}"
+    return f"start pose of {who} (plays {person}): {what}, {mode}{', rests in it' if idle else ''}; saved in {f}" + rested
+
+
+def _rest_now(scene, person):
+    """Re-pose a resting person on the open page (best effort: no page, no harm; it applies at the next load)."""
+    try:
+        from .link import page_cmd
+        page_cmd(scene, 'actor_rest', {'person': person}, timeout=8)
+        return '; the page shows it now'
+    except Exception:                                      # noqa: BLE001  (no page open, or an older page)
+        return '; the page shows it at its next load'
 
 
 NOT_IN_BATCH = {'stage_batch', 'stage_start', 'stage_stop', 'stage_listen', 'stage_scene_export', 'stage_scene_new',
