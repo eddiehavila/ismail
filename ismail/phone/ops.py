@@ -286,5 +286,5 @@ def phone_buzz(pattern: list = None) -> str:
 @op()
 def phone_route(inbox: str = None) -> str:
     """Also write what the person sends to this file (a song's notes/phone_inbox.jsonl); none: back to the playing
-    engine's project."""
+    engine's project. The route stays across a server restart."""
     return _call('route', inbox=inbox)

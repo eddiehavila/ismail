@@ -302,6 +302,18 @@ def test_an_open_panel_and_its_files_survive_a_restart(phone, tmp_path):
     assert saved['files'][tok].endswith('cover.png')
 
 
+def test_the_route_survives_a_restart(phone, tmp_path):
+    """ledger:M157: the DJ re-routed the inbox after every phone server restart."""
+    ph, base, _ = phone
+    (tmp_path / 'other' / 'notes').mkdir(parents=True)
+    dest = tmp_path / 'other' / 'notes' / 'phone_inbox.jsonl'
+    P.phone_route(inbox=str(dest))
+    assert json.loads((S.HOME / 'state.json').read_text(encoding='utf8'))['route'] == str(dest)
+    assert S.Phone().route == str(dest)                                     # what a restarted server loads
+    P.phone_route()
+    assert S.Phone().route is None
+
+
 def test_an_agent_sets_the_pages_vibe_and_it_stays_readable(phone, tmp_path):
     """Nate 10-06 08:18: 'change the colors ... how the headers look ... song covers in the background, blurred
     ... JavaScript effects ... I feel like you're there'. A vibe is data, checked by the server."""
