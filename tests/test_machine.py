@@ -4,6 +4,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 
 import pytest
 
@@ -475,3 +476,20 @@ def test_torch_takes_the_slots_threads_and_gets_its_own_back(board, monkeypatch)
     assert t.n == 8
     machine.cap_torch()                                          # outside a slot: nothing
     assert t.n == 8
+
+
+def test_a_priority_says_when_its_name_matches_no_job_and_takes_days(board):
+    """ledger:M143: `who` defaults to the working folder's name, so a grant to a session that does not set
+    ISMAIL_SESSION matched nothing, silently; and `--for 3d` (hq:D-15) raised."""
+    assert machine.duration_s('3d') == 3 * 86400
+    with machine.slot('cpu', 'render', who='ismail'):
+        pass
+    machine.set_priority('voice', 3600, by='the user')
+    miss = machine.priority_match()
+    assert "no job named 'voice'" in miss and 'ismail (1)' in miss and 'ISMAIL_SESSION' in miss
+    assert 'WARNING' in machine.board()
+    with machine.slot('cpu', 'round 41', who='voice'):
+        pass
+    assert machine.priority_match() == '' and 'WARNING' not in machine.board()
+    assert machine.main(['priority', 'voice', '--for', '3d', '--by', 'the user']) == 0
+    assert machine.priority()['until'] - time.time() > 2.9 * 86400

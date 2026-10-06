@@ -278,6 +278,7 @@ export function initLive(ed, desktop, xr) {
       markers: [...markers.values()].map((m) => ({ id: m.id, position: m.position, label: m.label })),
       highlights: highlights.map((h) => h.it.name),
       caption: capOn ? capOn.text : null, captions_queued: capQ.length,
+      music: window.VR_music ? window.VR_music.now() : null,   // the song's time as heard (music.js)
     };
   }
   async function postState() {

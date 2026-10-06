@@ -91,7 +91,9 @@ live.handlers.actor_follow = async (c) => {
 const perform = initPerform(ed, hands, voice, live, () => actors);   // a Follow is a performance (perform.js)
 window.VR_perform = perform;
 xr.setPerforming(() => hands.performing);
-initMusic(ed, live);
+const music = initMusic(ed, live);
+window.VR_music = music;
+actors.setMusicClock(() => music.now());            // takes played on the music (stage_actor_play at_music)
 initStream(ed, live);
 // a re-exported room comes in without the grown trees (they hang under the old scene's tree_k items): grow them again
 live.onEmit((type) => { if (type === 'scene_reload' && live.handlers.trees_reload) setTimeout(() => live.handlers.trees_reload({}).catch(() => {}), 500); });

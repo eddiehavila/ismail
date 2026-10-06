@@ -20,6 +20,33 @@
   Setting or clearing a start pose re-poses the resting person on an open page at once (page command `actor_rest`).
   The six dancers had stood with their arms out since they were imported ("a pose to leave everything in").
 - The pose read-back of a take-frame start pose (with nothing playing) no longer fails.
+### Exams know the devices; exam_check hears a band-limited take and lopsided sides (ledger:M146, Nate's approval 10-06)
+
+- vox:r39 was wasted: the takes went through Bluetooth earbuds' microphone (16 kHz audio, nothing above 7 kHz), the
+  synth filled that band 45-50 dB above them, and exam_check said READY. It now fails classes whose 1/3-octave levels
+  above 6 kHz differ by more than 10 dB and twice the spread within a class, warns on any clip with nothing above
+  8 kHz, and warns when a class comes first in 80 % or more of 6 or more trials (all of them, as in vox:r41's first build,
+  already fails).
+- `phone_exam` asks what they listened on (earbuds, headphones, phone speaker, speaker; remembered) and sends it with
+  the answers, with the output and microphone the browser can name. blind-tests.md: record the devices every round.
+
+### A priority says when it matches no job; `--for 3d` (ledger:M143, Nate's approval 10-06)
+
+- `who` defaults to the working folder's name, so nearly every job from the repo is `ismail` and a priority given to
+  a session matched nothing unless that session set `ISMAIL_SESSION`. Setting or reading a priority, and the board,
+  now warn when no job of that name ran or waited in 48 h, and list the names in use. SKILL.md tells every session to
+  set `ISMAIL_SESSION`.
+- Durations take days (`priority voice --for 3d`), and a grant beyond today shows its day.
+
+### Takes on the music clock
+
+- The page keeps the song's time as the person hears it (the audio context's clock, less the output latency):
+  `stage_music_time`, `music` in the page state, and `music_start` / `music_stop` events. `stage_music(start=)` begins
+  a song partway in.
+- `stage_actor_play(at_music=<song seconds>)` plays a take on that clock: its first frame sits at that song second and
+  every frame reads the song's time, so a beat-warped loop stays on the beat however late it started and wherever the
+  song loops. The film's dancers were warped onto the beat, but a take started on a command landed 0.3 to 6 s late.
+  Side server: the take followed the song within one take frame (median 16 ms, worst 41 ms at 30 Hz frames).
 
 ### The phone's Listen and Talk keys show their state with an icon (Nate, 10-06 09:59)
 

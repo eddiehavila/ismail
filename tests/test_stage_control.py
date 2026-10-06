@@ -226,3 +226,18 @@ def test_load_sets_define_unload_and_tell_an_open_page(stage):
         OPS['stage_world'](scene='room', world={'sets': {}, 'unloaded': ['ghosts']})
     with pytest.raises(OpError, match='at least one item'):
         OPS['stage_world'](scene='room', world={'sets': {'x': {'items': []}}})
+
+
+def test_music_time_and_takes_on_the_music_reach_the_page(stage):
+    page = FakePage(stage['port'], 'room')
+    try:
+        OPS['stage_music_time'](scene='room')
+        assert page.seen[-1]['type'] == 'music_time'
+        OPS['stage_music'](scene='room', url='scenes/room/music/song.wav', start=12.5, volume=0)
+        assert (page.seen[-1]['type'], page.seen[-1]['from']) == ('music', 12.5)
+        OPS['stage_actor_play'](scene='room', person='person_bar_lean', take='t1', at_music=8.0)
+        assert page.seen[-1]['at_music'] == 8.0
+        with pytest.raises(OpError, match='stage_music_time'):
+            OPS['stage_cmd'](scene='room', type='music_time')
+    finally:
+        page.stop = True
