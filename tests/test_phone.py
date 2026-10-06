@@ -338,3 +338,16 @@ def test_time_into_the_piece_rides_with_every_line(phone):
     assert 150 <= s['into_s'] <= 155 and len(s['clock']) == 8
     assert 150 <= s['taps'][0]['into_s'] <= 155
     assert '2:3' in P.phone_timeline(minutes=5)
+
+
+def test_a_restart_is_announced_and_the_page_can_tell_it_happened(phone):
+    """10-06 08:38: a restart after a merge dropped Nate's stream mid-set ("Why'd you stop?"), and a page whose
+    command count was past the new server's missed every command after it. The page is told first, and sees the
+    boot and the page build change."""
+    ph, base, _ = phone
+    s = get(base, '/api/state?since=0&wait=0')
+    assert s['boot'] == S.BOOT and len(s['build']) == 10
+    assert 'told the page' in post(base, '/agent', {'op': 'restarting', 'args': {'back_in_s': 5}})['result']
+    c = [c for c in ph.cmds if c['type'] == 'restarting'][-1]
+    assert c['back_in_s'] == 5.0
+    assert S.page_build() == S.BUILD

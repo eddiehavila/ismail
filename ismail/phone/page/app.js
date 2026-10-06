@@ -320,6 +320,16 @@ function renderTaps() {
   $('taps').innerHTML = ts.map((x) => `<div><time>${esc((x.ts || '').slice(11, 16))}</time><span>${x.what === 'mood' ? 'mood: ' + esc(x.mood) : esc(TAPWORD[x.what] || x.what)}`
     + `${x.now ? ' <span class="me">' + (clockMode && x.into_s != null ? mmss(x.into_s) + ' into ' : 'during ') + esc(x.now) + '</span>' : x.of ? ' <span class="me">at ' + esc(x.of) + '</span>' : ''}</span></div>`).join('');
 }
+// The phone's player pauses when the network stalls and carries on from there, so every stall adds to the delay
+// (17 s, then 40 s on a walk, 10-06). Past CATCH_S behind it plays 8 % faster (the pitch is kept) until it is close
+// to the room again, and the Live key says how far behind it is.
+const CATCH_S = 15, CLOSE_S = 6, CATCH_RATE = 1.08;
+function catchUp(b) {
+  if (!want || b == null || clip.el) { if (audio.playbackRate !== 1) audio.playbackRate = 1; return; }
+  if (b > CATCH_S && audio.playbackRate === 1) { audio.preservesPitch = true; audio.playbackRate = CATCH_RATE; ev('catch_up', { behind: Math.round(b) }); }
+  else if (b < CLOSE_S && audio.playbackRate !== 1) audio.playbackRate = 1;
+  $('golive').textContent = b > CATCH_S ? `Live -${Math.round(b)} s` : 'Live';
+}
 let clockMode = store.get('clock', false), polledAt = Date.now();
 const mmss = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 function showInto() {                      // how far into the piece they are hearing, ticking between polls
@@ -488,6 +498,7 @@ function render() {
   else { $('heardcap').textContent = 'Heard'; $('bar').innerHTML = m ? `BAR ${m[1]}<span>.${esc(Math.floor(+(m[2] || 1)))}</span>` : 'BAR <span>---</span>'; }
   applyVibe(state.vibe);
   $('behind').textContent = want && h.behind_s != null ? '+' + h.behind_s.toFixed(1) + ' s' : '--';
+  catchUp(h.behind_s);
   $('now').textContent = e.now || (e.playing ? 'playing' : 'nothing playing');
   $('next').textContent = e.next || '--';
   $('pinned').hidden = !state.pinned;
@@ -513,6 +524,7 @@ function render() {
 function onCmd(c) {
   if (c.type === 'caption') { toast(c.text); if (c.buzz) buzz([150, 80, 150]); notifyBg(c.who || 'ismail live', c.text); }
   else if (c.type === 'buzz') buzz(c.pattern);
+  else if (c.type === 'restarting') { restarting = Date.now(); toast('updating, back in a few seconds'); }
   else if (c.type === 'say_clip') {                // spoken to the page itself: nobody was on the stream
     const a = new Audio(c.url); a.play().catch(() => { toast((c.who || 'DJ') + ': ' + c.text); buzz([150, 80, 150]); });
   }
@@ -522,6 +534,16 @@ function onCmd(c) {
     const a = document.createElement('a'); a.href = c.offer.url + '?dl=1'; a.download = c.offer.name; document.body.appendChild(a); a.click(); a.remove(); toast('downloading ' + c.offer.name);
   }
 }
+// a server restart (an update): told first, the page retries every second, reconnects the stream, and loads the new
+// page code the next time it is on screen and idle (the stream position is remembered, so it picks back up)
+let boot = null, build = null, restarting = 0, reloadDue = false;
+function maybeReload(b) {
+  if (b && build && b !== build) reloadDue = true;
+  if (!reloadDue || document.visibilityState !== 'visible' || talk.rec || shown) return;
+  ev('reload', { why: 'new page code' }); flushEv(true); remember();
+  setTimeout(() => location.reload(), 300);
+}
+document.addEventListener('visibilitychange', () => maybeReload());
 async function poll() {
   const was = store.get('listening', 0);            // listening when the page went away: pick it back up
   if (was && Date.now() - was < 30 * 60000 && !want) setPlaying(true);
@@ -530,13 +552,22 @@ async function poll() {
       const t = heardNow();
       const r = await fetch(`api/state?since=${since}&wait=${first ? 0 : 20}&sid=${sid || ''}&t=${t == null ? '' : t}`, { cache: 'no-store' });
       const j = await r.json();
+      if (boot && j.boot !== boot) {             // the server restarted: its commands count from 0 again
+        since = 0; first = true; boot = j.boot; restarting = 0;
+        if (want) { retry = 0; connect(); }      // and the stream comes back at once, at the live edge
+        toast('back');
+        continue;
+      }
+      boot = j.boot; build = build || j.build;
       state = j;
       if (!first) (j.cmds || []).forEach(onCmd);
       since = j.cmd; first = false; poll.wait = 0;
       render();
+      maybeReload(j.build);
     } catch (e) {
-      $('livetext').textContent = navigator.onLine ? 'the server does not answer, retrying' : 'offline';
-      poll.wait = Math.min(30000, (poll.wait || 2000) * 2);          // back off: a phone in a pocket keeps its battery
+      const soon = restarting && Date.now() - restarting < 60000;
+      $('livetext').textContent = soon ? 'updating, back in a few seconds' : navigator.onLine ? 'the server does not answer, retrying' : 'offline';
+      poll.wait = soon ? 1000 : Math.min(30000, (poll.wait || 2000) * 2);   // back off: a phone in a pocket keeps its battery
       await new Promise((ok) => setTimeout(ok, poll.wait));
       continue;
     }
