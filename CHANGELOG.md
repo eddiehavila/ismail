@@ -18,6 +18,45 @@
   with its time from the dress rehearsals (install, warm-up, first call, first sketch). The first-session block
   says the sketch times too.
 
+### The update card lists every change waiting
+
+- The left-wrist update card lists the changes waiting (up to five, the most important first, then "+N more") and
+  grows to fit, instead of naming only one (the user, q44: panels "listing what changed in each update").
+  `updates_waiting` carries the titles. The titles come from `stage_note`, one per change landed.
+### Takes on the beat: sync, loop and warp as stage ops
+
+- `stage_take_sync` measures how takes keep time with a song (pulse, own BPM, the rate onto the beat, the first
+  low point, the seam) and with each other (lag in beats, movement match); `loops=True` lists the best whole-bar
+  windows of a long take. `stage_take_loop` cuts a window (given, or the best at a bpm) into a silent loop whose
+  last 0.4 s cross-fade into the frames before it. `stage_take_warp` makes a loop of exactly N bars with its hits
+  moved onto the beats. Ported from the film session's sync_measure.py, loop_cut.py and beat_warp.py with the
+  parameters tuned with the user (ledger:M145); on Nate's takes the port gives the same numbers, windows and
+  frames as the scripts. New takes drop the performance link (no borrowed voice), the trim and the label.
+### Takes play smoothly between their samples
+
+- Take playback poses the frame between the two recorded samples around each render frame (positions lerp,
+  quaternions nlerp the short way), instead of holding each sample until the next. A take recorded at 19.8 Hz
+  (Nate's dance, 20261005_122454) played at 72 fps held the right wrist still on 73% of frames, then jumped
+  (95th percentile 46 mm); mixed, 5% still and 21 mm. Samples more than 0.25 s apart (tracking lost) are held.
+  Only what posing reads is mixed (head, hands), into a reused buffer: 32 microseconds a person a frame on the desktop.
+### Load sets: unload a group of the room, with a placeholder
+
+- `stage_set_define` names a group of the room (node names or globs, and people), `stage_set_load` unloads it or
+  loads it again, and `stage_sets` lists the sets and what they match. Saved in world.json (`sets`, `unloaded`), so
+  an unloaded set stays out across reloads. An unloaded set is hidden before the room is staged (no shader compile,
+  texture upload, draw or shadow), what only it used is freed on the GPU, its people neither play, follow nor rest,
+  and a ghost box per member with one label carrying the set's name stands in its place (two draw calls). Loading
+  brings it back a piece at a time. The page state carries `sets`.
+- A scene switch reads the new scene's world.json before its room is staged, not after (resting people and load sets
+  read it).
+
+### People rest in their start pose
+
+- A person with a start pose (`stage_actor_start`) stands in it whenever nothing plays on them, at load and after
+  every stop: their own body, posed once, with the statue baked into the scene hidden. `idle=False` keeps the statue.
+  Setting or clearing a start pose re-poses the resting person on an open page at once (page command `actor_rest`).
+  The six dancers had stood with their arms out since they were imported ("a pose to leave everything in").
+- The pose read-back of a take-frame start pose (with nothing playing) no longer fails.
 ### The first sketches: mastered, balanced, the first one first, said plainly (ledger:M148, M150, M151 S-1..S-5)
 
 - S-1 (M148): every sketch goes through a master stage for its style (a low cut, glue, mono low end, a limiter at

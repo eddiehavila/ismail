@@ -30,7 +30,7 @@ import json
 from pathlib import Path
 
 DEFAULTS = {'actors': {}, 'facings': {}, 'partners': {}, 'floor': 0.0, 'keep_out': [], 'spawn': None, 'credits': [],
-            'build': None, 'derives_from': None, 'pass': None, 'assets': None, 'sky': None}
+            'build': None, 'derives_from': None, 'pass': None, 'assets': None, 'sky': None, 'sets': {}, 'unloaded': []}
 
 
 def NAME_OK(name):
@@ -77,6 +77,25 @@ def check_world(w):
     for k in ('derives_from', 'pass', 'assets', 'sky'):
         if w.get(k) is not None and not isinstance(w[k], str):
             out.append(f'{k} must be a string')
+    sets = w.get('sets')
+    if not isinstance(sets, dict):
+        out.append('sets must be an object {name: {"items": [...], "note": ...}}')
+        sets = {}
+    for n, s in sets.items():
+        if not NAME_OK(n):
+            out.append(f'sets: {n!r} is not a name (letters, digits, _ and -)')
+        if not (isinstance(s, dict) and isinstance(s.get('items'), list) and s['items']
+                and all(isinstance(x, str) and x for x in s['items'])):
+            out.append(f'sets.{n} must be {{"items": [node name or glob, ...]}} with at least one item')
+        elif s.get('note') is not None and not isinstance(s['note'], str):
+            out.append(f'sets.{n}.note must be a string')
+    un = w.get('unloaded')
+    if not (isinstance(un, list) and all(isinstance(x, str) for x in un)):
+        out.append('unloaded must be a list of set names')
+    else:
+        for x in un:
+            if x not in sets:
+                out.append(f'unloaded names {x!r}, which is not in sets')
     if w.get('derives_from') and b:
         out.append('a derived scene has no build of its own (it is built from derives_from); drop "build"')
     return out
