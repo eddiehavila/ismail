@@ -23,7 +23,8 @@ Ground:    #0e0d0b warm black, panel #171612, hairline #2c2a25; ink #efe9dd, dim
 Accent:    hsl(293 68% 66%) (djb2 "ismail live" = 293); on-air red #ff4b3e, warn #e2a93b
 Density:   4px base; keys 56px and up; chrome labels 11px mono caps, tracking .12em
 Shape:     3px radius, 1px hairlines, no shadows; pressed = 2px inset + ground shift
-Motion:    90ms ease-out on press only; lit lamps steady; no entrance animations
+Motion:    90ms ease-out on press only; lit lamps steady; no entrance animations; a key that is waiting on the network
+           (sending a note, reconnecting the stream) breathes its icon, and stops for reduced motion
 Signature: the HEARD counter (the bar reaching your ears) and the ON AIR lamp
 Icons:     inline SVG, 24-unit grid, 2px strokes, square ends, no fills; the label under it in 10px mono caps, dim;
            a tap lights the key in the accent and reads SENT for 0.8 s (glanceable, no reading needed)
@@ -83,7 +84,15 @@ button:active,button.down{background:var(--panel-2);box-shadow:inset 0 2px 0 rgb
 #startset{width:100%;margin-top:calc(var(--u)*3);border-color:var(--accent);color:var(--accent)}
 /* transport */
 .transport{display:grid;grid-template-columns:76px 1fr 76px;gap:calc(var(--u)*2);margin:calc(var(--u)*4) 0 calc(var(--u)*2)}
-#play{min-height:64px;font-size:18px;border-color:var(--accent);color:var(--accent)}
+#play{min-height:64px;font-size:18px;border-color:var(--accent);color:var(--accent);display:flex;align-items:center;justify-content:center;gap:calc(var(--u)*2)}
+#play svg,#talk svg{fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:square;stroke-linejoin:miter;flex:none}
+#play svg{width:22px;height:22px}
+#talk{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:calc(var(--u)*2)}
+#talk svg{width:34px;height:34px}
+#talk.sending,#talk.sent{color:var(--accent)}
+#talk.sending svg,#play.wait svg{animation:keypulse .9s ease-in-out infinite}
+@keyframes keypulse{50%{opacity:.35}}
+@media (prefers-reduced-motion:reduce){#talk.sending svg,#play.wait svg{animation:none}}
 #play.on{background:var(--accent-deep)}
 #back,#golive{font-size:13px;color:var(--dim)}
 /* push to talk */
@@ -183,11 +192,11 @@ textarea{width:100%;background:var(--panel);color:var(--ink);border:1px solid va
 
 <div class="transport" data-sec="listen">
   <button id="back" aria-label="back 30 seconds">-30 s</button>
-  <button id="play">Listen</button>
+  <button id="play"><svg viewBox="0 0 24 24" aria-hidden="true"></svg><span class="kl">Listen</span></button>
   <button id="golive">Live</button>
 </div>
 
-<button id="talk" data-sec="talk">Hold to talk<span id="meter"></span></button>
+<button id="talk" data-sec="talk"><svg viewBox="0 0 24 24" aria-hidden="true"></svg><span class="kl">Hold to talk</span><span id="meter"></span></button>
 <div class="hint cap" id="talkhint">tap once for hands-free, tap again to send</div>
 
 <div class="keys2" data-sec="keys"><button class="key" id="love" aria-label="Love this"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20 4.6 12.6a4.4 4.4 0 0 1 7.4-5.1 4.4 4.4 0 0 1 7.4 5.1Z"/></svg><span class="lbl">Love this</span></button><button class="key" id="change" aria-label="Change it up"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h4l10 10h4M3 17h4l3-3M14 10l3-3h4M18 4l3 3-3 3M18 14l3 3-3 3"/></svg><span class="lbl">Change it up</span></button></div>

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### The phone's Listen and Talk keys show their state with an icon (Nate, 10-06 09:59)
+
+- Listen: play, stop while playing, a breathing arrow while it reconnects or buffers, Resume when the phone wants a
+  tap. Hold to talk: a mic, the mic with sound while talking, an arrow while the note uploads, a check when it
+  arrived, a struck mic when the mic is blocked or the note waits to send. A waiting icon breathes, and stops for
+  reduced motion.
+
 ### Every mp3 carries ismail; downloads have names; the piece's position stays on screen (Nate, 10-06)
 
 - `ismail/tags.py`: ID3 tags on every mp3 ismail writes (title, artist, album, date, encoder, the GitHub link as a URL
