@@ -27,6 +27,14 @@ source or a key file it loads, formats, lengths or order that follow the key), o
 don't read. `phone_exam` runs it itself. A WARN is a likely tell: fix it, or say why it can't be fixed. The round trip
 leaves one answer line marked `preflight`: skip it when scoring.
 
+### On the phone
+
+When the person is away from the desk, `phone_exam(title, clips, question, chips, choices, key=, secrets=)` puts the
+exam on the phone page: it runs `exam_check` first and refuses one that is not READY, plays each clip on its own
+(the set's stream pauses and comes back after), and writes the answers where you read them. Say what to listen on
+(their earbuds, a speaker) and record it with the answers, as for any device. Keep clips short and the questions
+to two or three: they answer standing, walking, or between other things.
+
 ## 1. The eye exam: lenses that change one thing
 
 Put the real sound next to lenses, versions that each change exactly ONE named, physical thing (body colour, wood ring, room, open strings, pick or bow noise, brightness, attack, vibrato, evenness). The names become the user's vocabulary for the rest of the session: "B, but more air" is an instruction you can execute. Loudness-match every clip and make clips long enough to include the release. One round of this on a bowed voice found three things no metric showed (moving vibrato, missing air, sympathetic strings).

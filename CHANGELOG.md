@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### The phone page in the README and the skills (Nate, 10-06: "this phone app feature should start gaining prominence")
+
+- README: the tagline names it, and a section "The phone page: the set in your pocket" says what it does (listen
+  with the screen off, earbud voice notes, taps and history, exams, the vibe, bars or time, install, the timeline).
+  203 tools (17 `phone_*`).
+- Skills: SKILL.md (away from the desk all day; answer in time to a casual listener), user-experience.md (bring the
+  page to where they are; a new "Bars or time" section), blind-tests.md (exams on the phone), live.md (the page is
+  part of the show: marks and vibe on every chapter change, the timeline), setup.md (optional: the phone page and
+  Tailscale).
+
 ### The phone server restarts without dropping the person; a stream that fell behind catches up
 
 - A restart after a merge dropped Nate's stream mid-set (10-06 08:38, "Why'd you stop?"), and a page whose command
