@@ -71,6 +71,8 @@ MEM_OVER = 1.25                    # a running job past its declared memory by t
 MEM_OVER_MIN_GB = 0.5              # ... and by at least this much (a small render's estimate is not worth a flag)
 MEM_SUSPEND = 3.0                  # a job at this many times its declared memory ...
 SUSPEND_COMMIT_GB = 10.0           # ... while less commit than this is free is paused (ledger:M154; never killed)
+SUSPEND_COMMIT_FRAC = 0.15         # ... or than this share of the commit limit, if smaller (an 8 GB laptop is always
+                                   # under 10 GB free, and a job there is not in trouble for that alone)
 JOB_NOTE_S = 15.0                  # a running job writes its memory to its board file this often
 # What wins when a live set is on air and a render wants the machine (ledger:M127, hq:D-11). Nate, 2026-10-05, after
 # two real dropouts in a set: GPU jobs and Blender renders wait while a set plays, "only for now during sets". It is a
@@ -282,10 +284,17 @@ def jobs():
         if not f.endswith('.json'):
             continue
         p = os.path.join(d, f)
-        try:
-            with open(p, encoding='utf8') as fh:
-                job = json.load(fh)
-        except (OSError, ValueError):
+        job = None
+        for _ in range(5):          # Windows: a file being replaced by its job's meter cannot be opened for a moment
+            try:
+                with open(p, encoding='utf8') as fh:
+                    job = json.load(fh)
+                break
+            except FileNotFoundError:
+                break
+            except (OSError, ValueError):
+                time.sleep(0.02)
+        if job is None:
             continue
         if _alive(job):
             out.append(job)
@@ -816,8 +825,8 @@ class _Meter:
             self.job['over'] = round(max(self.job.get('over') or 0, now_gb), 2)
         self._resume_asked()
         if decl and now_gb >= decl * MEM_SUSPEND and not self.job.get('suspended') and not self.resumed:
-            free = memory()[0]
-            if free < SUSPEND_COMMIT_GB:
+            free, limit, _ = memory()
+            if free < min(SUSPEND_COMMIT_GB, SUSPEND_COMMIT_FRAC * limit):
                 self._suspend(now_gb, free)
         if self.path and (over or time.time() - self.noted >= JOB_NOTE_S):
             self.noted = time.time()

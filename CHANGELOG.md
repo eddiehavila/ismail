@@ -7,9 +7,11 @@
 - `machine run` pins its command to as many cores as its threads (the highest cores no other job holds; children
   inherit it, and the meter sets it again on a child that changed it), and the thread variables now include Numba's
   and Rayon's. A `run --cpu` at 2 threads used about 5 cores, because CTranslate2 ignores the BLAS variables.
-- A job at 3 times its `--mem` while less than 10 GB of commit is free has its processes paused, never killed: the
+- A job at 3 times its `--mem` while less than 10 GB of commit is free (or 15% of the commit limit, if smaller) has its processes paused, never killed: the
   board says SUSPENDED: OVER and how to go on, `python -m ismail.machine resume <job id, pid or name>`, after which
   it is not paused again. 10-06: an ffmpeg declared 3 GB and took 37 GB during a live set.
+- The board reads a job's file again when its meter is replacing it (Windows), so a running job never drops off
+  the board for a moment.
 - A docstring's `D:\ismail` made an invalid escape warning; it reads D:/ismail now.
 
 ### Exams know the devices; exam_check hears a band-limited take and lopsided sides (ledger:M146, Nate's approval 10-06)

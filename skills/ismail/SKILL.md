@@ -208,7 +208,7 @@ nudges you, follow it.
   `--cpu`) and pins it to that many cores: ask for more only when the machine is quiet. Give `--est` a unit (`--est 10m`, `600s`) so the board tells others when you will be done.
   Declare what it really needs: `--mem` (peak GB) and `--disk` (GB it writes). A job past its `--mem` is flagged
   OVER on the board and in its own output: stop it if it keeps growing, because on Windows the pagefile grows into
-  the disk. At 3 times its `--mem` with commit under 10 GB its processes are paused (SUSPENDED: OVER, never
+  the disk. At 3 times its `--mem` with commit under 10 GB (less on a small machine) its processes are paused (SUSPENDED: OVER, never
   killed); `python -m ismail.machine resume <job>` goes on once memory is free. Heavy jobs wait while a drive is under 15 GB free or commit under 6 GB; `machine_disk` shows where the
   space went. To free space, move finished intermediates (caches, old renders, uncut takes) into the project's
   `_reclaim/` folder and tell the user: nobody deletes, the user clears `_reclaim`.

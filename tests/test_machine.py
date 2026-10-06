@@ -340,12 +340,12 @@ def test_low_commit_holds_new_jobs_and_names_the_job_past_its_memory(board, monk
 
 def test_the_cli_says_over_memory_in_the_jobs_own_output(board):
     env = dict(os.environ, ISMAIL_MACHINE_DIR=str(board))
-    code = "import time; b = b'x' * (700 * 2 ** 20); time.sleep(2.5)"
-    out = subprocess.run([sys.executable, '-m', 'ismail.machine', 'run', '--cpu', '--force', '--mem', '0.05', '--what',
+    code = "import time; b = b'x' * (900 * 2 ** 20); time.sleep(2.5)"     # 2.5x: OVER, not paused (under 3x)
+    out = subprocess.run([sys.executable, '-m', 'ismail.machine', 'run', '--cpu', '--force', '--mem', '0.35', '--what',
                           'hog', '--', sys.executable, '-c', code], capture_output=True, text=True, env=env, timeout=120)
     assert out.returncode == 0 and 'OVER MEMORY' in out.stderr and "'hog'" in out.stderr
     j = [x for x in machine.history() if x['what'] == 'hog'][-1]
-    assert j['over_gb'] > 0.55 and j['mem_peak_gb'] >= 0.65
+    assert j['over_gb'] > 0.75 and j['mem_peak_gb'] >= 0.85 and not j.get('suspended')
 
 
 def test_a_render_in_a_big_process_is_not_over_its_estimate(board, monkeypatch):
