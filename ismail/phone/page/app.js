@@ -23,7 +23,19 @@ function connect(back) {
   sid = Math.random().toString(36).slice(2, 10);
   audio.src = `stream.mp3?sid=${sid}&kbps=${kbps}&back=${back || 0}`;
   lastT = 0; lastAdvance = Date.now();
-  audio.play().then(() => { retry = 0; }).catch((e) => { if (want) setTimeout(() => want && connect(), backoff()); });
+  audio.play().then(() => { retry = 0; }).catch((e) => {
+    if (e && e.name === 'NotAllowedError') return asleep();        // the phone wants a tap first: say so, no retry loop
+    if (want) setTimeout(() => want && connect(), backoff());
+  });
+}
+// A page that reloads (the phone dropped it while locked, or it was reopened) forgets it was listening and the set
+// goes quiet with nobody told (2026-10-06, a walk). It remembers, picks the stream back up when the phone allows, and
+// otherwise asks for one tap.
+function remember() { store.set('listening', want ? Date.now() : 0); }
+function asleep() {
+  want = false; sid = null;
+  $('play').textContent = 'Resume'; $('play').classList.remove('on');
+  toast('the set is still playing: tap Resume to hear it'); buzz([80, 60, 80]);
 }
 function backoff() { retry = Math.min(retry + 1, 6); return 1000 * 2 ** (retry - 1); }
 function setPlaying(on) {
@@ -31,6 +43,7 @@ function setPlaying(on) {
   if (on) connect(); else { audio.pause(); audio.removeAttribute('src'); audio.load(); sid = null; }
   $('play').textContent = on ? 'Stop' : 'Listen'; $('play').classList.toggle('on', on);
   if ('mediaSession' in navigator) navigator.mediaSession.playbackState = on ? 'playing' : 'paused';
+  remember();
 }
 $('play').onclick = () => { setPlaying(!want); if (want && keysOn) armMic(); };
 $('golive').onclick = () => { if (!want) return setPlaying(true); connect(0); toast('back to live'); };
@@ -40,6 +53,7 @@ audio.addEventListener('timeupdate', () => { if (audio.currentTime > lastT + 0.2
 setInterval(() => {                     // a stream that stops moving reconnects (wifi dropped, server restarted)
   if (want && !clip.el && Date.now() - lastAdvance > 12000) { lastAdvance = Date.now(); $('livetext').textContent = 'reconnecting'; connect(); }
 }, 3000);
+setInterval(() => { if (want) remember(); }, 30000);
 window.addEventListener('online', () => { if (want) connect(); flush(); });
 
 // ---- lock screen and earbuds: next = change it up, previous = love this
@@ -328,6 +342,9 @@ function render() {
 function onCmd(c) {
   if (c.type === 'caption') { toast(c.text); if (c.buzz) buzz([150, 80, 150]); }
   else if (c.type === 'buzz') buzz(c.pattern);
+  else if (c.type === 'say_clip') {                // spoken to the page itself: nobody was on the stream
+    const a = new Audio(c.url); a.play().catch(() => { toast((c.who || 'DJ') + ': ' + c.text); buzz([150, 80, 150]); });
+  }
   else if (c.type === 'stop_listening') { if (want) { setPlaying(false); cue('end'); toast('stopped listening: press the earbud or Listen to start again'); } }
   else if (c.type === 'heard') { const it = feedItems.find((x) => x.id === c.ref); if (it) it.text = '“' + c.text + '”'; else addFeed({ me: true, id: c.ref, ts: new Date().toTimeString().slice(0, 5), text: '“' + c.text + '”' }); }
   else if (c.type === 'offer' && c.offer && c.offer.auto && document.visibilityState === 'visible') {
@@ -335,6 +352,8 @@ function onCmd(c) {
   }
 }
 async function poll() {
+  const was = store.get('listening', 0);            // listening when the page went away: pick it back up
+  if (was && Date.now() - was < 30 * 60000 && !want) setPlaying(true);
   for (;;) {
     try {
       const t = heardNow();

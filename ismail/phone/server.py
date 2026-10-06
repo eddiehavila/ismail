@@ -54,6 +54,7 @@ TAPS = {'love': 'loves this: cut a highlight here', 'change': 'change it up now'
 MOODS = ('calm', 'steady', 'lift', 'peak')
 # a short voice note that is only a command acts as one (earbuds give one button, so the voice does the rest);
 # the words still reach the agent as voice_text, and the act carries via='voice' and the note's id
+PAGE_OPEN_S = 60.0          # a page that asked for its state this recently is open (it long-polls every 20 s)
 VOICE_CMDS = [(r'stop (?:listening|the stream|streaming)', 'stop_listening'), (r'(?:i )?love (?:this|that|it)', 'love'),
               (r'change it up', 'change'), (r'more energy', 'energy_up'), (r'calmer|calm (?:it )?down', 'energy_down'),
               (r'louder', 'louder'), (r'quieter|softer', 'quieter'), (r'pause the set', 'pause'),
@@ -192,6 +193,7 @@ class Phone:
         except (OSError, ValueError):
             pass
         self.files = {}                            # token -> path (only what an op offered is served)
+        self.page_seen = 0.0                       # the last time an open page asked for its state
         self.engine = None                         # the playing engine's parsed status
         self.agents = {}                           # who -> last time an agent called
         self.encoders = {}
@@ -405,12 +407,27 @@ class Phone:
         y = np.clip(x * DUCK + v, -1.0, 1.0)
         return (y * 32767).astype('<i2').tobytes()
 
-    def speak(self, text, voice=None):
+    def _tts(self, text, voice=None):
         req = urllib.request.Request(SPEAK + '/v1/audio/speech', method='POST',
                                      headers={'Content-Type': 'application/json'},
                                      data=json.dumps({'input': text, 'voice': voice or 'af_heart'}).encode())
         with urllib.request.urlopen(req, timeout=60) as r:
-            wav = r.read()
+            return r.read()
+
+    def speak_clip(self, text, voice=None):
+        """The words as a clip the open page plays itself, for when nobody listens to the stream (2026-10-06: the
+        page reloaded on a walk, the stream stayed off and a spoken answer was dropped). -> (url, seconds)."""
+        wav = self._tts(text, voice)
+        import soundfile as sf
+        info = sf.info(io.BytesIO(wav))
+        d = HOME / 'said'
+        d.mkdir(parents=True, exist_ok=True)
+        p = d / f"{time.strftime('%Y%m%d_%H%M%S')}_{secrets.token_hex(2)}.wav"
+        p.write_bytes(wav)
+        return '/files/' + self.offer_file(str(p)), info.frames / info.samplerate
+
+    def speak(self, text, voice=None):
+        wav = self._tts(text, voice)
         import soundfile as sf
         y, sr = sf.read(io.BytesIO(wav), dtype='float32', always_2d=True)
         y = y.mean(axis=1)
@@ -568,6 +585,13 @@ class Agent:
             if time.time() - s.get('at', 0) < 60:
                 h = ph.heard(sid, s.get('t'))
                 L.append(f"  a phone hears {h.get('of', 'a gap')}, {h.get('behind_s', '?')} s behind the room")
+        ago = time.time() - ph.page_seen
+        listening = sum(x.listeners for x in ph.encoders.values())
+        L.append('page: ' + ('never opened since the server started' if not ph.page_seen else
+                             f"open (seen {ago:.0f} s ago)" + ('' if listening else
+                                                              ', NOT listening to the stream: it asks to be resumed; a '
+                                                              'spoken phone_say goes to the page as a clip')
+                             if ago < PAGE_OPEN_S else f"closed or asleep (last seen {ago / 60:.0f} min ago)"))
         L.append(f"engine: {'playing, ' + str(e['bpm']) + ' BPM, recording ' + str(e['recording']) if e else 'none playing'}")
         L.append(f"inbox: {ph.seq} lines; routed to {', '.join(str(p) for p in ph.routes())}")
         if ph.voice_state:
@@ -591,7 +615,19 @@ class Agent:
         out = f"shown on the phone: {text}"
         if speak:
             if not ph.encoders:
-                return out + " (not spoken: nobody is listening to the stream)"
+                ago = time.time() - ph.page_seen
+                if ago > PAGE_OPEN_S:
+                    return out + (" (not spoken: nobody is listening to the stream and no page is open"
+                                  + (f", last seen {ago / 60:.0f} min ago" if ph.page_seen else '') +
+                                  "; the caption waits on the page)")
+                try:
+                    url, s = ph.speak_clip(text, voice)
+                except Exception as e:
+                    return out + f" (not spoken: the speech server does not answer: {e})"
+                ph.cmd('say_clip', url=url, text=text, who=who)
+                return out + (f" (nobody is listening to the stream, so it went to the open page as a spoken clip, "
+                              f"{s:.1f} s: it plays if the phone lets the page make sound; the caption shows either "
+                              f"way)")
             try:
                 s = ph.speak(text, voice)
                 out += f" (and spoken into the stream, {s:.1f} s, the music ducked under it)"
@@ -756,6 +792,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == '/health':
             return self._json(200, {'ok': True, 'engine': bool(self.ph.engine), 'inbox': self.ph.seq})
         if path == '/api/state':
+            self.ph.page_seen = time.time()
             since, wait = int(g('since', '0') or 0), min(25.0, float(g('wait', '0') or 0))
             end = time.time() + wait
             with self.ph.cond:
