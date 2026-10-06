@@ -11,6 +11,85 @@
   every frame reads the song's time, so a beat-warped loop stays on the beat however late it started and wherever the
   song loops. The film's dancers were warped onto the beat, but a take started on a command landed 0.3 to 6 s late.
   Side server: the take followed the song within one take frame (median 16 ms, worst 41 ms at 30 Hz frames).
+### The frame beat says where the head was
+
+- The page's 5 s beat (clientlog.jsonl) carries `head` (position in Blender metres, yaw and pitch in degrees, yaw 0
+  along +Y) and `worstAt`: the head and the triangles and draw calls of the worst frame in those 5 s, so a stall is
+  read against the view it happened in (the frame budget: under 400k triangles and 300 draw calls per view). It also
+  carries `shadowFrames` (frames in the window that re-drew the shadow maps), `playing` (people playing or following)
+  and `eyes` (2 in the headset: triangles and calls count both eyes).
+
+### Takes keep what was said while recording
+
+- A take's audio is transcribed as it lands (`takes/<id>/voice.json`, a `take_voice` event), with word times on the
+  take's clock, snapped onto the measured voice. A take kept from a Follow, or recorded during one, takes its words
+  from the performance's voice clips that fall inside it.
+- `stage_takes(scene, query, person, kept)`: takes newest first with what was said, label and notes; `query` finds
+  takes by their words, label or notes, and shows each hit with its second. `stage_take_note(scene, take, label,
+  note, at)` names a take or adds a note; `stage_take_transcribe(scene, take)` fills in an older take's words. The
+  person asked for it: he says a take's name and notes while recording, and records many takes of one thing.
+
+### The headset speaks when the server's voice is off
+
+- While speakwright is off, `stage_say` was silent in VR (the server answers 502). The page now says the line with the
+  headset browser's own speech engine instead (Web Speech), still waiting while the person talks; the event says
+  `voice_spoken` with `via: "headset speech (server voice off)"`, or `voice_error` when the browser has no engine or
+  voice. Lines in the speech cache still play from the server.
+
+### The phone page in the README and the skills (Nate, 10-06: "this phone app feature should start gaining prominence")
+
+- README: the tagline names it, and a section "The phone page: the set in your pocket" says what it does (listen
+  with the screen off, earbud voice notes, taps and history, exams, the vibe, bars or time, install, the timeline).
+  203 tools (17 `phone_*`).
+- Skills: SKILL.md (away from the desk all day; answer in time to a casual listener), user-experience.md (bring the
+  page to where they are; a new "Bars or time" section), blind-tests.md (exams on the phone), live.md (the page is
+  part of the show: marks and vibe on every chapter change, the timeline), setup.md (optional: the phone page and
+  Tailscale).
+
+### The phone server restarts without dropping the person; a stream that fell behind catches up
+
+- A restart after a merge dropped Nate's stream mid-set (10-06 08:38, "Why'd you stop?"), and a page whose command
+  count was past the new server's missed every command after it. `phone_restart()` tells the page first; the page
+  sees the server's boot change, starts its commands from 0, reconnects the stream at the live edge, and loads new
+  page code (`build`) when it is next on screen and idle.
+- The phone's player pauses on a weak network and carries on from there, so the delay grew (17 s, then 40 s). Past
+  15 s behind it now plays 8 % faster with the pitch kept until it is within 6 s; the Live key shows the delay.
+
+### The phone page takes the music's vibe, and reads in time as well as bars (Nate, 10-06)
+
+- `phone_vibe`: an agent sets the page to fit the song (Nate: "change the colors ... how the headers look ... song
+  covers in the background, blurred ... JavaScript effects ... I feel like you're there"). Presets (rain, calm,
+  warm, night, peak), colours, a heading face from nine, an art layer with blur and dim, one ambient effect (rain,
+  particles, pulse on the set's beat, grain, aurora) that stops while the page is hidden or for reduced motion.
+  The server holds every vibe to a dark ground, ink 7:1 and accent 3:1, and refuses others saying what to change.
+- Bars or time (Nate: "an option for the person to understand music in time"): lines from the page carry
+  `into_s`, the page has a Bars/Time switch ("2:31 in" with the clock), and `phone_timeline` shows both.
+
+### The phone session is a take: the page reports what happens on it, on one clock (Nate, 10-06)
+
+- Nate: "can you see when I download stuff? where I'm scrolling ... like a VR take ... but for the mobile interface
+  ... do you know if I'm on my phone?" The page now sends its own actions, timed (`/api/events`, kind 'page'):
+  open with the device, Listen and Stop, hidden and visible, the section in view, downloads, clips, panels, note
+  start and end, earbud presses. Every line from the page carries `room` (the engine's bar, also off the stream)
+  and `now` (the piece); voice notes carry `dur_s` and `ended_by`.
+- `phone_timeline(minutes=)` lays the session on one clock with what they said. `phone_listen(page=True)`
+  includes the page's actions; without it they never wake a waiting agent.
+- An open panel or exam, and the files it offers, survive a server restart (a merge dropped an unread one).
+
+### The phone page: momentary keys and a tap history, notes that never cut off, installable (Nate, 10-06)
+
+- Nate: a key "stays pressed even once that has been sent ... when I press it again, I'm unpressing the button".
+  Every key is momentary now (Love this no longer rests in the accent, the mood detents flash SENT instead of
+  staying selected), and the page lists what he asked for: each tap and mood with its time and the piece that
+  played, today's count, and the mood he asked for the next chapter. The server keeps it (it survives a reload or
+  a restart).
+- Now and next carry a small mark: a heart for a piece he loved, a loop for one played again, NEW for one just made.
+  `phone_now(now_mark=, next_mark=)` sets it; without it a love tap during that piece shows the heart.
+- "The voice recording should not cut me off": notes stopped at 60 s mid-sentence. They now run until his press,
+  30 s of quiet, or 10 minutes (a warning 20 s before).
+- Installable from Chrome, after his tooler PWA: PNG icons (192, 512, maskable; `python -m ismail.phone.make_icons`
+  redraws them from icon.svg), an Install app button when Chrome offers it, and optional notifications for what
+  the DJ says while the app is in the background.
 
 ### The phone page picks the set back up after a reload, and a spoken answer reaches an open page
 

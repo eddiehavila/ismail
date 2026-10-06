@@ -38,6 +38,12 @@ from pathlib import Path
 
 import numpy as np
 
+try:                                       # a package module in ismail; a plain script when phone_start runs it
+    from . import vibe
+except ImportError:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import vibe
+
 HOME = Path(os.environ.get('ISMAIL_PHONE_HOME') or Path.home() / '.ismail' / 'phone')
 PAGE = Path(__file__).resolve().parent / 'page'
 SPEAK = os.environ.get('ISMAIL_SPEAK') or 'http://127.0.0.1:8765'
@@ -45,6 +51,22 @@ SR = 44100
 BLOCK = 2048                       # frames fed per step (46 ms)
 RING_S = 120.0                     # seconds of encoded stream kept for rewind and late joiners
 LEAD_S = 1.0                       # a live join starts this far back, so the phone's buffer fills at once
+BOOT = secrets.token_hex(4)        # this server run: a page that sees it change knows the server restarted
+
+
+def page_build():
+    """The page code this server serves: an open page that sees it change reloads itself when it is idle."""
+    import hashlib
+    h = hashlib.sha1()
+    for n in ('index.html', 'app.js', 'sw.js'):
+        try:
+            h.update((PAGE / n).read_bytes())
+        except OSError:
+            pass
+    return h.hexdigest()[:10]
+
+
+BUILD = page_build()
 IDLE_S = 60.0                      # an encoder with no listener for this long stops
 DUCK = 0.3                         # the music's gain under a spoken line
 KBPS = (64, 128)
@@ -54,6 +76,7 @@ TAPS = {'love': 'loves this: cut a highlight here', 'change': 'change it up now'
 MOODS = ('calm', 'steady', 'lift', 'peak')
 # a short voice note that is only a command acts as one (earbuds give one button, so the voice does the rest);
 # the words still reach the agent as voice_text, and the act carries via='voice' and the note's id
+MARKS = ('loved', 'replay', 'new')   # a piece they loved before, one the DJ plays again, one just made
 PAGE_OPEN_S = 60.0          # a page that asked for its state this recently is open (it long-polls every 20 s)
 VOICE_CMDS = [(r'stop (?:listening|the stream|streaming)', 'stop_listening'), (r'(?:i )?love (?:this|that|it)', 'love'),
               (r'change it up', 'change'), (r'more energy', 'energy_up'), (r'calmer|calm (?:it )?down', 'energy_down'),
@@ -63,8 +86,9 @@ STATUS = re.compile(r'live ([\d.]+) BPM (\d+)/4 \| heard bar (\d+)(?: beat ([\d.
                     r'mixed ahead ([\d.]+) s')
 
 
-def now_iso():
-    return datetime.datetime.now().isoformat(timespec='seconds')
+def now_iso(at=None):
+    t = datetime.datetime.fromtimestamp(at) if at else datetime.datetime.now()
+    return t.isoformat(timespec='seconds')
 
 
 def ffmpeg():
@@ -187,12 +211,28 @@ class Phone:
         self.cmds = []
         self.view = {'now': None, 'next': None, 'rec_why': None, 'mood': None, 'captions': [], 'pinned': None,
                      'buttons': [], 'panels': [], 'offers': []}
+        saved = {}
         try:
             saved = json.loads((HOME / 'state.json').read_text(encoding='utf8'))
-            self.view.update({k: saved[k] for k in ('now', 'next', 'rec_why', 'mood', 'buttons', 'pinned') if k in saved})
+            self.view.update({k: saved[k] for k in ('now', 'next', 'rec_why', 'mood', 'buttons', 'pinned', 'panels')
+                              if k in saved})
         except (OSError, ValueError):
             pass
-        self.files = {}                            # token -> path (only what an op offered is served)
+        self.view.setdefault('marks', {})         # piece text -> 'loved' | 'replay' | 'new' (the DJ's, phone_now)
+        try:
+            self.view['marks'] = dict(saved.get('marks') or {})
+        except NameError:
+            pass
+        self.taps = collections.deque(self._recent_taps(), maxlen=60)   # what they loved and asked for, newest last
+        self.piece = (None, time.time())
+        try:
+            self.view['vibe'] = vibe.resolve(saved.get('vibe') or {})
+            if saved.get('vibe', {}).get('image'):
+                self.view['vibe'].update({k: saved['vibe'][k] for k in ('image', 'image_name') if k in saved['vibe']})
+        except (ValueError, TypeError):
+            self.view['vibe'] = vibe.resolve({})
+        self.files = {k: Path(v) for k, v in (saved.get('files') or {}).items()}   # token -> path (only what an op offered is served); a panel
+                                                      # or exam left open survives a restart with its clips
         self.page_seen = 0.0                       # the last time an open page asked for its state
         self.engine = None                         # the playing engine's parsed status
         self.agents = {}                           # who -> last time an agent called
@@ -217,6 +257,54 @@ class Phone:
         except (OSError, ValueError, KeyError, IndexError):
             return 0
 
+    def _recent_taps(self):
+        """The last taps and moods from the inbox, so a restarted server still shows what they asked for."""
+        try:
+            with open(HOME / 'inbox.jsonl', 'rb') as f:
+                f.seek(max(0, os.path.getsize(f.name) - 200_000))
+                lines = f.read().decode('utf8', 'replace').splitlines()[1:]
+        except OSError:
+            return []
+        out = []
+        for line in lines:
+            try:
+                r = json.loads(line)
+            except ValueError:
+                continue
+            if r.get('kind') in ('tap', 'mood'):
+                out.append(self._tap_item(r))
+        return out[-60:]
+
+    @staticmethod
+    def _tap_item(r):
+        return {'ts': r.get('ts'), 'what': r.get('what') or 'mood', 'mood': r.get('mood'),
+                'of': (r.get('heard') or {}).get('of') or (r.get('room') or {}).get('of'), 'now': r.get('now'),
+                'into_s': r.get('into_s')}
+
+    def now_text(self):
+        e = self.engine
+        t = self.view['now'] or (', '.join(e['playing']) if e and e['playing'] else None)
+        if t != self.piece[0]:
+            self.piece = (t, time.time())          # when this piece began (for "2:31 into it", Nate 10-06 08:24)
+        return t
+
+    def into_s(self, age_s=0.0):
+        """Seconds into the piece playing now (or age_s ago), from when it began; None when nothing names it."""
+        self.now_text()
+        if not self.piece[0]:
+            return None
+        return round(max(0.0, time.time() - age_s - self.piece[1]), 1)
+
+    def mark(self, text):
+        """How a piece stands with them: the DJ's mark (phone_now now_mark/next_mark), else 'loved' when they tapped
+        Love this while it played."""
+        if not text:
+            return None
+        m = self.view['marks'].get(text)
+        if m:
+            return m
+        return 'loved' if any(t['what'] == 'love' and t.get('now') == text for t in self.taps) else None
+
     def routes(self):
         out = [HOME / 'inbox.jsonl']
         if self.route:
@@ -225,10 +313,25 @@ class Phone:
             out.append(Path(self.engine['project']) / 'notes' / 'phone_inbox.jsonl')
         return out
 
+    def room(self, age_s=0.0):
+        """The bar playing in the room age_s seconds ago, from the engine's clock (heard is what the phone's stream
+        played; this is there even when the page is off the stream, on the room speakers or a JBL)."""
+        b, e = self.beat_now(), self.engine
+        if b is None or not e or not e.get('bpm'):
+            return {}
+        b -= max(0.0, age_s) * e['bpm'] / 60
+        bpb = e.get('bpb') or 4
+        return {'beat': round(b, 2), 'bar': int(b // bpb) + 1, 'of': bar_text(b, bpb)}
+
     def post(self, rec):
+        age = float(rec.pop('_age', 0) or 0)
+        if 'heard' in rec:                                   # from the page: where the set was, on one clock
+            rec.setdefault('room', self.room(age))
+            rec.setdefault('now', self.now_text())
+            rec.setdefault('into_s', self.into_s(age))       # and how far into that piece, in seconds
         with self.cond:
             self.seq += 1
-            rec = {'n': self.seq, 'ts': now_iso(), **rec}
+            rec = {'n': self.seq, 'ts': now_iso(time.time() - age), **rec}
             line = json.dumps(rec, ensure_ascii=False) + '\n'
             for p in self.routes():
                 try:
@@ -238,6 +341,8 @@ class Phone:
                 except OSError as e:
                     print(f'[phone] inbox {p}: {e}', flush=True)
             self.cond.notify_all()
+            if rec.get('kind') in ('tap', 'mood'):
+                self.taps.append(self._tap_item(rec))
         self._hooks(rec)
         return rec
 
@@ -283,8 +388,10 @@ class Phone:
 
     def save(self):
         try:
-            (HOME / 'state.json').write_text(json.dumps({k: self.view[k] for k in ('now', 'next', 'rec_why', 'mood',
-                                                                                    'buttons', 'pinned')}), encoding='utf8')
+            st = {k: self.view[k] for k in ('now', 'next', 'rec_why', 'mood', 'buttons', 'pinned', 'marks', 'panels',
+                                            'vibe')}
+            st['files'] = {k: str(v) for k, v in self.files.items()}
+            (HOME / 'state.json').write_text(json.dumps(st), encoding='utf8')
         except OSError:
             pass
 
@@ -464,13 +571,13 @@ class Phone:
         return out
 
     # ---- voice notes
-    def add_voice(self, data, mime, sid, t):
+    def add_voice(self, data, mime, sid, t, extra=None):
         vid = datetime.datetime.now().strftime('%Y%m%d_%H%M%S_') + secrets.token_hex(2)
         ext = 'webm' if 'webm' in (mime or '') else 'ogg' if 'ogg' in (mime or '') else 'm4a' if 'mp4' in (mime or '') else 'bin'
         f = HOME / 'voice' / f'{vid}.{ext}'
         f.write_bytes(data)
         rec = self.post({'kind': 'voice', 'id': vid, 'file': str(f), 'state': 'transcribing', 'sid': sid,
-                         'heard': self.heard(sid, t)})
+                         'heard': self.heard(sid, t), **(extra or {})})
         self.voice_state[vid] = 'queued'
         self.voice_q.append((vid, f, rec['heard'], sid))
         return rec
@@ -533,6 +640,7 @@ class Phone:
                 return k
         k = secrets.token_urlsafe(9)
         self.files[k] = p
+        self.save()
         return k
 
     # ---- state for the page
@@ -542,14 +650,21 @@ class Phone:
         agents = sorted(w for w, at in self.agents.items() if now - at < 90)
         rec = {'on': bool(e and e.get('recording')), 'file': e.get('recording') if e else None,
                'why': self.view['rec_why']}
-        return {'engine': {'playing': bool(e), 'bpm': e['bpm'] if e else None,
-                           'now': self.view['now'] or (', '.join(e['playing']) if e and e['playing'] else None),
-                           'next': self.view['next'] or (e['next'] if e else None)},
+        now_t, next_t = self.now_text(), self.view['next'] or (e['next'] if e else None)
+        today = time.strftime('%Y-%m-%d')
+        tally = collections.Counter(x['what'] for x in self.taps if (x['ts'] or '').startswith(today))
+        moods = [x for x in self.taps if x['what'] == 'mood']
+        return {'engine': {'playing': bool(e), 'bpm': e['bpm'] if e else None, 'now': now_t, 'next': next_t,
+                           'now_mark': self.mark(now_t), 'next_mark': self.mark(next_t)},
+                'taps': list(self.taps)[-8:][::-1], 'tally': dict(tally),
+                'asked_mood': moods[-1] if moods else None,
                 'rec': rec, 'mood': self.view['mood'], 'captions': self.view['captions'][-6:],
                 'pinned': self.view['pinned'], 'buttons': self.view['buttons'], 'panels': self.view['panels'],
                 'offers': self.view['offers'][-4:], 'listening': agents,
                 'voice': [{'id': k, 'state': v} for k, v in self.voice_state.items()],
-                'heard': self.heard(sid, t) if sid else {}, 'cmd': self.cmd_id}
+                'heard': self.heard(sid, t) if sid else {}, 'cmd': self.cmd_id,
+                'vibe': self.view['vibe'], 'into_s': self.into_s(), 'clock': time.strftime('%H:%M:%S'),
+                'boot': BOOT, 'build': BUILD}
 
 
 def stt(audio, filename):
@@ -635,14 +750,26 @@ class Agent:
                 out += f" (not spoken: the speech server does not answer: {e})"
         return out
 
-    def op_now(self, now=None, next=None, recording_why=None, mood=None, who=None):
-        v = self.ph.view
+    def op_now(self, now=None, next=None, recording_why=None, mood=None, now_mark=None, next_mark=None, who=None):
+        v, ph = self.ph.view, self.ph
         for k, val in (('now', now), ('next', next), ('rec_why', recording_why), ('mood', mood)):
             if val is not None:
                 v[k] = val or None
-        self.ph.save()
-        self.ph.cmd('view')
-        return f"now={v['now']!r} next={v['next']!r} recording_why={v['rec_why']!r} mood={v['mood']!r}"
+        for text, m in ((ph.now_text(), now_mark), (v['next'], next_mark)):
+            if m is None or not text:
+                continue
+            if m and m not in MARKS:
+                raise ValueError(f"now_mark/next_mark: one of {MARKS}, or '' to clear")
+            if m:
+                v['marks'][text] = m
+            else:
+                v['marks'].pop(text, None)
+        while len(v['marks']) > 200:
+            v['marks'].pop(next(iter(v['marks'])))
+        ph.save()
+        ph.cmd('view')
+        return (f"now={v['now']!r} ({ph.mark(ph.now_text()) or 'no mark'}) next={v['next']!r} "
+                f"({ph.mark(v['next']) or 'no mark'}) recording_why={v['rec_why']!r} mood={v['mood']!r}")
 
     def _wait_answer(self, pid, wait):
         if not wait:
@@ -659,6 +786,7 @@ class Agent:
     def _panel(self, p, wait):
         v = self.ph.view
         v['panels'] = [x for x in v['panels'] if x['id'] != p['id']] + [p]
+        self.ph.save()
         self.ph.cmd('panel', panel=p)
         got = self._wait_answer(p['id'], wait)
         if got:
@@ -681,6 +809,7 @@ class Agent:
         v = self.ph.view
         had = any(x['id'] == panel_id for x in v['panels'])
         v['panels'] = [x for x in v['panels'] if x['id'] != panel_id]
+        self.ph.save()
         self.ph.cmd('close', ref=panel_id)
         return f"closed {panel_id}" if had else f"no open panel {panel_id}"
 
@@ -716,21 +845,94 @@ class Agent:
         self.ph.cmd('view')
         return f"buttons on the phone: {[b['label'] for b in bs] or 'none'}; a tap arrives as kind 'button'"
 
+    def op_vibe(self, preset=None, ground=None, ink=None, accent=None, heading=None, image=None, blur=None, dim=None,
+                effect=None, intensity=None, transition_ms=None, reset=False, menu=False, who=None):
+        ph = self.ph
+        if menu:
+            return vibe.menu() + '\n' + vibe.describe(ph.view['vibe'])
+        if preset is not None and preset not in vibe.PRESETS:
+            raise ValueError(f"preset {preset!r}: one of {sorted(vibe.PRESETS)} (or set the parts yourself)")
+        cur = {} if reset else {k: v for k, v in ph.view['vibe'].items() if k in vibe.DEFAULT}
+        if preset:
+            cur.update({k: v for k, v in vibe.DEFAULT.items() if k not in ('image', 'blur', 'dim')})
+            cur.update(vibe.PRESETS[preset])
+        for k, v in (('ground', ground), ('ink', ink), ('accent', accent), ('heading', heading), ('blur', blur),
+                     ('dim', dim), ('effect', effect), ('intensity', intensity), ('transition_ms', transition_ms)):
+            if v is not None:
+                cur[k] = v
+        name = ph.view['vibe'].get('image_name')
+        if image is not None:
+            cur['image'] = '/files/' + ph.offer_file(image) if image else None
+            name = Path(image).name if image else None
+        v = vibe.resolve(cur)
+        v['image_name'] = name if v.get('image') else None
+        ph.view['vibe'] = v
+        ph.save()
+        ph.cmd('vibe', vibe=v)
+        return vibe.describe(v) + " (on the page now, fading over " + str(v['transition_ms']) + " ms)"
+
+    def op_restarting(self, back_in_s=5, why='updating'):
+        """Tell the open page the server is about to restart: it says so, then reconnects the stream at once."""
+        self.ph.cmd('restarting', back_in_s=float(back_in_s), why=str(why)[:80])
+        n = sum(x.listeners for x in self.ph.encoders.values())
+        return f"told the page ({n} on the stream)"
+
     def op_buzz(self, pattern=None, who=None):
         self.ph.cmd('buzz', pattern=pattern or [200, 100, 200])
         return 'buzzed (if the page is open)'
 
-    def op_listen(self, who, since=None, wait=25):
+    def op_listen(self, who, since=None, wait=25, page=False):
         ph = self.ph
         ph.agents[who] = time.time()
         since = ph.seq if since is None else int(since)
         end = time.time() + float(wait or 0)
-        with ph.cond:
-            while ph.seq <= since and time.time() < end:
-                ph.cond.wait(min(5.0, end - time.time()))
-                ph.agents[who] = time.time()
-        rows = ph.read_inbox(since)
+        keep = (lambda r: True) if page else (lambda r: r.get('kind') != 'page')
+        rows = [r for r in ph.read_inbox(since) if keep(r)]
+        while not rows and time.time() < end:          # the page's own actions (scrolls, opens) do not wake you
+            seen = ph.seq
+            with ph.cond:
+                while ph.seq <= seen and time.time() < end:
+                    ph.cond.wait(min(5.0, end - time.time()))
+                    ph.agents[who] = time.time()
+            rows = [r for r in ph.read_inbox(since) if keep(r)]
         return json.dumps({'since': ph.seq, 'lines': rows}, ensure_ascii=False)
+
+    def op_timeline(self, minutes=15, kinds=None, limit=200):
+        """Everything from the phone in the last `minutes` on one clock, oldest first, one line each: time, the bar
+        in the room (and what the phone heard), the piece, then what happened. A take of the phone session."""
+        ph = self.ph
+        start = datetime.datetime.now() - datetime.timedelta(minutes=float(minutes))
+        want = set(kinds.split(',') if isinstance(kinds, str) else kinds or [])
+        rows = [r for r in ph.read_inbox(max(0, ph.seq - 5000))
+                if (r.get('ts') or '') >= start.strftime('%Y-%m-%dT%H:%M:%S') and (not want or r.get('kind') in want)]
+        L, piece = [], None
+        for r in rows[-int(limit):]:
+            k = r.get('kind')
+            if r.get('now') and r['now'] != piece:
+                piece = r['now']
+                L.append(f"            -- {piece}")
+            where = (r.get('room') or {}).get('of') or ''
+            if r.get('into_s') is not None:
+                where += f" {int(r['into_s'] // 60)}:{int(r['into_s'] % 60):02d} in"
+            h = (r.get('heard') or {}).get('of')
+            if h and h != where:
+                where += f" (phone heard {h})"
+            if k == 'page':
+                skip = ('n', 'ts', 'kind', 'what', 'sid', 'heard', 'room', 'now')
+                what = r['what'] + ''.join(f" {a}={v}" for a, v in r.items() if a not in skip)
+            elif k == 'voice_text':
+                what = f"said: \"{r.get('text', '')}\""
+            elif k == 'voice':
+                what = f"voice note {r.get('dur_s', '?')} s" + (f", ended by {r['ended_by']}" if r.get('ended_by') else '')
+            elif k == 'tap':
+                what = 'tap ' + str(r.get('what'))
+            elif k == 'mood':
+                what = 'mood ' + str(r.get('mood'))
+            else:
+                what = k + ' ' + json.dumps({a: v for a, v in r.items() if a in ('id', 'answer', 'label', 'state')},
+                                            ensure_ascii=False)
+            L.append(f"{(r.get('ts') or '')[11:19]}  {where:<22} {what}")
+        return '\n'.join(L) if L else f"nothing from the phone in the last {minutes} min"
 
 
 # ------------------------------------------------------------------ http
@@ -787,7 +989,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._file(PAGE / 'index.html')
         if re.fullmatch(r'/cues/(start|end|sent|error)\.mp3', path):
             return self._file(PAGE / path[1:])
-        if path in ('/app.js', '/sw.js', '/icon.svg', '/manifest.webmanifest'):
+        if path in ('/app.js', '/sw.js', '/icon.svg', '/manifest.webmanifest', '/icon-192.png', '/icon-512.png',
+                    '/icon-maskable.png', '/apple-touch-icon.png'):
             return self._file(PAGE / path[1:])
         if path == '/health':
             return self._json(200, {'ok': True, 'engine': bool(self.ph.engine), 'inbox': self.ph.seq})
@@ -851,10 +1054,35 @@ class Handler(BaseHTTPRequestHandler):
                 data = self._body()
                 if len(data) < 200:
                     return self._json(400, {'error': 'no audio'})
-                rec = ph.add_voice(data, self.headers.get('Content-Type'), g('sid'), g('t'))
+                extra = {}
+                try:
+                    if g('dur'):
+                        extra['dur_s'] = round(float(g('dur')), 1)        # how long they talked
+                        extra['_age'] = extra['dur_s']                    # the line is stamped when they started
+                except ValueError:
+                    pass
+                if g('end') in ('press', 'quiet', 'max'):
+                    extra['ended_by'] = g('end')                          # their press, 30 s of quiet, or 10 min
+                rec = ph.add_voice(data, self.headers.get('Content-Type'), g('sid'), g('t'), extra)
                 return self._json(200, {'ok': True, 'id': rec['id'], 'heard': rec['heard']})
             body = json.loads(self._body() or b'{}')
             sid, t = body.get('sid'), body.get('t')
+            if u.path == '/api/events':
+                n = 0
+                for ev in (body.get('events') or [])[:60]:
+                    what = str(ev.get('what', ''))[:40]
+                    if not re.fullmatch(r'[a-z_]+', what):
+                        continue
+                    fields = {k[:24]: (v[:300] if isinstance(v, str) else v) for k, v in ev.items()
+                              if k not in ('what', 'age_ms', 't', 'kind', 'n', 'ts', 'sid', 'heard', 'room', 'now')
+                              and isinstance(v, (str, int, float, bool)) and v is not None}
+                    if what == 'open':
+                        fields['ua'] = self.headers.get('User-Agent', '')[:300]
+                    age = max(0.0, min(3600.0, float(ev.get('age_ms') or 0) / 1000))
+                    ph.post({'kind': 'page', 'what': what, **fields, 'sid': sid, 'heard': ph.heard(sid, ev.get('t')),
+                             '_age': age})
+                    n += 1
+                return self._json(200, {'ok': True, 'n': n})
             if u.path == '/api/tap':
                 what = str(body.get('what', ''))
                 if what == 'mood':
@@ -863,14 +1091,15 @@ class Handler(BaseHTTPRequestHandler):
                         return self._json(400, {'error': f'mood: one of {MOODS}'})
                     ph.view['mood'] = m
                     ph.save()
-                    rec = ph.post({'kind': 'mood', 'mood': m, 'sid': sid, 'heard': ph.heard(sid, t)})
+                    rec = ph.post({'kind': 'mood', 'mood': m, 'sid': sid, 'heard': ph.heard(sid, t),
+                                   'now': ph.now_text()})
                 elif what.startswith('button:'):
                     bid = what[7:]
                     lab = next((b['label'] for b in ph.view['buttons'] if b['id'] == bid), bid)
                     rec = ph.post({'kind': 'button', 'id': bid, 'label': lab, 'sid': sid, 'heard': ph.heard(sid, t)})
                 elif what in TAPS:
                     rec = ph.post({'kind': 'tap', 'what': what, 'means': TAPS[what], 'sid': sid,
-                                   'heard': ph.heard(sid, t)})
+                                   'heard': ph.heard(sid, t), 'now': ph.now_text()})
                 else:
                     return self._json(400, {'error': f'what: one of {sorted(TAPS)}, mood, button:<id>'})
                 ph.cmd('view')
@@ -896,6 +1125,7 @@ class Handler(BaseHTTPRequestHandler):
                     except OSError as e:
                         rec['answers_path_error'] = str(e)
                 ph.view['panels'] = [x for x in ph.view['panels'] if x['id'] != pid]
+                ph.save()
                 rec = ph.post(rec)
                 ph.cmd('close', ref=pid)
                 return self._json(200, {'ok': True, 'n': rec['n']})

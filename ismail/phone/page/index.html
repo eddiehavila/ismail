@@ -6,6 +6,11 @@
 <meta name="theme-color" content="#0e0d0b">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon.svg">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="ismail">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..800&family=JetBrains+Mono:wght@400;600&display=swap">
@@ -25,6 +30,9 @@ Icons:     inline SVG, 24-unit grid, 2px strokes, square ends, no fills; the lab
 Bespoke:   the talk key is a walkie-talkie PTT that draws your mic level while it records
 Copy:      key caps in capitals and terse; sentences only in the DJ log; quiet; no em dashes
 Never:     gradients, glass, emoji or symbol-glyph icons, purple-tinted ground, uniform rounded grey cards, glows except a lit lamp
+Vibe:      this is the default skin. An agent re-skins the page per song with phone_vibe (palette, the face of the titles,
+           a blurred art layer, one ambient effect); the server holds every vibe to a dark ground, ink 7:1 and accent 3:1.
+           Nate 10-06: "make the page fit with the song ... I feel like you're there".
 -->
 <style>
 :root{
@@ -32,9 +40,18 @@ Never:     gradients, glass, emoji or symbol-glyph icons, purple-tinted ground, 
   --accent:hsl(293 68% 66%); --accent-deep:hsl(293 40% 18%); --air:#ff4b3e; --air-off:#3a1e1b; --warn:#e2a93b;
   --u:4px; --r:3px; --press:90ms;
   --display:'Archivo','Arial Narrow',system-ui,sans-serif; --mono:'JetBrains Mono',ui-monospace,Consolas,monospace;
+  --head:var(--display); --vt:1200ms;
 }
+html,body,button,.dial,.counter,.strip{transition:background-color var(--vt) ease,color var(--vt) ease,border-color var(--vt) ease}
+#bg,#fx{position:fixed;inset:0;pointer-events:none}
+#bg{z-index:-2;background:var(--ground) center/cover no-repeat;transform:scale(1.08);opacity:0;transition:opacity var(--vt) ease,filter var(--vt) ease}
+#bg.on{opacity:1}
+#bgdim{position:fixed;inset:0;z-index:-2;pointer-events:none;background:var(--ground);opacity:0;transition:opacity var(--vt) ease,background-color var(--vt) ease}
+#fx{z-index:-1}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-html,body{margin:0;background:var(--ground);color:var(--ink);font:400 16px/1.4 var(--display)}
+html{background:var(--ground)}
+body{background:transparent}
+html,body{margin:0;color:var(--ink);font:400 16px/1.4 var(--display)}
 body{padding:calc(env(safe-area-inset-top) + calc(var(--u)*3)) calc(var(--u)*4) calc(env(safe-area-inset-bottom) + calc(var(--u)*6));max-width:520px;margin:0 auto;user-select:none}
 .cap{font:600 11px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--dim)}
 button{font:700 15px/1.1 var(--display);font-stretch:75%;letter-spacing:.06em;text-transform:uppercase;color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:var(--r);min-height:56px;padding:calc(var(--u)*3) calc(var(--u)*2);cursor:pointer;touch-action:manipulation;transition:background var(--press) ease-out,box-shadow var(--press) ease-out}
@@ -58,7 +75,8 @@ button:active,button.down{background:var(--panel-2);box-shadow:inset 0 2px 0 rgb
 .dial{border-top:1px solid var(--line);border-bottom:1px solid var(--line);padding:calc(var(--u)*3) 0}
 .dial .row{display:grid;grid-template-columns:44px 1fr;gap:calc(var(--u)*2);align-items:baseline}
 .dial .row+.row{margin-top:calc(var(--u)*2)}
-#now{font:700 21px/1.2 var(--display);font-stretch:85%}
+#now{font:700 21px/1.2 var(--head);font-stretch:85%}
+#next{font-family:var(--head)}
 #next{font-size:15px;color:var(--dim)}
 .note{margin:calc(var(--u)*3) 0 0;padding-left:calc(var(--u)*3);border-left:2px solid var(--accent);font-size:15px}
 .note .cap{display:block;margin-bottom:var(--u)}
@@ -84,7 +102,7 @@ button:active,button.down{background:var(--panel-2);box-shadow:inset 0 2px 0 rgb
 #love svg,#change svg{width:36px;height:36px}
 .key.sent{border-color:var(--accent);color:var(--accent)}
 .key.sent .lbl{color:var(--accent)}
-#love{color:var(--accent);border-color:var(--accent)}
+#love svg{color:var(--accent)}             /* the heart is the accent; the key itself only lights when a tap is sent */
 .pad{display:grid;grid-template-columns:1fr 1fr;gap:calc(var(--u)*2);margin-top:calc(var(--u)*2)}
 .pad button{min-height:64px;color:#d9d2c4}
 .section{margin-top:calc(var(--u)*6)}
@@ -93,8 +111,13 @@ button:active,button.down{background:var(--panel-2);box-shadow:inset 0 2px 0 rgb
 .detents{display:grid;grid-template-columns:repeat(4,1fr);border:1px solid var(--line);border-radius:var(--r)}
 .detents button{border:0;border-radius:0;min-height:48px;font-size:12px;background:transparent;color:var(--dim);position:relative}
 .detents button+button{border-left:1px solid var(--line)}
-.detents button.sel{color:var(--ink);background:var(--panel)}
-.detents button.sel::after{content:'';position:absolute;left:25%;right:25%;bottom:6px;height:2px;background:var(--accent)}
+.detents button.sent{color:var(--accent);background:var(--panel)}
+.detents button.sent::after{content:'';position:absolute;left:25%;right:25%;bottom:6px;height:2px;background:var(--accent)}
+#askedmood{color:var(--ink);letter-spacing:.08em}
+.mark{display:inline-block;width:14px;height:14px;margin-right:6px;vertical-align:-2px;font-style:normal}
+.mark:empty{display:none}
+.mark svg{width:14px;height:14px;fill:none;stroke:var(--accent);stroke-width:2.4;stroke-linecap:square}
+.mark.new{width:auto;height:auto;font:600 9px/1 var(--mono);letter-spacing:.12em;color:var(--accent);border:1px solid var(--accent);border-radius:2px;padding:2px 3px;vertical-align:2px}
 #agentbtns{display:grid;grid-template-columns:1fr 1fr;gap:calc(var(--u)*2)}
 #agentbtns:empty{display:none}
 #agentbtns button{border-style:dashed;min-height:52px;font-size:13px}
@@ -113,7 +136,7 @@ button:active,button.down{background:var(--panel-2);box-shadow:inset 0 2px 0 rgb
 #sheet{position:fixed;inset:0;background:rgba(8,7,6,.86);display:none;align-items:flex-end;z-index:8}
 #sheet.show{display:flex}
 #panel{background:var(--ground);border-top:3px solid var(--accent);width:100%;max-width:520px;margin:0 auto;padding:calc(var(--u)*5) calc(var(--u)*4) calc(env(safe-area-inset-bottom) + calc(var(--u)*5));max-height:90vh;overflow:auto}
-#panel h2{margin:0 0 calc(var(--u)*2);font:700 22px/1.15 var(--display);font-stretch:85%}
+#panel h2{margin:0 0 calc(var(--u)*2);font:700 22px/1.15 var(--head);font-stretch:85%}
 #panel p{margin:0 0 calc(var(--u)*4);color:#d9d2c4;white-space:pre-wrap}
 #panel img{max-width:100%;border-radius:var(--r);margin-bottom:calc(var(--u)*3)}
 .btns{display:grid;gap:calc(var(--u)*2)}
@@ -128,51 +151,53 @@ textarea{width:100%;background:var(--panel);color:var(--ink);border:1px solid va
 </style>
 </head>
 <body>
+<div id="bg"></div><div id="bgdim"></div><canvas id="fx"></canvas>
 <div class="strip" id="top">
   <span class="lamp" id="rec"><i></i><span id="rectext">ON AIR</span></span>
   <span id="livestate" class="cap"><i></i><span id="livetext">connecting</span></span>
 </div>
 
 <div class="counter">
-  <div><div class="cap">Heard</div><div class="num" id="bar">BAR <span>---</span></div></div>
+  <div><div class="cap" id="heardcap">Heard</div><div class="num" id="bar">BAR <span>---</span></div></div>
   <div class="side"><div class="cap">Behind the room</div><div id="behind">--</div></div>
 </div>
 
-<div class="dial">
-  <div class="row"><span class="cap">Now</span><span id="now">nothing playing</span></div>
-  <div class="row"><span class="cap">Next</span><span id="next">--</span></div>
+<div class="dial" data-sec="now">
+  <div class="row"><span class="cap">Now</span><span><i class="mark" id="nowmark"></i><span id="now">nothing playing</span></span></div>
+  <div class="row"><span class="cap">Next</span><span><i class="mark" id="nextmark"></i><span id="next">--</span></span></div>
 </div>
 <div class="note" id="pinned" hidden></div>
 <div class="note" id="last" hidden></div>
 <button id="startset" hidden>Ask the DJ for a set</button>
 
-<div class="transport">
+<div class="transport" data-sec="listen">
   <button id="back" aria-label="back 30 seconds">-30 s</button>
   <button id="play">Listen</button>
   <button id="golive">Live</button>
 </div>
 
-<button id="talk">Hold to talk<span id="meter"></span></button>
+<button id="talk" data-sec="talk">Hold to talk<span id="meter"></span></button>
 <div class="hint cap" id="talkhint">tap once for hands-free, tap again to send</div>
 
-<div class="keys2"><button class="key" id="love" aria-label="Love this"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20 4.6 12.6a4.4 4.4 0 0 1 7.4-5.1 4.4 4.4 0 0 1 7.4 5.1Z"/></svg><span class="lbl">Love this</span></button><button class="key" id="change" aria-label="Change it up"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h4l10 10h4M3 17h4l3-3M14 10l3-3h4M18 4l3 3-3 3M18 14l3 3-3 3"/></svg><span class="lbl">Change it up</span></button></div>
+<div class="keys2" data-sec="keys"><button class="key" id="love" aria-label="Love this"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20 4.6 12.6a4.4 4.4 0 0 1 7.4-5.1 4.4 4.4 0 0 1 7.4 5.1Z"/></svg><span class="lbl">Love this</span></button><button class="key" id="change" aria-label="Change it up"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h4l10 10h4M3 17h4l3-3M14 10l3-3h4M18 4l3 3-3 3M18 14l3 3-3 3"/></svg><span class="lbl">Change it up</span></button></div>
 <div class="pad">
   <button class="key" data-tap="energy_down" aria-label="Calmer"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5v14M12 10v9M19 15v4"/></svg><span class="lbl">Calmer</span></button><button class="key" data-tap="energy_up" aria-label="More energy"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 15v4M12 10v9M19 5v14"/></svg><span class="lbl">More energy</span></button>
   <button class="key" data-tap="quieter" aria-label="Quieter"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9h4l5-4v14l-5-4H3ZM16 12h5"/></svg><span class="lbl">Quieter</span></button><button class="key" data-tap="louder" aria-label="Louder"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9h4l5-4v14l-5-4H3ZM16 12h5M18.5 9.5v5"/></svg><span class="lbl">Louder</span></button>
   <button class="key" data-tap="pause" aria-label="Pause set"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14M16 5v14"/></svg><span class="lbl">Pause set</span></button><button class="key" data-tap="resume" aria-label="Resume set"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5 19 12 7 19Z"/></svg><span class="lbl">Resume set</span></button>
 </div>
 
-<div class="section"><span class="cap">Mood for the next chapter</span>
+<div class="section" data-sec="mood"><span class="cap">Mood for the next chapter <span id="askedmood"></span></span>
   <div class="detents" id="mood"><button data-mood="calm">Calm</button><button data-mood="steady">Steady</button><button data-mood="lift">Lift</button><button data-mood="peak">Peak</button></div>
 </div>
-<div class="section" id="agentwrap" hidden><span class="cap">From the DJ, right now</span><div id="agentbtns"></div></div>
+<div class="section" id="agentwrap" hidden data-sec="dj buttons"><span class="cap">From the DJ, right now</span><div id="agentbtns"></div></div>
 
-<div class="section" id="offerbox" hidden><span class="cap">Downloads</span><div id="offers"></div></div>
-<div class="section"><span class="cap">DJ log</span><div class="log" id="feed"></div></div>
+<div class="section" id="offerbox" hidden data-sec="downloads"><span class="cap">Downloads</span><div id="offers"></div></div>
+<div class="section" id="mine" hidden data-sec="your taps"><span class="cap">What you asked for <span id="tally"></span></span><div class="log" id="taps"></div></div>
+<div class="section" data-sec="dj log"><span class="cap">DJ log</span><div class="log" id="feed"></div></div>
 
-<div class="foot">
+<div class="foot" data-sec="settings">
   <span class="cap" id="listening">no agent listening</span>
-  <span><button id="keysset">Earbud: talk</button> <button id="quality">64 kbps</button> <button id="buzzset">Buzz on</button></span>
+  <span><button id="install" hidden>Install app</button> <button id="notify" hidden>Notify off</button> <button id="clockset">Bars</button> <button id="keysset">Earbud: talk</button> <button id="quality">64 kbps</button> <button id="buzzset">Buzz on</button></span>
 </div>
 
 <div id="sheet"><div id="panel"></div></div>

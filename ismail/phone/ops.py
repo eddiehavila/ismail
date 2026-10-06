@@ -1,5 +1,6 @@
 """phone_* ops: agents drive the phone page and read what the person sends from it (server.py says how it works)."""
 import json
+import re
 import os
 import subprocess
 import sys
@@ -119,6 +120,26 @@ def phone_stop() -> str:
 
 
 @op()
+def phone_restart(why: str = 'updating', when_idle: bool = False) -> str:
+    """Restart the phone server (after a merge: it serves the new page code) without dropping the person: the page
+    is told first ("updating, back in a few seconds"), reconnects the stream as soon as the server answers, and
+    reloads itself into the new page code when it is next on screen and idle. when_idle=True restarts only when
+    nobody is on the stream (otherwise it says so and does nothing)."""
+    if _port() is None:
+        return phone_start()
+    st = _call('status', timeout=10)
+    m = re.match(r'phone server: (\d+) listening', st)
+    listening = int(m.group(1)) if m else 0
+    if when_idle and listening:
+        return f"not restarted: {listening} on the stream; try again later or without when_idle (the page reconnects)"
+    told = _call('restarting', back_in_s=5, why=why)
+    time.sleep(2.0)                                      # the page's long poll picks the notice up first
+    stopped = phone_stop()
+    started = phone_start()
+    return f"{told}; {stopped}; {started.splitlines()[0]}"
+
+
+@op()
 def phone_status() -> str:
     """Who is listening on the phone, the bar they hear and how far behind the room, the engine, the inbox, voice
     notes waiting for transcription, and what the page shows."""
@@ -126,14 +147,28 @@ def phone_status() -> str:
 
 
 @op()
-def phone_listen(who: str, since: int = None, wait: float = 25) -> str:
+def phone_listen(who: str, since: int = None, wait: float = 25, page: bool = False) -> str:
     """What the person sent from the phone, oldest first, as JSON {since, lines}: taps (love = cut a highlight,
     change = change it up now, energy_up/energy_down, louder/quieter, pause/resume, start_set), mood (calm, steady,
     lift, peak), voice (then voice_text with the words, same id), answer / exam (to phone_ask, phone_panel_show,
     phone_exam), button (phone_buttons). Every line carries heard {bar, beat, of} (what they actually heard, not the
     engine's now) and behind_s. who: your name (the page shows who is listening while you call at least every 90 s).
-    since: the last call's `since` (default: only new lines); wait: seconds to wait for one."""
-    return _call('listen', timeout=float(wait or 0) + 15, who=who, since=since, wait=wait)
+    since: the last call's `since` (default: only new lines); wait: seconds to wait for one. Every line also
+    carries room {bar, of} (the engine's bar then, there even when the page is off the stream) and now (the piece).
+    page=True also returns the page's own actions (kind 'page': open with the device, listen, stop, hidden/visible,
+    scroll to a section, download, clip play, panel open/close, note start/end); phone_timeline reads them best."""
+    return _call('listen', timeout=float(wait or 0) + 15, who=who, since=since, wait=wait, page=page)
+
+
+@op()
+def phone_timeline(minutes: float = 15, kinds: list = None, limit: int = 200) -> str:
+    """A take of the phone session: everything from the phone in the last `minutes` on one clock, oldest first, one
+    line each: the time, the bar in the room (and what the phone heard), then what happened: the page's own actions
+    (opened, on which device; Listen and Stop; hidden and back; which section they scrolled to; downloads; clips
+    played; panels), taps, moods, voice notes with their length and what they said. A line '-- <piece>' marks where
+    the piece changed. Use it to lay what they said over what they did. kinds: only these (page, tap, mood, voice,
+    voice_text, answer, exam, button)."""
+    return _call('timeline', minutes=minutes, kinds=kinds, limit=limit)
 
 
 @op()
@@ -147,10 +182,14 @@ def phone_say(text: str, speak: bool = False, pin: bool = False, buzz: bool = Fa
 
 @op()
 def phone_now(now: str = None, next: str = None, recording_why: str = None, mood: str = None,
-              sender: str = None) -> str:
+              now_mark: str = None, next_mark: str = None, sender: str = None) -> str:
     """What the page shows as now playing and next up (default: read from the engine), and why recording is on or
-    off (the page always shows whether it is). '' clears a field. mood: set the mood chip (calm, steady, lift, peak)."""
-    return _call('now', now=now, next=next, recording_why=recording_why, mood=mood, who=sender)
+    off (the page always shows whether it is). '' clears a field. mood: set the mood chip (calm, steady, lift, peak).
+    now_mark/next_mark: a small mark beside the piece, so they know what they are hearing: 'loved' (one they loved
+    before, played again), 'replay' (played earlier, back again), 'new' (just made). Set it on every chapter change;
+    without one the page shows a heart when they tapped Love this while that piece played."""
+    return _call('now', now=now, next=next, recording_why=recording_why, mood=mood, now_mark=now_mark,
+                 next_mark=next_mark, who=sender)
 
 
 @op()
@@ -210,6 +249,24 @@ def phone_buttons(buttons: list = None, sender: str = None) -> str:
     """Extra buttons on the page, as data: [{'id': 'darker', 'label': 'darker'}, ...] or plain labels; [] or none
     clears them. A tap arrives as kind 'button' {id, label, heard}."""
     return _call('buttons', buttons=buttons or [], who=sender)
+
+
+@op()
+def phone_vibe(preset: str = None, ground: str = None, ink: str = None, accent: str = None, heading: str = None,
+               image: str = None, blur: int = None, dim: float = None, effect: str = None, intensity: float = None,
+               transition_ms: int = None, reset: bool = False, menu: bool = False, sender: str = None) -> str:
+    """Set the phone page's look to fit the music, so the person feels you there (as the stage does in VR): change it
+    with the mood, on chapter changes. preset: a starting point (default, rain, calm, warm, night, peak), then any
+    part over it. ground/ink/accent: colours ('#rrggbb', 'rgb(r g b)', 'hsl(h s% l%)'); the ground stays dark, ink
+    on ground 7:1 and accent 3:1 or it is refused with what to change. heading: the face of the titles (archivo,
+    fraunces, playfair, cormorant, space grotesk, syne, unbounded, bebas, major mono). image: a picture file (a cover,
+    a Blender still, art another agent made) behind the page, blurred by `blur` px (0-40) and darkened by `dim`
+    (0.2-0.9); '' removes it. effect: none, rain, particles, pulse (breathes on the set's beat), grain, aurora, at
+    `intensity` 0-1. Changes fade over transition_ms. reset=True starts from the default skin; menu=True lists the
+    presets, faces and effects and the current vibe."""
+    return _call('vibe', preset=preset, ground=ground, ink=ink, accent=accent, heading=heading, image=image, blur=blur,
+                 dim=dim, effect=effect, intensity=intensity, transition_ms=transition_ms, reset=reset or None,
+                 menu=menu or None, who=sender)
 
 
 @op()
