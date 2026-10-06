@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### A script under `machine run` can render; a slot caps its threads (ledger:M81, ledger:M132, hq:D-16)
+
+- `machine run` hands its slot to the command it starts (`$ISMAIL_SLOT`): a script that renders or measures runs
+  those ops in the run's slot instead of being refused, or deadlocking, on a second one. That happened three times
+  on 10-05/06 (a paper harness, the DJ's salsa checks, the phone cue tones). A child's GPU step still takes the GPU
+  slot; a live engine always takes its own.
+- A slot counts jobs, not cores, so it now caps its threads everywhere: BLAS and OpenMP in its process, torch where
+  ismail loads it (the perceptual model, demucs), and a command's environment under `run` (`--threads`, 2 by default
+  for `--cpu`). One slot that ran a render, eq_match and the perceptual model on every core took the CPU to
+  88-100 % and a live set dropped 359 buffers.
+- While a set is on air, the CPU jobs beside it share half the machine's threads; a job that would pass that waits
+  and says how many it may ask for. The board shows each job's threads.
+
 ### The skill says when to offer the phone page, and how it is hosted
 
 - `references/phone.md`: when to offer it (a set plays and the person steps away: a walk, bed, another room), the
