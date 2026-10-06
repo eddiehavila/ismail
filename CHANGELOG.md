@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### The phone page shows the set's notes as they reach the ear (ledger:M160 phase 2, Nate 10-06 14:48)
+
+- `phone_vibe(react={track: reaction})`: flash, glow, burst, sparks, drops or ring on every note of that track
+  ('qrq*' matches a prefix), each fired when the phone hears its beat (the stream's delay included). The engine's new
+  `onsets` command lists the events it has placed (track, beat, level); the phone server passes them on only while
+  a look reacts to them. No audio analysis on the phone.
+
 ### The first sketches: mastered, balanced, the first one first, said plainly (ledger:M148, M150, M151 S-1..S-5)
 
 - S-1 (M148): every sketch goes through a master stage for its style (a low cut, glue, mono low end, a limiter at
