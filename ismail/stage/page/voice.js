@@ -102,6 +102,24 @@ export function initVoice(ed, hands, live) {
   // AFTER_NOTE_MS since the last one ended (they often send the next note at once). Speech and new panels wait for it.
   const AFTER_NOTE_MS = 3000;
   const talking = () => !!(note.rec || note.starting || phoneSince || performance.now() - (note.endedAt || -1e9) < AFTER_NOTE_MS);
+  // the headset's own speech engine, for when the server's voice (speakwright) is off (the user turned it off on
+  // 2026-10-05 and then heard nothing from the agents in VR). Resolves the seconds spoken; rejects when this browser
+  // has no engine or no voice, or the line does not finish
+  function browserSay(t) {
+    const S = window.speechSynthesis;
+    if (!S || !window.SpeechSynthesisUtterance) return Promise.reject(new Error('no speech engine in this browser'));
+    const voices = S.getVoices();
+    return new Promise((res, rej) => {
+      const u = new SpeechSynthesisUtterance(t), t0 = performance.now();
+      const en = voices.find((v) => /^en/i.test(v.lang) && v.localService) || voices.find((v) => /^en/i.test(v.lang));
+      if (en) u.voice = en;
+      u.rate = 1.0;
+      const giveUp = setTimeout(() => { S.cancel(); rej(new Error('the headset speech did not finish (' + voices.length + ' voices)')); }, 8000 + t.length * 120);
+      u.onend = () => { clearTimeout(giveUp); res((performance.now() - t0) / 1000); };
+      u.onerror = (e) => { clearTimeout(giveUp); rej(new Error('headset speech: ' + (e.error || 'error') + ' (' + voices.length + ' voices)')); };
+      S.speak(u);
+    });
+  }
   async function speak(text, voice) {
     sayQ.push([text, voice, Date.now()]);
     if (speaking) return;
@@ -116,6 +134,14 @@ export function initVoice(ed, hands, live) {
         const giveUp = setTimeout(() => speechAbort.abort(), 40000);          // a stuck TTS: drop the line, not the page
         const r = await fetch(`voice/say?text=${encodeURIComponent(t)}${v ? '&voice=' + encodeURIComponent(v) : ''}`, { signal: speechAbort.signal })
           .finally(() => clearTimeout(giveUp));
+        if (r.status === 502 || r.status === 503) {          // the server's voice is off: the headset says it itself
+          while ((renderer.xr.isPresenting && !head.on) || talking()) await new Promise((res) => setTimeout(res, 300));
+          EAR.incoming();
+          await new Promise((res) => setTimeout(res, 160));
+          const s = await browserSay(t);
+          live.emit('voice_spoken', { text: t.slice(0, 80), waited_s: Math.round((Date.now() - (at || Date.now())) / 1000), s: +s.toFixed(1), via: 'headset speech (server voice off)' });
+          continue;
+        }
         if (!r.ok) throw new Error('tts ' + r.status);
         const a = audio(), buf = await a.decodeAudioData(await r.arrayBuffer());
         // the user may have started talking while this line was being rendered: wait for them, check again, then play

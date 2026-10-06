@@ -142,6 +142,8 @@ nudges you, follow it.
 | a version of another piece | `project_new(derived_from=)`, and the objective in their words |
 | a job over a minute | `machine_status` first; `python -m ismail.machine run` for anything outside ismail |
 | a live set plays and the person steps away (a walk, bed, another room) | offer the phone page: `phone_start`, then give them its address (`references/phone.md`) |
+| the person is away from the desk for the day (on their phone, in VR) | everything goes through the phone page: answer on it (`phone_say`, panels), exams with `phone_exam`, and read `phone_listen` / `phone_timeline` |
+| a casual listener says "that bit at two minutes" | answer in time, not bars: lines from the phone carry `into_s`; offer bars only to someone who works in bars (`references/user-experience.md`) |
 | a live set | a runway queued ahead; a guard on `live_status` (`SILENT ON AIR`, `RUNWAY ENDED`, `THIN`) |
 | a song sounds different live | `live_parity`, then the song's `HANDOFF.md` |
 | something you built would help others | the inclusion review (`references/development.md`), then a fork and a pull request |

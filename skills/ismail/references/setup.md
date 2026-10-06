@@ -101,6 +101,13 @@ output device and the file before anything else.
   `HANDOFF.md` under "Setup". The maintainer reads every handoff, and the next person's setup gets better from
   it.
 
+### Optional: the phone page
+
+If they want to listen and talk back from their phone (`phone.md`), the phone and this computer need Tailscale,
+signed in to the same account: install it on both (the person signs in; say what they will see), then
+`phone_start` gives the address. Phones allow the microphone only on https pages, which Tailscale's address is.
+Nothing is public.
+
 ## 6. Then the first session
 
 `guide` says how the first session runs. Its first question can carry whether they play or read music ("what is
