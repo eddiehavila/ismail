@@ -15,6 +15,8 @@ def separate(path, outdir, model='htdemucs_ft'):
     import torch
     from demucs.pretrained import get_model
     from demucs.apply import apply_model
+    from . import machine
+    machine.cap_torch()                                  # the slot's threads, not every core (ledger:M132)
     m = get_model(model)
     dev = 'cuda' if torch.cuda.is_available() else 'cpu'
     m.eval().to(dev)

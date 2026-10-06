@@ -68,7 +68,8 @@ wait in a queue: taps still arrive at once, and the page tells them their note i
 Earbuds send one media key: play/pause (on Skullcandy's Dime 3, double and triple presses only change the volume
 in the bud, and a long press opens the phone's assistant). So, while a set plays and "Earbud: talk" is on:
 - a press starts a voice note (a rising tone; the music ducks) and the next press sends it (a falling tone, then a
-  short chirp when it has arrived); a note stops itself after 60 s;
+  short chirp when it has arrived). A note never cuts them off mid-sentence: it runs until their press, 30 s of
+  quiet (a note left running in a pocket) or 10 minutes (a buzz and a tone 20 s before);
 - a short note that is only a command acts as one: "stop listening" stops the stream (a press starts it again),
   "love this", "change it up", "more energy", "calmer", "louder", "quieter", "pause the set", "resume the set" arrive
   as taps with `via: 'voice'` and the note's `id`. The words also arrive as `voice_text`: act once, not twice.
@@ -77,14 +78,61 @@ in the bud, and a long press opens the phone's assistant). So, while a set plays
 
 Only `phone_listen` counts as listening on the page; watching the inbox file does not show them anyone is there.
 
+## Restarting the server
+
+After a change to the phone code, restart with `phone_restart()`, never `phone_stop` then `phone_start` by hand:
+the page is told first ("updating, back in a few seconds"), reconnects the stream as soon as the server answers,
+and loads the new page code the next time it is on screen and idle. A plain stop drops the person's stream mid-set
+(10-06: "Why'd you stop?"). `phone_restart(when_idle=True)` waits for nobody on the stream.
+
+A stream that fell behind the room (the phone's player pauses on a weak network and carries on from there) catches
+up by itself: past 15 s behind it plays 8 % faster, pitch kept, until it is within 6 s; the Live key shows how far
+behind it is.
+
+## Set the page's vibe to the music
+
+The page is part of the performance, as the stage is in VR: set its look with the music so the person feels you
+there. `phone_vibe(preset=)` starts from rain, calm, warm, night or peak (or default), then any part over it:
+ground, ink and accent colours, the face of the titles (`heading`), an art layer (`image=`: a cover, a Blender
+still, art another agent made, blurred by `blur` and darkened by `dim`) and one ambient effect (rain, particles,
+pulse on the set's beat, grain, aurora) at an `intensity`. Change it with the mood and on chapter changes, not on
+every bar; it fades over `transition_ms`. The server keeps every vibe readable on a walk (a dark ground, ink 7:1,
+accent 3:1) and refuses one that is not, saying what to change. `phone_vibe(menu=True)` lists the choices.
+
+## Bars or time
+
+Every line from the page carries `into_s` (seconds into the piece) beside the bar, and the page has a Bars/Time
+switch: in Time it reads "2:31 in" with the clock. Someone listening casually talks in time ("that bit at two
+minutes"); answer in their unit, and say bars only to someone who works in bars.
+
+## The phone session is a take
+
+Like a VR take, the page reports what they do on it, timed: opened (which device, installed or in the browser),
+Listen and Stop, hidden and back, the section they scrolled to, downloads, clips played, panels opened and closed,
+voice notes with their length and what ended them (their press, 30 s of quiet, the 10 minute limit), earbud
+presses. Every line from the page, taps and notes included, carries `room` (the engine's bar then, there even
+when the page is off the stream) and `now` (the piece). `phone_timeline(minutes=15)` lays it all on one clock with
+what they said, so you can tell what they meant by "this" or "that bit". `phone_listen` leaves the page's own
+actions out unless you pass `page=True`, so a scroll never wakes you. All of it stays on this computer
+(`~/.ismail/phone/inbox.jsonl`).
+
 ## What you can put on the page
 
 - `phone_now(now=, next=, recording_why=)`: the title, next up, and why recording is on or off. The page always
-  shows whether it is, read from the engine.
+  shows whether it is, read from the engine. On every chapter change, say what each piece is to them with
+  `now_mark=` / `next_mark=`: 'loved' (one they loved before, played again), 'replay' (played earlier, back
+  again) or 'new' (just made). A small mark sits beside it; without one, the page shows a heart when they tapped
+  Love this while that piece played.
+- What they tapped is kept: the page lists their taps and moods with the time and the piece that played, and
+  today's count (it survives a reload and a server restart). The keys are momentary: a press sends, lights SENT,
+  and the key is plain again.
+- Installing: the page installs as an app from Chrome (Install app in the footer, or Chrome's menu, Install). With
+  Notify on, what you `phone_say` while the app is in the background also arrives as a phone notification.
 - `phone_say(text)`: a caption and a toast. Use `pin=True` for the "since you left" summary when they come back
   (three lines: what changed and why). `speak=True` says it into the stream with the music ducked under it, so
-  they hear it in their pocket. Speak only to answer something they said, never unprompted. `buzz=True`
-  vibrates.
+  they hear it in their pocket. When the page is open but off the stream (it reloaded, or they use the phone as
+  a remote beside the room speakers), the words go to the page as a clip; `phone_status` shows which. Speak only
+  to answer something they said, never unprompted. `buzz=True` vibrates.
 - `phone_ask(text)`: yes or no. `phone_panel_show(title, text, image, buttons)`: anything else (the
   stage_panel_show shape). Either one with `wait=N` blocks for the answer.
 - `phone_exam(title, clips, question, chips, choices, answers_path)`: a blind exam. Label the clips blind (A, B). The
