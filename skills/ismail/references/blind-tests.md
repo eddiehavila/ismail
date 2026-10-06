@@ -35,6 +35,18 @@ exam on the phone page: it runs `exam_check` first and refuses one that is not R
 (their earbuds, a speaker) and record it with the answers, as for any device. Keep clips short and the questions
 to two or three: they answer standing, walking, or between other things.
 
+### Record the devices, every round
+
+The microphone and the listening device change what an exam measures, so the page records both (vox:r39 was lost:
+the takes went through Bluetooth earbuds' microphone, which records 16 kHz audio, and nobody knew). On a page that
+records takes, store the microphone's name with each take: after `getUserMedia`, `stream.getAudioTracks()[0].label`.
+On an answer page, prefill the listening device and let the person confirm it: in Chrome on a computer,
+`enumerateDevices()` lists `audiooutput` devices once the page has microphone permission (the `default` entry names
+the current output); Firefox lists none but offers `selectAudioOutput()`; phones rarely name it, so ask (earbuds,
+headphones, phone speaker, speaker). Listen for `devicechange`: earbuds connect mid-round. `phone_exam` does this
+itself (a "Listening on" row, remembered, with what the browser can name). `exam_check` fails classes whose top
+end differs (a band-limited mic on one side) and warns on any clip with nothing above 8 kHz.
+
 ## 1. The eye exam: lenses that change one thing
 
 Put the real sound next to lenses, versions that each change exactly ONE named, physical thing (body colour, wood ring, room, open strings, pick or bow noise, brightness, attack, vibrato, evenness). The names become the user's vocabulary for the rest of the session: "B, but more air" is an instruction you can execute. Loudness-match every clip and make clips long enough to include the release. One round of this on a bowed voice found three things no metric showed (moving vibrato, missing air, sympathetic strings).
