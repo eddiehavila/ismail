@@ -83,8 +83,9 @@ Only `phone_listen` counts as listening on the page; watching the inbox file doe
   shows whether it is, read from the engine.
 - `phone_say(text)`: a caption and a toast. Use `pin=True` for the "since you left" summary when they come back
   (three lines: what changed and why). `speak=True` says it into the stream with the music ducked under it, so
-  they hear it in their pocket. Speak only to answer something they said, never unprompted. `buzz=True`
-  vibrates.
+  they hear it in their pocket. When the page is open but off the stream (it reloaded, or they use the phone as
+  a remote beside the room speakers), the words go to the page as a clip; `phone_status` shows which. Speak only
+  to answer something they said, never unprompted. `buzz=True` vibrates.
 - `phone_ask(text)`: yes or no. `phone_panel_show(title, text, image, buttons)`: anything else (the
   stage_panel_show shape). Either one with `wait=N` blocks for the answer.
 - `phone_exam(title, clips, question, chips, choices, answers_path)`: a blind exam. Label the clips blind (A, B). The

@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### The phone page picks the set back up after a reload, and a spoken answer reaches an open page
+
+- On Nate's walk (2026-10-06) the page reloaded (the phone dropped it while locked, or it was reopened): the stream
+  stayed off, his voice notes still came in, and a spoken `phone_say` was dropped ("nobody is listening"). The page
+  now remembers it was listening (30 minutes) and reconnects by itself; when the phone wants a tap first it shows
+  Resume, buzzes and says the set is still playing, instead of retrying silently.
+- `phone_say(speak=True)` with nobody on the stream sends the words to the open page as a spoken clip; with no page
+  open it says so. `phone_status` says whether a page is open and whether it is on the stream.
+
 ### A script under `machine run` can render; a slot caps its threads (ledger:M81, ledger:M132, hq:D-16)
 
 - `machine run` hands its slot to the command it starts (`$ISMAIL_SLOT`): a script that renders or measures runs

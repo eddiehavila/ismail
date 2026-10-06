@@ -213,3 +213,24 @@ def test_a_short_note_that_is_a_command_acts_as_one(phone):
     assert any(c['type'] == 'stop_listening' for c in ph.cmds)
     page = urllib.request.urlopen(base + '/app.js', timeout=5).read().decode()
     assert "h('pause', () => { if (want && keysOn) return keyNote();" in page and 'CUES' in page
+
+
+def test_an_open_page_off_the_stream_still_hears_a_spoken_answer(phone):
+    """2026-10-06, Nate's walk: the page reloaded, the stream stayed off, voice notes still came in, and a spoken
+    phone_say was dropped ('nobody is listening'). The open page now gets the words as a clip; status says so."""
+    ph, base, _ = phone
+    import io
+    import numpy as np
+    import soundfile as sf
+    buf = io.BytesIO()
+    sf.write(buf, np.zeros(24000, dtype='float32'), 24000, format='WAV')
+    ph._tts = lambda text, voice=None: buf.getvalue()
+    assert 'no page is open' in P.phone_say('rain music coming', speak=True)
+    get(base, '/api/state?since=0&wait=0')                       # the page is open, not on the stream
+    assert 'NOT listening to the stream' in P.phone_status()
+    out = P.phone_say('rain music coming', speak=True, sender='dj')
+    assert 'spoken clip, 1.0 s' in out
+    c = [c for c in ph.cmds if c['type'] == 'say_clip'][-1]
+    assert c['text'] == 'rain music coming'
+    with urllib.request.urlopen(base + c['url'], timeout=5) as r:
+        assert r.status == 200 and len(r.read()) > 1000
