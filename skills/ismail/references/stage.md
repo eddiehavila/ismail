@@ -236,6 +236,12 @@ A person in a headset cannot see your terminal. Contact is part of the interface
   frame of a take, or a pose exported from Blender: the actor's rest is an A-pose standing at the origin, not the
   pose the scene shows); every Follow and playback then starts there, and the user's motion plays as changes from
   their pose at GO. Check it by number with `stage_actor_pose` (the hands on the bar top, the pelvis over the seat).
+  With a start pose they also rest in it whenever nothing plays on them, instead of the statue baked into the scene.
+- **Keep the headset light with load sets.** When the work moves to one group (the band), unload the others (the
+  dancers): `stage_set_define(scene, 'dancers', items=['person_couple_*'], note='the six dancers')` once, then
+  `stage_set_load(scene, 'dancers', loaded=False)`. They are not drawn, compiled or uploaded, their people neither
+  play nor rest, and a ghost box per member with the set's name stands in their place, so the room still says what
+  is in the film. The page replies with the meshes and triangles it took out; load them again before a take with them.
 - **Set up a moment in one call.** `stage_batch(scene, ops=[...])` runs several stage ops in order (seat a person,
   mark the clip, show a card): the page commands land together, and a failure stops the rest.
 - **Say who you are.** Pass `sender=` (your name as the person knows it, e.g. "crossroads film") on `stage_say` and

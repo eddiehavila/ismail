@@ -39,3 +39,53 @@ export function vec(ks, t, f, mode = 'stop') {
 
 // how far to slerp between keys i and i + 1 at u
 export const slerpK = (u, mode = 'stop') => (mode === 'smooth' ? u : ease(u));
+
+// ---- take playback between recorded samples (actors.js). The user, 2026-10-06 (voice note #20002): playback "looks
+// low frame rate and steppy"; a take recorded while the headset ran at 20 to 30 fps has about 20 samples a second,
+// and each one was held until the next. mixFrame(a, b, u, out) is the frame u (0..1) of the way from sample a to
+// sample b: numbers lerp; a pose array [x, y, z, qx, qy, qz, qw, (radius)] lerps its position and radius and nlerps
+// its quaternion the short way (unit quaternions only: other arrays of 7 or 8 numbers just lerp); objects and arrays
+// mix field by field; anything else (a gesture name, a hand that is missing in one sample) is the nearer sample's.
+// out: the previous result, written in place when its shape matches and mixFrame made it (never a recorded sample
+// passed through), so playback makes no garbage per frame on the Quest.
+const OWN = new WeakSet();                       // buffers mixFrame made: the only ones it writes into
+const own = (o) => { OWN.add(o); return o; };
+const isQ = (a) => { const n = a[3] * a[3] + a[4] * a[4] + a[5] * a[5] + a[6] * a[6]; return n > 0.81 && n < 1.21; };
+
+export function mixFrame(a, b, u, out) {
+  if (typeof a === 'number') return typeof b === 'number' ? a + (b - a) * u : (u < 0.5 ? a : b);
+  if (Array.isArray(a)) {
+    if (!Array.isArray(b) || b.length !== a.length) return u < 0.5 ? a : b;
+    const o = Array.isArray(out) && out.length === a.length && OWN.has(out) ? out : own(new Array(a.length));
+    if (a.length && typeof a[0] === 'number') {
+      for (let k = 0; k < a.length; k++) o[k] = a[k] + (b[k] - a[k]) * u;
+      if ((a.length === 7 || a.length === 8) && isQ(a) && isQ(b)) {
+        const s = a[3] * b[3] + a[4] * b[4] + a[5] * b[5] + a[6] * b[6] < 0 ? -1 : 1;
+        let n = 0;
+        for (let k = 3; k < 7; k++) { o[k] = a[k] + (s * b[k] - a[k]) * u; n += o[k] * o[k]; }
+        n = Math.sqrt(n) || 1;
+        for (let k = 3; k < 7; k++) o[k] /= n;
+      }
+      return o;
+    }
+    for (let k = 0; k < a.length; k++) o[k] = mixFrame(a[k], b[k], u, o[k]);
+    return o;
+  }
+  if (a && typeof a === 'object') {
+    if (!b || typeof b !== 'object' || Array.isArray(b)) return u < 0.5 ? a : b;
+    const o = out && typeof out === 'object' && !Array.isArray(out) && OWN.has(out) ? out : own({});
+    for (const k in a) o[k] = k in b ? mixFrame(a[k], b[k], u, o[k]) : a[k];
+    return o;
+  }
+  return u < 0.5 ? a : b;
+}
+
+// a take frame for playback: only what posing reads (t, head, the hands) is mixed; the rest (the 83-joint body) is
+// sample a's. A whole frame took 0.1 ms on the desktop, the body most of it.
+const POSED = ['t', 'head', 'left', 'right'];
+export function mixTake(a, b, u, out) {
+  const o = out && OWN.has(out) ? out : own({});
+  for (const k in a) if (!POSED.includes(k)) o[k] = a[k];
+  for (const k of POSED) if (k in a) o[k] = k in b ? mixFrame(a[k], b[k], u, o[k]) : a[k];
+  return o;
+}

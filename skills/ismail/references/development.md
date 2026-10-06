@@ -72,6 +72,9 @@ worktree (`songs/` is git-ignored), so read a song's files by their path in the 
    more heavy job on the shared machine, so run it only when CI cannot answer), a `CHANGELOG.md` entry under
    Unreleased, and the skill, README and op docstrings updated in the same commit as the behavior they describe.
    The test suite takes a CPU slot on the machine's board (`tests/conftest.py`), so it waits like any render.
+   The board follows `ISMAIL_SONGS` (`<ISMAIL_SONGS>/_machine`, or `ISMAIL_MACHINE_DIR`): a test that sets
+   `ISMAIL_SONGS` to a temporary folder gets an empty board of its own and no longer sees the shared machine, so a
+   test of the governor sets `ISMAIL_MACHINE_DIR` to its own folder on purpose and nothing else moves the board.
 5. **Stage your files and hunks only**, never `git add .` or `-a`.
 6. **The user merges.** Push the branch and open a pull request; the user reviews and merges. Push to main only when
    the user says so. A worktree stays until its pull request is merged.
