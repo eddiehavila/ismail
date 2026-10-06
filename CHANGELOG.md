@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### The live engine renders lazily and says STARVING before the underruns (ledger:M156, hq:D-30)
+
+- A clip queued more than 32 bars ahead renders nothing until it comes within 32 bars (PRELOAD_WITHIN_BARS). On
+  10-06 a 21-minute piano set queued in one call rendered every clip's first pass at once: a backlog of 10,089
+  renders and 82 underruns in 6 bars. Renders already went out earliest-needed first.
+- live_status says STARVING (the bar, the track, the seconds of render work before it against the seconds until it
+  sounds) when the line, earliest-needed first at the measured rates, cannot keep up.
+
 ### phone_route survives a restart (ledger:M157, hq:D-30)
 
 - The route is kept in the phone's state.json and loaded again when the server starts (when its folder still
