@@ -599,8 +599,18 @@ def sketch(project: str, brief: str, base: str = None, n: int = None, styles: li
         with open(os.path.join(sp, 'sketch.json'), 'w', encoding='utf8') as f:
             json.dump({'brief': brief, 'label': label, 'spec': spec, 'key': pl['key'], 'bpm': pl['bpm'],
                        'form': pl['form'], 'progression': pl['progression']}, f, indent=1)
+        prod = SK.production(spec, list(pl['parts']))             # a first impression is mixed and mastered
+        P = _load(sp)
+        P.d['master']['fx'] = prod['master']
+        P.save()
+        bus_add(sp, 'room', fx=[prod['room']])
+        for role, db in prod['sends'].items():
+            track_set(sp, role, sends={'room': db})
+        for role, fxs in prod['track_fx'].items():
+            for fx in fxs:
+                fx_add(sp, role, fx)
         render(sp)
-        _loudness_trim(sp, -16.0)
+        _loudness_trim(sp, prod['lufs'])
         render(sp, out=f"sketch_{letter}", mp3=mp3)
         lufs, peak = _lufs_peak(os.path.join(sp, 'renders', 'latest.wav'))
         f = os.path.join(sp, 'renders', f"sketch_{letter}.{'mp3' if mp3 == 'also' else 'wav'}")
@@ -612,7 +622,7 @@ def sketch(project: str, brief: str, base: str = None, n: int = None, styles: li
               f"   {pl['key']}, {pl['bpm']:g} BPM, {pl['bars']} bars (~{sec:.0f} s){form}; chords "
               f"{' '.join(pl['progression'])}" + (f", closing {pl['cadence']}" if pl.get('cadence') else '') +
               (f"; feel {pl['feel']}" if pl['feel'] else '') + ('; soft' if pl.get('soft') else ''),
-              f"   {lufs:.1f} LUFS, peak {peak:.1f} dBFS; listen: {f}"]
+              f"   {lufs:.1f} LUFS, peak {peak:.1f} dBFS; {prod['why']}; listen: {f}"]
     L.append("NEXT: play them to the person one at a time (open each file), ask which is closest or what each is "
              "missing. Their correction is the next round: sketch(project, '<their words>', base='<letter>'). "
              f"sketch_keep(project, '<letter>') makes the pick the song (it is the song's example); until then "

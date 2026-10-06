@@ -113,6 +113,40 @@ SECTIONS = {'intro': 'intro', 'verse': 'groove', 'groove': 'groove', 'main': 'gr
 ROLE_ORDER = ['drums', 'sub', 'bass', 'chords', 'keys', 'harmony', 'pad', 'counter', 'melody', 'fx']
 
 
+# A sketch is a first impression, so it is mastered and placed in a room (moves:M021 exam r1, Nate 10-06: "is this
+# mastered?"; "sounds like it's on a basic midi piano ... not enough effects engineering"). Per feel: the loudness the
+# genre is mastered to (references/mastering.md), the room's length, and whether the keys get a little tape warmth.
+MASTER = {   # feel -> (target LUFS, room rt60 s, keys warmth)
+    'break': (-12.0, 1.2, True), 'four': (-9.5, 0.9, False), 'jazz': (-14.0, 1.4, True), 'rock': (-11.0, 1.0, True),
+    'classical': (-17.0, 2.4, False), None: (-16.0, 1.8, False)}
+ROOM_SEND = {'keys': -12.0, 'chords': -14.0, 'harmony': -12.0, 'pad': -10.0, 'counter': -12.0, 'melody': -13.0,
+             'drums': -24.0}
+
+
+def production(spec, roles):
+    """The mix and master a sketch gets: {lufs, master (fx chain), room (the bus's reverb), sends {role: dB},
+    track_fx {role: [fx]}, why}."""
+    feel = spec.get('feel')
+    lufs, rt60, warm = MASTER.get(feel, MASTER[None])
+    if spec.get('soft'):
+        lufs -= 2.0
+    master = [{'type': 'eq', 'bands': [{'type': 'lowcut', 'freq': 28}]},
+              {'type': 'compressor', 'threshold_db': -20.0, 'ratio': 1.6, 'attack_ms': 25.0, 'release_ms': 150.0,
+               'knee_db': 6.0},                                          # glue: 1-3 dB on the loud bars
+              {'type': 'width', 'width': 1.05, 'mono_below_hz': 130},    # the low end mono (phones, clubs)
+              {'type': 'limiter', 'ceiling_db': -1.0, 'gain_db': 0.0}]   # -1 dB: mp3 encoding overshoots
+    room = {'type': 'hall', 'rt60': rt60, 'predelay_ms': 18.0, 'mix': 1.0, 'hp_hz': 180.0, 'high_mult': 0.5}
+    sends = {r: db for r, db in ROOM_SEND.items() if r in roles}
+    track_fx = {}
+    if warm:
+        for r in ('keys', 'chords', 'harmony'):
+            if r in roles:
+                track_fx[r] = [{'type': 'distortion', 'mode': 'tanh', 'drive_db': 5.0, 'mix': 0.22}]
+    why = (f"mastered to {lufs:g} LUFS for {feel or 'its style'} (glue, mono below 130 Hz, limiter at -1 dB), "
+           f"a {rt60:g} s room on " + ', '.join(sends) + (', tape warmth on the keys' if track_fx else ''))
+    return {'lufs': lufs, 'master': master, 'room': room, 'sends': sends, 'track_fx': track_fx, 'why': why}
+
+
 class SketchError(ValueError):
     pass
 
