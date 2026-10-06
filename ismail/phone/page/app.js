@@ -445,7 +445,9 @@ function applyVibe(v) {
   if (!v || !v.css) return;
   const k = JSON.stringify(v); if (k === vibeKey) return; vibeKey = k;
   const root = document.documentElement.style;
-  root.setProperty('--vt', (v.transition_ms || 0) + 'ms');
+  const bpm = (state.engine && state.engine.bpm) || 120;
+  const ms = v.ramp_beats ? v.ramp_beats * 60000 / bpm : (v.transition_ms || 0);
+  root.setProperty('--vt', Math.round(ms) + 'ms');
   Object.entries(v.css).forEach(([n, val]) => root.setProperty(n, val));
   if (v.font_css && !fontsLoaded.has(v.font_css)) {
     fontsLoaded.add(v.font_css); const l = document.createElement('link'); l.rel = 'stylesheet'; l.href = v.font_css; document.head.appendChild(l);
@@ -454,65 +456,114 @@ function applyVibe(v) {
   const bg = $('bg');
   if (v.image) { bg.style.backgroundImage = `url("${v.image}")`; bg.style.filter = `blur(${v.blur}px)`; bg.classList.add('on'); $('bgdim').style.opacity = v.dim; }
   else { bg.classList.remove('on'); $('bgdim').style.opacity = 0; }
-  fx.set(v.effect, v.intensity, v.css['--accent'], v.css['--ink']);
+  fx.set(v.layers || [{ effect: v.effect, intensity: v.intensity, speed: 1, density: 0.5, size: 1, angle: 8, opacity: 1 }],
+    v.css['--accent'], v.css['--ink'], ms, v.hue_drift);
 }
-// one ambient effect on a canvas behind the page; still while hidden, and for anyone who asked for less motion
+// the background: up to three effect layers on one canvas, behind the page (ledger:M160); a new look crossfades in
+// over its transition; still while hidden, and for anyone who asked for less motion
 const fx = (() => {
   const cv = $('fx'), cx = cv.getContext('2d');
-  let kind = 'none', amt = 0.5, acc = '#ffffff', ink = '#ffffff', raf = 0, last = 0, parts = [], W = 0, H = 0, dpr = 1;
+  let layers = [], old = [], fadeAt = 0, fadeMs = 1, drift = 0, raf = 0, last = 0, W = 0, H = 0, dpr = 1;
+  let acc = '#ffffff', ink = '#ffffff';
   const still = matchMedia('(prefers-reduced-motion: reduce)');
+  const COUNT = { rain: 280, particles: 140, grain: 1, aurora: 3, pulse: 1, none: 0 };
   function size() {
     dpr = Math.min(2, window.devicePixelRatio || 1); W = window.innerWidth; H = window.innerHeight;
     cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); cv.style.width = W + 'px'; cv.style.height = H + 'px';
   }
-  function seed() {
-    const n = Math.round((kind === 'rain' ? 140 : kind === 'particles' ? 70 : 3) * (0.3 + amt));
-    parts = Array.from({ length: n }, () => ({ x: Math.random() * W, y: Math.random() * H, v: 0.4 + Math.random(), r: Math.random() }));
+  function seed(L) {
+    const n = L.effect === 'aurora' ? 3 : Math.round((COUNT[L.effect] || 0) * (0.1 + 0.9 * L.density) * (0.4 + 0.6 * L.intensity));
+    L.parts = Array.from({ length: n }, () => ({ x: Math.random() * W, y: Math.random() * H, v: 0.4 + Math.random(), r: Math.random() }));
+  }
+  function draw(L, t, dt, k) {
+    const a = (0.15 + L.intensity * 0.5) * L.opacity * k;
+    if (a <= 0.001) return;
+    const c1 = L.color || (L.effect === 'rain' || L.effect === 'grain' ? ink : acc), c2 = L.color2 || ink;
+    cx.globalCompositeOperation = L.op || 'source-over';
+    if (L.effect === 'rain') {
+      const sl = Math.tan(L.angle * Math.PI / 180), len = (14 + 8) * L.size, sp = (500 + 500) * L.speed;
+      cx.strokeStyle = c1; cx.lineWidth = Math.max(0.5, L.size); cx.globalAlpha = a * 0.5; cx.beginPath();
+      for (const p of L.parts) {
+        const v = (0.5 + p.v * 0.5) * sp;
+        p.y += v * dt; p.x += v * sl * dt;
+        if (p.y > H) { p.y = -20; p.x = Math.random() * (W + H * Math.abs(sl)) - (sl > 0 ? H * sl : 0); }
+        cx.moveTo(p.x, p.y); cx.lineTo(p.x - len * sl * (0.6 + p.v * 0.4), p.y - len * (0.6 + p.v * 0.4));
+      }
+      cx.stroke();
+    } else if (L.effect === 'particles') {
+      cx.fillStyle = c1;
+      for (const p of L.parts) {
+        p.y -= p.v * 8 * L.speed * dt; p.x += Math.sin(t / 3000 * L.speed + p.r * 6) * 6 * L.speed * dt;
+        if (p.y < -4) { p.y = H + 4; p.x = Math.random() * W; }
+        cx.globalAlpha = a * (0.4 + 0.6 * Math.abs(Math.sin(t / 900 * L.speed + p.r * 9)));
+        cx.beginPath(); cx.arc(p.x, p.y, (1 + p.r * 1.6) * L.size, 0, 6.283); cx.fill();
+      }
+    } else if (L.effect === 'pulse') {
+      const bpm = (state.engine && state.engine.bpm) || 120, b = heardBeat();
+      const ph = (((b != null ? b : (t / 1000) * bpm / 60) / Math.max(0.25, L.speed)) % 1 + 1) % 1;
+      const e = Math.exp(-ph * 5), g = cx.createRadialGradient(W / 2, H + 40, 10, W / 2, H + 40, H * (0.55 + 0.25 * e) * L.size);
+      g.addColorStop(0, c1); g.addColorStop(1, 'transparent'); cx.globalAlpha = a * (0.25 + 0.75 * e); cx.fillStyle = g; cx.fillRect(0, 0, W, H);
+    } else if (L.effect === 'grain') {
+      cx.fillStyle = c1; cx.globalAlpha = a * 0.35;
+      const n = 1800 * (0.1 + 0.9 * L.density), sz = Math.max(1, L.size);
+      for (let i = 0; i < n; i++) cx.fillRect(Math.random() * W, Math.random() * H, sz, sz);
+    } else if (L.effect === 'aurora') {
+      L.parts.forEach((p, i) => {
+        const sp = L.speed, x = W * (0.5 + 0.4 * Math.sin(t * sp / (9000 + i * 2300) + p.r * 6)), y = H * (0.3 + 0.3 * Math.cos(t * sp / (11000 + i * 1700) + p.r * 4));
+        const g = cx.createRadialGradient(x, y, 0, x, y, Math.max(W, H) * 0.6 * L.size); g.addColorStop(0, i === 1 ? c2 : c1); g.addColorStop(1, 'transparent');
+        cx.globalAlpha = a * (i === 1 ? 0.12 : 0.3) * Math.min(1.6, 0.4 + 1.2 * L.density); cx.fillStyle = g; cx.fillRect(0, 0, W, H);
+      });
+    }
   }
   function frame(t) {
     raf = 0;
-    if (document.visibilityState !== 'visible' || kind === 'none') return;
+    if (document.visibilityState !== 'visible' || !(layers.length || old.length)) return;
     raf = requestAnimationFrame(frame);
     if (t - last < 33) return;                                       // about 30 frames a second is plenty
     const dt = Math.min(0.1, (t - last) / 1000); last = t;
-    cx.setTransform(dpr, 0, 0, dpr, 0, 0); cx.clearRect(0, 0, W, H);
-    const a = 0.15 + amt * 0.5;
-    if (kind === 'rain') {
-      cx.strokeStyle = ink; cx.lineWidth = 1; cx.globalAlpha = a * 0.5; cx.beginPath();
-      for (const p of parts) { p.y += (500 + p.v * 500) * dt; p.x += 60 * dt; if (p.y > H) { p.y = -20; p.x = Math.random() * W; } cx.moveTo(p.x, p.y); cx.lineTo(p.x - 3, p.y - 14 - p.v * 8); }
-      cx.stroke();
-    } else if (kind === 'particles') {
-      cx.fillStyle = acc;
-      for (const p of parts) { p.y -= p.v * 8 * dt; p.x += Math.sin(t / 3000 + p.r * 6) * 6 * dt; if (p.y < -4) { p.y = H + 4; p.x = Math.random() * W; }
-        cx.globalAlpha = a * (0.4 + 0.6 * Math.abs(Math.sin(t / 900 + p.r * 9))); cx.beginPath(); cx.arc(p.x, p.y, 1 + p.r * 1.6, 0, 6.283); cx.fill(); }
-    } else if (kind === 'pulse') {
-      const bpm = (state.engine && state.engine.bpm) || 120, ph = ((t / 1000) * bpm / 60) % 1;
-      const k = Math.exp(-ph * 5), g = cx.createRadialGradient(W / 2, H + 40, 10, W / 2, H + 40, H * (0.55 + 0.25 * k));
-      g.addColorStop(0, acc); g.addColorStop(1, 'transparent'); cx.globalAlpha = a * (0.25 + 0.75 * k); cx.fillStyle = g; cx.fillRect(0, 0, W, H);
-    } else if (kind === 'grain') {
-      cx.fillStyle = ink; cx.globalAlpha = a * 0.35;
-      for (let i = 0; i < 900 * (0.3 + amt); i++) cx.fillRect(Math.random() * W, Math.random() * H, 1, 1);
-    } else if (kind === 'aurora') {
-      parts.forEach((p, i) => {
-        const x = W * (0.5 + 0.4 * Math.sin(t / (9000 + i * 2300) + p.r * 6)), y = H * (0.3 + 0.3 * Math.cos(t / (11000 + i * 1700) + p.r * 4));
-        const g = cx.createRadialGradient(x, y, 0, x, y, Math.max(W, H) * 0.6); g.addColorStop(0, i === 1 ? ink : acc); g.addColorStop(1, 'transparent');
-        cx.globalAlpha = a * (i === 1 ? 0.12 : 0.3); cx.fillStyle = g; cx.fillRect(0, 0, W, H);
-      });
-    }
-    cx.globalAlpha = 1;
+    cx.setTransform(dpr, 0, 0, dpr, 0, 0); cx.globalCompositeOperation = 'source-over'; cx.clearRect(0, 0, W, H);
+    const k = Math.min(1, (performance.now() - fadeAt) / fadeMs);
+    if (k >= 1) old = [];
+    for (const L of old) draw(L, t, dt, 1 - k);
+    for (const L of layers) draw(L, t, dt, k);
+    cx.globalAlpha = 1; cx.globalCompositeOperation = 'source-over';
+    cv.style.filter = drift ? `hue-rotate(${(drift * t / 60000) % 360}deg)` : '';
   }
-  function go() { if (!raf && kind !== 'none' && !still.matches && document.visibilityState === 'visible') raf = requestAnimationFrame(frame); }
-  window.addEventListener('resize', () => { size(); seed(); });
+  function go() { if (!raf && (layers.length || old.length) && !still.matches && document.visibilityState === 'visible') raf = requestAnimationFrame(frame); }
+  window.addEventListener('resize', () => { size(); layers.forEach(seed); });
   document.addEventListener('visibilitychange', go);
   return {
-    set(k, i, a, n) {
-      kind = k || 'none'; amt = i == null ? 0.5 : i; acc = a || acc; ink = n || ink; size(); seed();
-      if (kind === 'none' || still.matches) { if (raf) cancelAnimationFrame(raf); raf = 0; cx.clearRect(0, 0, cv.width, cv.height); return; }
+    set(ls, a, n, ms, hue) {
+      acc = a || acc; ink = n || ink; drift = hue || 0; size();
+      const next = (ls || []).filter((L) => L && L.effect && L.effect !== 'none').map((L) => Object.assign({}, L));
+      next.forEach(seed);
+      old = layers; layers = next; fadeAt = performance.now(); fadeMs = Math.max(1, ms || 1);
+      if (still.matches || !(layers.length || old.length)) { if (raf) cancelAnimationFrame(raf); raf = 0; cx.clearRect(0, 0, cv.width, cv.height); return; }
       go();
     },
-    get kind() { return kind; },
+    get kind() { return layers.map((L) => L.effect).join('+') || 'none'; },
+    get layers() { return layers; },
   };
 })();
+
+// where the phone is in the set, in beats, ticking between polls: what they hear when on the stream, else the room
+function heardBeat() {
+  const h = state.heard || {}, r = state.room || {}, bpm = (state.engine && state.engine.bpm) || 0;
+  const dt = ((Date.now() - polledAt) / 1000) * bpm / 60;
+  if (want && h.beat != null) return h.beat + dt;
+  if (r.beat != null) return r.beat + dt;
+  return null;
+}
+// scheduled looks (phone_vibe at='bar:N'): each lands on its bar as this phone hears it; the server folds a move
+// into the standing vibe a few bars later, so this only has to be right at the moment
+let movesLocal = null;
+function vibeNow() {
+  const moves = movesLocal || state.vibe_moves || [], b = heardBeat(), bpb = (state.engine && state.engine.bpb) || 4;
+  let v = state.vibe;
+  if (b != null) for (const m of moves) if (b >= (m.at_bar - 1) * bpb - 0.02) v = Object.assign({}, m.vibe, { ramp_beats: m.ramp_beats });
+  return v;
+}
+setInterval(() => { if (state.vibe && document.visibilityState === 'visible') applyVibe(vibeNow()); }, 50);
 
 const feedItems = [];
 function addFeed(it) { feedItems.unshift(it); feedItems.splice(12); renderFeed(); }
@@ -607,7 +658,7 @@ function render() {
   polledAt = Date.now();
   if (clockMode) showInto();
   else { $('heardcap').textContent = 'Heard'; $('bar').innerHTML = m ? `BAR ${m[1]}<span>.${esc(Math.floor(+(m[2] || 1)))}</span>` : 'BAR <span>---</span>'; }
-  applyVibe(state.vibe); showPos();
+  movesLocal = null; applyVibe(vibeNow()); showPos();
   SOUNDS = state.sounds || {};
   if (e.now && render.now !== undefined && e.now !== render.now) sound('chapter');   // not on the first look
   render.now = e.now || null;
@@ -637,6 +688,8 @@ function render() {
 }
 function onCmd(c) {
   if (c.type === 'sounds') SOUNDS = c.sounds || {};
+  else if (c.type === 'vibe_moves') { movesLocal = c.moves || []; applyVibe(vibeNow()); }
+  else if (c.type === 'vibe') { state.vibe = c.vibe; applyVibe(vibeNow()); }
   else if (c.type === 'caption') { sound('message'); toast(c.text); if (c.buzz) buzz([150, 80, 150]); notifyBg(c.who || 'ismail live', c.text); }
   else if (c.type === 'buzz') buzz(c.pattern);
   else if (c.type === 'restarting') { restarting = Date.now(); toast('updating, back in a few seconds'); }

@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### The phone page's background: layers, looks on the bar, scenes (ledger:M160 phase 1, Nate 10-06)
+
+- `phone_vibe(layers=[...])`: up to three effects at once, each with speed, density, size, angle, opacity, colours
+  and a blend mode; `hue_drift` turns the colours over time. New looks crossfade in.
+- `phone_vibe(at='bar:N', ramp_beats=)`: a look lands on the bar the phone hears (the page applies it on its own
+  stream clock; the server folds it into the standing vibe 8 bars later), and repeated calls build a list of moves.
+- `save=` and `scene=` keep and recall named looks. The state carries `room` (the engine's bar) for a page that is
+  not on the stream.
+
 ### phone_sounds: the page plays sounds an agent made, one per event (Nate, 10-06)
 
 - `phone_sounds(event, path, gain_db)` attaches a short sound (wav, ogg or mp3, at most 5 s and 1 MB) to an event:

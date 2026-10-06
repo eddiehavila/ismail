@@ -113,6 +113,14 @@ pulse on the set's beat, grain, aurora) at an `intensity`. Change it with the mo
 every bar; it fades over `transition_ms`. The server keeps every vibe readable on a walk (a dark ground, ink 7:1,
 accent 3:1) and refuses one that is not, saying what to change. `phone_vibe(menu=True)` lists the choices.
 
+For more than one effect, give `layers`: up to three, drawn in order, each with its own `speed`, `density`, `size`,
+`angle` (rain's slant), `opacity`, `color`/`color2` and `blend` (normal, add, screen, multiply, overlay), e.g.
+`layers=[{'effect': 'aurora', 'speed': 0.5}, {'effect': 'rain', 'density': 0.9, 'angle': 25, 'blend': 'add'}]`;
+`hue_drift` turns the colours a few degrees a minute. Land a look on the music: `at='bar:65'` puts it on bar 65 as
+the phone hears it (the stream's delay included), `ramp_beats=` fades into it over that many beats, and each call
+with `at=` adds a move after the last one, so a drop flashes on its downbeat. `cancel_moves=True` drops them. Keep a
+look for a chapter with `save='gnawa_drop'` and bring it back with `scene='gnawa_drop'`.
+
 ## Bars or time
 
 Every line from the page carries `into_s` (seconds into the piece) beside the bar, and the page has a Bars/Time
