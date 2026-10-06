@@ -1495,7 +1495,11 @@ def render(project: str, bars: list = None, tracks: list = None, stems: bool = F
             write_mp3(os.path.join(rd, 'latest.wav'), os.path.join(rd, name))
         except RuntimeError as e:
             raise OpError(f"render finished (renders/latest.wav) but the mp3 failed: {e}")
-        mp3_note = f" + renders/{name}"
+        from .tags import tag_mp3
+        song = P.d.get('name') or os.path.basename(P.root)
+        tag_mp3(os.path.join(rd, name), title=song if not out or out == 'latest' else f"{song} ({out})",
+                artist=P.d.get('artist'), album=P.d.get('album') or song)
+        mp3_note = f" + renders/{name} (tagged: {song}, made with ismail)"
     if stems:
         sd = os.path.join(rd, 'stems')
         os.makedirs(sd, exist_ok=True)

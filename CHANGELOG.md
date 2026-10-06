@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Every mp3 carries ismail; downloads have names; the piece's position stays on screen (Nate, 10-06)
+
+- `ismail/tags.py`: ID3 tags on every mp3 ismail writes (title, artist, album, date, encoder, the GitHub link as a URL
+  frame and in the comment: "Made with ismail (https://github.com/newsbubbles/ismail)"). Nate: "very important for
+  provenance whenever we're shipping out MP3s". `render(mp3=)` tags with the song's name; `phone_offer` sends a
+  tagged copy with a readable name from its label (their own file is never changed). mutagen is a dependency.
+- The Download key no longer runs off the right edge of a phone.
+- `phone_now(length=, sections=, into=)`: the page keeps a position line on screen (elapsed / length, the section,
+  the next one), in time or bars. Nate: "something that's always on screen ... that shows where we are in the song".
+- When the playing piece began survives a server restart (ledger:M139: lines after a restart said 0:00 into it).
+
 ### Takes keep what was said while recording
 
 - A take's audio is transcribed as it lands (`takes/<id>/voice.json`, a `take_voice` event), with word times on the
