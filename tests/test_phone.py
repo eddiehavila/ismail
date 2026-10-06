@@ -212,4 +212,142 @@ def test_a_short_note_that_is_a_command_acts_as_one(phone):
     assert lines[0]['via'] == 'voice' and lines[0]['id'] == 'v1' and lines[0]['heard']['of'] == 'bar 9'
     assert any(c['type'] == 'stop_listening' for c in ph.cmds)
     page = urllib.request.urlopen(base + '/app.js', timeout=5).read().decode()
-    assert "h('pause', () => { if (want && keysOn) return keyNote();" in page and 'CUES' in page
+    assert "if (want && keysOn) return keyNote();" in page and "h('pause'" in page and 'CUES' in page
+
+
+def test_an_open_page_off_the_stream_still_hears_a_spoken_answer(phone):
+    """2026-10-06, Nate's walk: the page reloaded, the stream stayed off, voice notes still came in, and a spoken
+    phone_say was dropped ('nobody is listening'). The open page now gets the words as a clip; status says so."""
+    ph, base, _ = phone
+    import io
+    import numpy as np
+    import soundfile as sf
+    buf = io.BytesIO()
+    sf.write(buf, np.zeros(24000, dtype='float32'), 24000, format='WAV')
+    ph._tts = lambda text, voice=None: buf.getvalue()
+    assert 'no page is open' in P.phone_say('rain music coming', speak=True)
+    get(base, '/api/state?since=0&wait=0')                       # the page is open, not on the stream
+    assert 'NOT listening to the stream' in P.phone_status()
+    out = P.phone_say('rain music coming', speak=True, sender='dj')
+    assert 'spoken clip, 1.0 s' in out
+    c = [c for c in ph.cmds if c['type'] == 'say_clip'][-1]
+    assert c['text'] == 'rain music coming'
+    with urllib.request.urlopen(base + c['url'], timeout=5) as r:
+        assert r.status == 200 and len(r.read()) > 1000
+
+
+def test_what_they_loved_is_kept_and_marks_the_piece_when_it_returns(phone):
+    """Nate 10-06: keys stay pressed and nothing shows what he asked for; and a small mark beside now/next for a piece
+    he loved before, one played again, or one just made."""
+    ph, base, _ = phone
+    P.phone_now(now='chapter 3: rain piano', next='chapter 4: dub')
+    post(base, '/api/tap', {'what': 'love'})
+    post(base, '/api/tap', {'what': 'mood', 'mood': 'lift'})
+    s = get(base, '/api/state?since=0&wait=0')
+    assert [t['what'] for t in s['taps']] == ['mood', 'love'] and s['taps'][1]['now'] == 'chapter 3: rain piano'
+    assert s['tally'] == {'love': 1, 'mood': 1} and s['asked_mood']['mood'] == 'lift'
+    assert s['engine']['now_mark'] == 'loved' and s['engine']['next_mark'] is None     # a heart without the DJ saying
+    out = P.phone_now(now='chapter 5: new strings', now_mark='new', next_mark='replay')
+    assert "(new)" in out and "(replay)" in out
+    s = get(base, '/api/state?since=0&wait=0')
+    assert s['engine']['now_mark'] == 'new' and s['engine']['next_mark'] == 'replay'
+    P.phone_now(now='chapter 3: rain piano')
+    assert get(base, '/api/state?since=0&wait=0')['engine']['now_mark'] == 'loved'   # it came back
+    with pytest.raises(Exception, match='one of'):
+        P.phone_now(now_mark='great')
+    assert ph._recent_taps()[-1]['what'] == 'mood'                                      # a restart still has them
+    for name in ('icon-192.png', 'icon-512.png', 'icon-maskable.png', 'apple-touch-icon.png'):
+        with urllib.request.urlopen(base + '/' + name, timeout=10) as r:
+            assert r.read()[:4] == b'\x89PNG'
+
+
+def test_the_phone_session_is_a_take_on_one_clock(phone):
+    """Nate 10-06 08:16: 'can you see when I download stuff? where I'm scrolling? ... like a VR take, but for the
+    mobile interface ... do you know if I'm on my phone?' The page reports its actions, timed; phone_timeline lays
+    them over the voice notes with the bar playing in the room."""
+    ph, base, _ = phone
+    P.phone_now(now='chapter 3: rain piano')
+    ph.room = lambda age_s=0.0: {'beat': 400.0 - age_s * 2, 'bar': 101, 'of': 'bar 101'}
+    r = post(base, '/api/events', {'sid': None, 'events': [
+        {'what': 'open', 'mobile': True, 'app': True, 'w': 412, 'h': 915, 'age_ms': 9000},
+        {'what': 'scroll', 'to': 'downloads', 'y': 1200, 'age_ms': 4000},
+        {'what': 'download', 'file': 'take3.wav', 'age_ms': 3000},
+        {'what': 'Bad-Name', 'age_ms': 0},
+        {'what': 'note_end', 'dur': 72.5, 'by': 'quiet', 'sent': True, 'nested': {'x': 1}}]})
+    assert r['n'] == 4
+    rows = json.loads(P.phone_listen('dj', since=0, wait=0, page=True))['lines']
+    pg = [x for x in rows if x['kind'] == 'page']
+    assert [x['what'] for x in pg] == ['open', 'scroll', 'download', 'note_end']
+    assert pg[0]['mobile'] is True and 'ua' in pg[0] and pg[0]['room']['of'] == 'bar 101'
+    assert pg[0]['ts'] < pg[3]['ts'] and 'nested' not in pg[3] and pg[1]['now'] == 'chapter 3: rain piano'
+    assert not [x for x in json.loads(P.phone_listen('dj', since=0, wait=0))['lines'] if x['kind'] == 'page']
+    req = urllib.request.Request(base + '/api/voice?sid=&t=&dur=72.5&end=quiet', data=b'\x1a' * 2000,
+                                 headers={'Content-Type': 'audio/webm;codecs=opus'})
+    urllib.request.urlopen(req, timeout=5).read()
+    tl = P.phone_timeline(minutes=5)
+    assert '-- chapter 3: rain piano' in tl and 'download file=take3.wav' in tl and 'scroll to=downloads' in tl
+    assert 'voice note 72.5 s, ended by quiet' in tl and 'bar 101' in tl
+
+
+def test_an_open_panel_and_its_files_survive_a_restart(phone, tmp_path):
+    """10-06: a server restart (a merge) dropped an unanswered panel Nate had not read yet."""
+    ph, base, _ = phone
+    img = tmp_path / 'cover.png'
+    img.write_bytes(b'\x89PNG' + b'0' * 100)
+    P.phone_panel_show(panel_id='visibility', title='What the agents can see', text='...', image=str(img))
+    saved = json.loads((S.HOME / 'state.json').read_text(encoding='utf8'))
+    assert [x['id'] for x in saved['panels']] == ['visibility']
+    tok = saved['panels'][0]['image'].split('/')[-1]
+    assert saved['files'][tok].endswith('cover.png')
+
+
+def test_an_agent_sets_the_pages_vibe_and_it_stays_readable(phone, tmp_path):
+    """Nate 10-06 08:18: 'change the colors ... how the headers look ... song covers in the background, blurred
+    ... JavaScript effects ... I feel like you're there'. A vibe is data, checked by the server."""
+    ph, base, _ = phone
+    assert 'presets: default, rain' in P.phone_vibe(menu=True)
+    out = P.phone_vibe(preset='rain')
+    assert 'effect rain' in out and 'heading fraunces' in out
+    v = get(base, '/api/state?since=0&wait=0')['vibe']
+    assert v['css']['--ground'] == '#0b0f14' and 'Fraunces' in v['font_css'] and v['css']['--head'].startswith("'Fraunces'")
+    cover = tmp_path / 'cover.jpg'
+    cover.write_bytes(b'\xff\xd8' + b'0' * 200)
+    P.phone_vibe(image=str(cover), blur=20, accent='#ff8844', effect='pulse')
+    v = get(base, '/api/state?since=0&wait=0')['vibe']
+    assert v['image'].startswith('/files/') and v['blur'] == 20 and v['effect'] == 'pulse' and v['heading'] == 'fraunces'
+    with urllib.request.urlopen(base + v['image'], timeout=5) as r:
+        assert r.read()[:2] == b'\xff\xd8'
+    for bad, why in ((dict(ground='#f0f0f0'), 'light'), (dict(ink='#333333'), '7:1'), (dict(accent='#202020'), '3:1'),
+                     (dict(heading='comic sans'), 'one of'), (dict(effect='fire'), 'one of'), (dict(preset='x'), 'one of')):
+        with pytest.raises(Exception, match=why):
+            P.phone_vibe(**bad)
+    assert get(base, '/api/state?since=0&wait=0')['vibe']['effect'] == 'pulse'        # a refusal changes nothing
+    assert 'no art' in P.phone_vibe(image='', reset=True)
+    assert any(c['type'] == 'vibe' for c in ph.cmds)
+    saved = json.loads((S.HOME / 'state.json').read_text(encoding='utf8'))
+    assert saved['vibe']['effect'] == 'none'
+
+
+def test_time_into_the_piece_rides_with_every_line(phone):
+    """Nate 10-06 08:24: bars are one way; a casual listener talks in time ('2:31 into it')."""
+    ph, base, _ = phone
+    P.phone_now(now='chapter 7: plume house')
+    ph.piece = ('chapter 7: plume house', time.time() - 151)
+    post(base, '/api/tap', {'what': 'love'})
+    s = get(base, '/api/state?since=0&wait=0')
+    assert 150 <= s['into_s'] <= 155 and len(s['clock']) == 8
+    assert 150 <= s['taps'][0]['into_s'] <= 155
+    assert '2:3' in P.phone_timeline(minutes=5)
+
+
+def test_a_restart_is_announced_and_the_page_can_tell_it_happened(phone):
+    """10-06 08:38: a restart after a merge dropped Nate's stream mid-set ("Why'd you stop?"), and a page whose
+    command count was past the new server's missed every command after it. The page is told first, and sees the
+    boot and the page build change."""
+    ph, base, _ = phone
+    s = get(base, '/api/state?since=0&wait=0')
+    assert s['boot'] == S.BOOT and len(s['build']) == 10
+    assert 'told the page' in post(base, '/agent', {'op': 'restarting', 'args': {'back_in_s': 5}})['result']
+    c = [c for c in ph.cmds if c['type'] == 'restarting'][-1]
+    assert c['back_in_s'] == 5.0
+    assert S.page_build() == S.BUILD

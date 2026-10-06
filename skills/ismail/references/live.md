@@ -414,7 +414,11 @@ lanes on a performer), tempo changes inside a run, placed audio clips and the ma
 
 While your engine is on the board, the governor holds GPU jobs and Blender renders until the set ends (Nate's
 temporary rule after two real dropouts, hq:D-11; `python -m ismail.machine on-air` shows the policy). Audio
-renders and other CPU work still run beside you, so keep your engine at High priority and watch underruns.
+renders and other CPU work still run beside you, sharing half the machine's threads (a job that asks for more
+waits; ledger:M132, after a 359-underrun dropout from one slot's render plus the perceptual model on every core).
+Keep your engine at High priority and watch underruns. Your own checks during a set: run them as
+`python -m ismail.machine run --cpu --threads 2 -- python check.py`; the renders and comparisons inside it use the
+run's slot and its threads.
 
 ## Away from the computer
 
@@ -422,3 +426,9 @@ Offer the phone page whenever a set is playing and the person is about to leave 
 kitchen, the car. Say it in one line: "Want it on your phone? You can talk to me from the earbuds and tap feedback
 without unlocking." Then `phone_start` and give them the address. `references/phone.md` covers the rest: reading
 their taps and voice notes by the bar they heard, answering on the page, and the hosting.
+
+When they listen on the phone, the page is part of the show. On every chapter change: `phone_now(now=, next=,
+now_mark=, next_mark=)` ('loved' for a piece they loved before, 'replay', 'new'), and `phone_vibe` with the mood
+(a preset or colours, a heading face, the cover or a render behind it, one ambient effect). Read
+`phone_timeline` when they say "this" or "that bit": it lays their notes over what played. If they work in time,
+not bars, answer in minutes and seconds.

@@ -40,7 +40,9 @@ def embed_windows(path, grid, starts, span_bars=2):
     import torch
     import soundfile as sf
     import librosa
+    from . import machine
     m, proc, dev = _model()
+    machine.cap_torch()                                  # the slot's threads, not every core (ledger:M132)
     y, sr = sf.read(path, always_2d=True, dtype='float32')
     y = librosa.resample(y.mean(1), orig_sr=sr, target_sr=SR)
     segs = []

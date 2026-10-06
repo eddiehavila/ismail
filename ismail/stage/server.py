@@ -15,7 +15,8 @@ GET  /takes?scene=<name> -> recorded performance takes (scenes/<name>/takes/<id>
 POST /take/frames|/take/meta?scene=&take=  the page appends samples / merges metadata (hands.js)
 POST /voice/in?scene=&kind=message|take[&take=]  audio from the headset mic (voice.js): a message is saved to
                          scenes/<name>/voice/ and transcribed by speakwright (CPU whisper, 127.0.0.1:8765) into a
-                         `voice_message` event; a take's audio goes to takes/<id>/audio.<ext>
+                         `voice_message` event; a take's audio goes to takes/<id>/audio.<ext> and is transcribed
+                         into takes/<id>/voice.json and a `take_voice` event (takes.py)
 POST /voice/perf?scene=&perf=&clip=N&seq=K   a performance clip's audio, chunk K appended (perform.js; a Follow is
                          a performance); ...&end=1&at=&seconds=&by= closes clip N: transcribed with word times snapped
                          onto the voice (perform.py) into a `perform_clip` event and performances/<perf>/perf.json
@@ -54,7 +55,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from . import perform, presence
+from . import perform, presence, takes
 
 PAGE = Path(__file__).resolve().parent / 'page'
 SCENES = Path('scenes').resolve()                          # set by configure(): the song's scenes folder
@@ -889,6 +890,9 @@ class Handler(SimpleHTTPRequestHandler):
                 f = d / f'audio.{ext}'
                 f.write_bytes(audio)
                 server_event(name, {'type': 'take_audio', 'take': take, 'file': str(f.relative_to(SCENES / name)), 'bytes': len(audio), **extra})
+                # what the person said during the take, kept with it (takes.py): take_voice when it is transcribed
+                threading.Thread(target=takes.transcribe_and_tell, daemon=True,
+                                 args=(name, d, stt_words, lambda ev: server_event(name, ev))).start()
                 return self._json(200, {'ok': True, 'file': str(f)})
             d = SCENES / name / 'voice'
             d.mkdir(exist_ok=True)

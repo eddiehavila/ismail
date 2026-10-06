@@ -142,6 +142,8 @@ nudges you, follow it.
 | a version of another piece | `project_new(derived_from=)`, and the objective in their words |
 | a job over a minute | `machine_status` first; `python -m ismail.machine run` for anything outside ismail |
 | a live set plays and the person steps away (a walk, bed, another room) | offer the phone page: `phone_start`, then give them its address (`references/phone.md`) |
+| the person is away from the desk for the day (on their phone, in VR) | everything goes through the phone page: answer on it (`phone_say`, panels), exams with `phone_exam`, and read `phone_listen` / `phone_timeline` |
+| a casual listener says "that bit at two minutes" | answer in time, not bars: lines from the phone carry `into_s`; offer bars only to someone who works in bars (`references/user-experience.md`) |
 | a live set | a runway queued ahead; a guard on `live_status` (`SILENT ON AIR`, `RUNWAY ENDED`, `THIN`) |
 | a song sounds different live | `live_parity`, then the song's `HANDOFF.md` |
 | something you built would help others | the inclusion review (`references/development.md`), then a fork and a pull request |
@@ -201,14 +203,17 @@ nudges you, follow it.
   `machine_status` before anything that runs over a minute and wait when it says WAIT. Heavy ops (render, separate,
   mimic_measure, the fits, live_parity) take a slot themselves and refuse with the reason; anything outside ismail
   (Blender, whisper, demucs, a long script) runs through `python -m ismail.machine run --gpu|--cpu -- <command>` so
-  it takes one too; give `--est` a unit (`--est 10m`, `600s`) so the board tells others when you will be done.
+  it takes one too. A script it runs may call ismail's ops (render, measure): they run in the run's slot. A slot
+  counts jobs, not cores, so `--threads` caps the command's numeric threads (BLAS, OpenMP, torch; 2 by default for
+  `--cpu`): ask for more only when the machine is quiet. Give `--est` a unit (`--est 10m`, `600s`) so the board tells others when you will be done.
   Declare what it really needs: `--mem` (peak GB) and `--disk` (GB it writes). A job past its `--mem` is flagged
   OVER on the board and in its own output: stop it if it keeps growing, because on Windows the pagefile grows into
   the disk. Heavy jobs wait while a drive is under 15 GB free or commit under 6 GB; `machine_disk` shows where the
   space went. To free space, move finished intermediates (caches, old renders, uncut takes) into the project's
   `_reclaim/` folder and tell the user: nobody deletes, the user clears `_reclaim`.
-  While a live set is on air, GPU jobs and Blender renders wait until it ends (a temporary rule, "only for now
-  during sets": `machine on-air` shows it; only the user lifts it). Register Blender honestly: a `--cpu` Blender
+  While a live set is on air, GPU jobs and Blender renders wait until it ends, and the CPU jobs beside it share
+  half the machine's threads (a temporary rule, "only for now during sets": `machine on-air` shows it; only the
+  user lifts it). Register Blender honestly: a `--cpu` Blender
   render waits too.
   `run --wait 30m` (or `slot(..., wait=)`) stands in line for a slot instead of being refused. Every finished job
   leaves a line in the board's history (what, which song, how long it waited, its exit, CPU seconds, peak memory, the
