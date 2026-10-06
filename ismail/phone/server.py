@@ -75,6 +75,8 @@ BLOCK = 2048                       # frames fed per step (46 ms)
 RING_S = 120.0                     # seconds of encoded stream kept for rewind and late joiners
 MASTER_S = 150.0                   # seconds of the streamed master kept raw, for the music under a voice note
 REF_LEAD_S, REF_TAIL_S = 3.0, 2.0  # how much of it before the note begins and after it ends (ledger:M163)
+REF_GUESS_S = 20.0                 # off the stream (the room speaker), the note's start is a guess: this much either side
+KEEP_MASTER = os.environ.get('ISMAIL_PHONE_KEEP_MASTER', '1') != '0'   # take the master while an engine plays, page or not
 LEAD_S = 1.0                       # a live join starts this far back, so the phone's buffer fills at once
 BOOT = secrets.token_hex(4)        # this server run: a page that sees it change knows the server restarted
 
@@ -503,7 +505,16 @@ class Phone:
                 except Exception:
                     got = None
             self.engine = got
+            if got and got.get('playing') and KEEP_MASTER:  # the music under a note heard from the room speaker too
+                with self.cond:
+                    if self.feeder is None or not self.feeder.is_alive():
+                        self.feeder = threading.Thread(target=self._feed, daemon=True)
+                        self.feeder.start()
             time.sleep(1.0)
+
+    def _want_feed(self):
+        e = self.engine
+        return bool(self.encoders) or (KEEP_MASTER and bool(e and e.get('playing')))
 
     def beat_now(self):
         e = self.engine
@@ -528,7 +539,7 @@ class Phone:
     def _source(self, q):
         """Pump the engine's master into q while an engine plays; reconnect when it changes."""
         import http.client
-        while self.encoders:
+        while self._want_feed():
             e = self.engine
             if not e:
                 time.sleep(1.0)
@@ -540,7 +551,7 @@ class Phone:
                 if r.status != 200:
                     raise OSError(f'engine stream {r.status}')
                 print(f'[phone] master from :{e["port"]}', flush=True)
-                while self.encoders:
+                while self._want_feed():
                     b = r.read1(16384)
                     if not b:
                         break
@@ -561,7 +572,7 @@ class Phone:
                     if enc.proc is None or (enc.listeners == 0 and time.time() - enc.last > IDLE_S):
                         enc.close()
                         del self.encoders[k]
-                if not self.encoders:
+                if not self._want_feed():
                     self.feeder = None
                     return
             while q:
@@ -695,16 +706,26 @@ class Phone:
             t = float(t)
         except (TypeError, ValueError):
             t = None
-        if not s or t is None:
-            return {'ref_why': 'the page was not playing the stream when the note began'}
-        a = s['pcm0'] + t - REF_LEAD_S
+        guess = not s or t is None
+        if guess:                                # off the stream (the room speaker): from when the note arrived
+            with self.cond:
+                tl = list(self.timeline)
+            if not tl:
+                return {'ref_why': 'no engine was playing (the server keeps the master only while one plays)'}
+            began = time.time() - float(dur or 0) - 1.0      # about a second to upload
+            p, wall = min(tl, key=lambda x: abs(x[1] - began))[:2]
+            start = p + (began - wall)
+            lead, tail = REF_GUESS_S, REF_GUESS_S
+        else:
+            start, lead, tail = s['pcm0'] + t, REF_LEAD_S, REF_TAIL_S
+        a = start - lead
         with self.cond:
             blocks = [(p, b) for p, b in self.master if p + len(b) / 4 / SR > a]
             tl = [x for x in self.timeline if x[0] >= a - 1]
             end = self.fed / SR
         if dur:
-            end = min(end, s['pcm0'] + t + float(dur) + REF_TAIL_S)
-        if not blocks or blocks[0][0] > a + 1.0:
+            end = min(end, start + float(dur) + tail)
+        if not blocks or (not guess and blocks[0][0] > a + 1.0):
             return {'ref_why': 'the stream had not been playing long enough before the note'}
         a = max(a, blocks[0][0])
         x = np.frombuffer(b''.join(b for _, b in blocks), dtype='<i2').reshape(-1, 2)
@@ -719,10 +740,11 @@ class Phone:
                 beats.append([round(p - a, 3), round(beat, 3)])
                 bpm, bpb, last = bp or bpm, bb or bpb, p
         bj = HOME / 'voice' / f'{vid}_ref.json'
-        bj.write_text(json.dumps({'sr': SR, 'note_starts_at_s': round(s['pcm0'] + t - a, 3), 'bpm': bpm, 'bpb': bpb,
-                                  'beats': beats}), encoding='utf8')
-        return {'ref': str(ref), 'ref_beats': str(bj), 'ref_lead_s': round(s['pcm0'] + t - a, 2),
-                'ref_s': round(len(x) / SR, 2)}
+        bj.write_text(json.dumps({'sr': SR, 'note_starts_at_s': round(start - a, 3), 'bpm': bpm, 'bpb': bpb,
+                                  'beats': beats, 'start_is_guess': guess,
+                                  'search_s': REF_GUESS_S if guess else REF_LEAD_S}), encoding='utf8')
+        return {'ref': str(ref), 'ref_beats': str(bj), 'ref_lead_s': round(start - a, 2),
+                'ref_s': round(len(x) / SR, 2), 'start_is_guess': guess}
 
     def hum_check(self, vid, f=None, text=None):
         """The hum check on one voice note (hum.check), kept beside it as <id>_hum.json. -> (meta, check)."""

@@ -84,7 +84,10 @@ in the bud, and a long press opens the phone's assistant). So, while a set plays
 
 Every voice note keeps the master the page played under it, from 3 s before the person began to 2 s after they
 stopped (`<id>_ref.wav` beside the note, with the beat at points through it in `<id>_ref.json`). The server keeps the
-last two and a half minutes of the stream in memory for this, so nothing has to be recording. The music bleeds into
+last two and a half minutes of the master in memory for this, whenever an engine plays, page open or not, so nothing
+has to be recording (`ISMAIL_PHONE_KEEP_MASTER=0` turns that off). When they listen on the room speaker with the
+stream off, the note's start is a guess from when it arrived, and the ref spans 20 s either side
+(`start_is_guess`, `search_s`): search that window, and the room route gets its own latency. The music bleeds into
 their mic a little, and that is the sync signal: cross-correlate the note with its ref and every sample of what they
 sang maps to the beat they heard, with the stream delay and the latency of their input folded in.
 

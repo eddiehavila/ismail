@@ -80,7 +80,9 @@ def describe(vid, meta, chk):
     if meta.get('ref'):
         lines.append(f"The music he heard under it: {meta['ref']} (from {meta['ref_lead_s']:g} s before the note "
                      f"began; beat stamps in {meta['ref_beats']}). The music bleeding into his mic lines the two up: "
-                     f"cross-correlate to find where the note sits, and the latency of his input with it.")
+                     f"cross-correlate to find where the note sits, and the latency of his input with it." +
+                     (f" Its start is a guess from when the note arrived (he was off the stream, likely on the room "
+                      f"speaker): search {meta['ref_lead_s']:g} s either side." if meta.get('start_is_guess') else ''))
     else:
         lines.append(f"No music was saved under it: {meta.get('ref_why') or 'the note predates the master buffer'}.")
     lines.append("Notes, timing and swing: the Live DJ's measuring joins here once it holds on real hums (M163 phase "

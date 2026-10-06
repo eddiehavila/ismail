@@ -517,16 +517,24 @@ def test_a_hum_tells_itself_apart_from_talk():
     assert hum.words('Mmm la la, play it') == ['play', 'it']
 
 
-def test_every_voice_note_keeps_the_music_under_it(phone):
+def test_every_voice_note_keeps_the_music_under_it(phone, monkeypatch):
     ph, base, _ = phone
     import soundfile as sf
+    monkeypatch.setattr(S, 'KEEP_MASTER', False)                       # this test feeds the master itself
+    for _ in range(50):
+        if not (ph.feeder and ph.feeder.is_alive()):
+            break
+        time.sleep(0.1)
     ph.sids['s1'] = {'pcm0': 0.0, 'kbps': 64, 't': 0.0, 'at': time.time()}
+    now = time.time()
     with ph.cond:
-        for i in range(int(12 * S.SR / S.BLOCK)):                      # 12 s of streamed master, 2 beats a second
+        ph.master.clear()
+        ph.timeline.clear()
+        for i in range(int(60 * S.SR / S.BLOCK)):                      # 60 s of streamed master, 2 beats a second
             p = i * S.BLOCK / S.SR
             ph.master.append((p, (np.full((S.BLOCK, 2), i % 100, dtype='<i2')).tobytes()))
-            ph.timeline.append((p, time.time(), p * 2, 120.0, 4, 0.0))
-        ph.fed = int(12 * S.SR / S.BLOCK) * S.BLOCK
+            ph.timeline.append((p, now - 60 + p, p * 2, 120.0, 4, 0.0))
+        ph.fed = int(60 * S.SR / S.BLOCK) * S.BLOCK
     req = urllib.request.Request(base + '/api/voice?sid=s1&t=5.0&dur=3.0&end=press', data=b'\x1a' * 2000,
                                  headers={'Content-Type': 'audio/webm;codecs=opus'})
     r = json.loads(urllib.request.urlopen(req, timeout=5).read())
@@ -535,10 +543,14 @@ def test_every_voice_note_keeps_the_music_under_it(phone):
     assert sr == S.SR and abs(len(x) / sr - 8.0) < 0.05 and meta['ref_lead_s'] == 3.0   # 3 s before, 3 s note, 2 after
     bj = json.loads(open(meta['ref_beats'], encoding='utf8').read())
     assert bj['bpm'] == 120.0 and bj['note_starts_at_s'] == 3.0 and abs(bj['beats'][0][1] - 4.0) < 0.1
-    req = urllib.request.Request(base + '/api/voice?sid=&t=', data=b'\x1a' * 2000, headers={'Content-Type': 'audio/webm'})
+    # off the stream (heard from the room speaker): the start is a guess from when the note arrived, searched wide
+    req = urllib.request.Request(base + '/api/voice?sid=&t=&dur=3.0', data=b'' * 2000,
+                                 headers={'Content-Type': 'audio/webm'})
     r = json.loads(urllib.request.urlopen(req, timeout=5).read())
     meta = json.loads((S.HOME / 'voice' / f"{r['id']}_meta.json").read_text(encoding='utf8'))
-    assert 'ref' not in meta and 'not playing the stream' in meta['ref_why']
+    bj = json.loads(open(meta['ref_beats'], encoding='utf8').read())
+    assert meta['start_is_guess'] and bj['search_s'] == S.REF_GUESS_S and meta['ref_lead_s'] == S.REF_GUESS_S
+    assert abs(meta['ref_s'] - (S.REF_GUESS_S + 4.0)) < 1.0         # the master runs out at "now"
 
 
 @pytest.mark.skipif(not S.ffmpeg(), reason='ffmpeg is not installed')
@@ -562,4 +574,4 @@ def test_a_hummed_note_reaches_the_inbox_as_a_hum(phone, monkeypatch):
     h = [x for x in lines if x['kind'] == 'hum']
     assert h and h[0]['id'] == vid and h[0]['note'].startswith(('G', 'A'))
     out = P.phone_hum()
-    assert f'voice note {vid}' in out and 'a HUM' in out and 'No music was saved' in out
+    assert f'voice note {vid}' in out and 'a HUM' in out and ('No music was saved' in out or 'a guess' in out)
