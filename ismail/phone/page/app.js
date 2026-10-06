@@ -61,7 +61,7 @@ function backoff() { retry = Math.min(retry + 1, 6); return 1000 * 2 ** (retry -
 function setPlaying(on) {
   if (on !== want) ev(on ? 'listen' : 'stop');
   want = on;
-  if (on) connect(); else { audio.pause(); audio.removeAttribute('src'); audio.load(); sid = null; }
+  if (on) connect(); else { holdOff(); audio.pause(); audio.removeAttribute('src'); audio.load(); sid = null; }
   keyState('play', on ? 'wait' : 'play', on ? 'Stop' : 'Listen', on ? 'wait' : null); $('play').classList.toggle('on', on);
   if ('mediaSession' in navigator) navigator.mediaSession.playbackState = on ? 'playing' : 'paused';
   remember();
@@ -69,8 +69,17 @@ function setPlaying(on) {
 $('play').onclick = () => { setPlaying(!want); if (want && keysOn) armMic(); };
 $('golive').onclick = () => { if (!want) return setPlaying(true); connect(0); toast('back to live'); };
 $('back').onclick = () => { want = true; connect(30); send('/api/tap', { what: 'rewind' }, true); toast('30 s back'); };
-['error', 'ended'].forEach((ev) => audio.addEventListener(ev, () => { if (want) setTimeout(() => want && connect(), backoff()); }));
-audio.addEventListener('playing', () => { if (want) keyState('play', 'stop', 'Stop'); });
+// ledger:M142: after a server restart a page in a pocket never came back. A hidden page whose audio stops loses the
+// media exemption and Android freezes its timers, so the retries never run. While the stream is down, a loop far
+// under hearing (40 Hz at -80 dBFS) keeps the page playing, and so awake, until the stream plays again.
+let keep = null;
+function holdOn() {
+  if (!want) return;
+  try { if (!keep) { keep = new Audio(wav([[40, 1000]], 3)); keep.loop = true; } if (keep.paused) keep.play().catch(() => {}); } catch (e) {}
+}
+function holdOff() { if (keep && !keep.paused) keep.pause(); }
+['error', 'ended'].forEach((ev) => audio.addEventListener(ev, () => { if (want) { holdOn(); setTimeout(() => want && connect(), backoff()); } }));
+audio.addEventListener('playing', () => { holdOff(); if (want) keyState('play', 'stop', 'Stop'); });
 ['waiting', 'stalled'].forEach((x) => audio.addEventListener(x, () => { if (want) keyState('play', 'wait', 'Stop', 'wait'); }));
 audio.addEventListener('timeupdate', () => { if (audio.currentTime > lastT + 0.2) { lastT = audio.currentTime; lastAdvance = Date.now(); } });
 // the stream's gaps, measured (Nate 10-06 14:56: "dropouts ... is that the stream due to buffering ... or CPU ... a
@@ -91,7 +100,7 @@ audio.addEventListener('timeupdate', () => { if (gap.at && gap.kind === 'freeze'
 setInterval(() => { if (want && !audio.paused && !clip.el && Date.now() - lastAdvance > 1500) gapStart('freeze'); }, 500);
 try { navigator.mediaDevices.addEventListener('devicechange', () => ev('route', { during_note: !!talk.rec })); } catch (e) {}
 setInterval(() => {                     // a stream that stops moving reconnects (wifi dropped, server restarted)
-  if (want && !clip.el && Date.now() - lastAdvance > 12000) { lastAdvance = Date.now(); $('livetext').textContent = 'reconnecting'; connect(); }
+  if (want && !clip.el && Date.now() - lastAdvance > 12000) { lastAdvance = Date.now(); $('livetext').textContent = 'reconnecting'; holdOn(); connect(); }
 }, 3000);
 setInterval(() => { if (want) remember(); }, 30000);
 window.addEventListener('online', () => { if (want) connect(); flush(); });
@@ -226,7 +235,7 @@ function closeMic() {                     // every track stopped: the earbuds ca
 }
 // ---- earbud button and the tones you hear in your pocket
 let keysOn = store.get('keys', true), noteTimer = 0;
-function wav(parts) {                       // [[freq, ms], ...] -> a data: URI of a short 16-bit tone sequence
+function wav(parts, amp = 9000) {           // [[freq, ms], ...] -> a data: URI of a short 16-bit tone sequence
   const sr = 22050, n = parts.reduce((a, [, ms]) => a + Math.round(sr * ms / 1000), 0);
   const b = new DataView(new ArrayBuffer(44 + 2 * n)); let o = 44;
   const str = (i, t) => [...t].forEach((c, k) => b.setUint8(i + k, c.charCodeAt(0)));
@@ -235,7 +244,7 @@ function wav(parts) {                       // [[freq, ms], ...] -> a data: URI 
   str(36, 'data'); b.setUint32(40, 2 * n, true);
   for (const [f, ms] of parts) {
     const m = Math.round(sr * ms / 1000);
-    for (let i = 0; i < m; i++) { const env = Math.min(1, i / 200, (m - i) / 400); b.setInt16(o, f ? Math.sin(2 * Math.PI * f * i / sr) * 9000 * env : 0, true); o += 2; }
+    for (let i = 0; i < m; i++) { const env = Math.min(1, i / 200, (m - i) / 400); b.setInt16(o, f ? Math.sin(2 * Math.PI * f * i / sr) * amp * env : 0, true); o += 2; }
   }
   let bin = ''; new Uint8Array(b.buffer).forEach((x) => { bin += String.fromCharCode(x); });
   return 'data:audio/wav;base64,' + btoa(bin);
@@ -717,7 +726,7 @@ function onCmd(c) {
   else if (c.type === 'vibe') { state.vibe = c.vibe; applyVibe(vibeNow()); }
   else if (c.type === 'caption') { sound('message'); toast(c.text); if (c.buzz) buzz([150, 80, 150]); notifyBg(c.who || 'ismail live', c.text); }
   else if (c.type === 'buzz') buzz(c.pattern);
-  else if (c.type === 'restarting') { restarting = Date.now(); toast('updating, back in a few seconds'); }
+  else if (c.type === 'restarting') { restarting = Date.now(); holdOn(); toast('updating, back in a few seconds'); }
   else if (c.type === 'say_clip') {                // spoken to the page itself: nobody was on the stream
     const a = new Audio(c.url); a.play().catch(() => { toast((c.who || 'DJ') + ': ' + c.text); buzz([150, 80, 150]); });
   }

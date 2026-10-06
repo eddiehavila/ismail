@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### The phone page stays awake while the stream is down (ledger:M142)
+
+- After a server restart a page in a pocket never reconnected: a hidden page whose audio stops is frozen by
+  Android, so its retries never run. While the stream is down (an error, a restart notice, a stalled stream), the
+  page now plays a loop far under hearing (40 Hz at -80 dBFS) until the stream plays again. Needs a check on a
+  phone with the screen off.
+
 ### The first sketches: mastered, balanced, the first one first, said plainly (ledger:M148, M150, M151 S-1..S-5)
 
 - S-1 (M148): every sketch goes through a master stage for its style (a low cut, glue, mono low end, a limiter at
