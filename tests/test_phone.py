@@ -234,3 +234,28 @@ def test_an_open_page_off_the_stream_still_hears_a_spoken_answer(phone):
     assert c['text'] == 'rain music coming'
     with urllib.request.urlopen(base + c['url'], timeout=5) as r:
         assert r.status == 200 and len(r.read()) > 1000
+
+
+def test_what_they_loved_is_kept_and_marks_the_piece_when_it_returns(phone):
+    """Nate 10-06: keys stay pressed and nothing shows what he asked for; and a small mark beside now/next for a piece
+    he loved before, one played again, or one just made."""
+    ph, base, _ = phone
+    P.phone_now(now='chapter 3: rain piano', next='chapter 4: dub')
+    post(base, '/api/tap', {'what': 'love'})
+    post(base, '/api/tap', {'what': 'mood', 'mood': 'lift'})
+    s = get(base, '/api/state?since=0&wait=0')
+    assert [t['what'] for t in s['taps']] == ['mood', 'love'] and s['taps'][1]['now'] == 'chapter 3: rain piano'
+    assert s['tally'] == {'love': 1, 'mood': 1} and s['asked_mood']['mood'] == 'lift'
+    assert s['engine']['now_mark'] == 'loved' and s['engine']['next_mark'] is None     # a heart without the DJ saying
+    out = P.phone_now(now='chapter 5: new strings', now_mark='new', next_mark='replay')
+    assert "(new)" in out and "(replay)" in out
+    s = get(base, '/api/state?since=0&wait=0')
+    assert s['engine']['now_mark'] == 'new' and s['engine']['next_mark'] == 'replay'
+    P.phone_now(now='chapter 3: rain piano')
+    assert get(base, '/api/state?since=0&wait=0')['engine']['now_mark'] == 'loved'   # it came back
+    with pytest.raises(Exception, match='one of'):
+        P.phone_now(now_mark='great')
+    assert ph._recent_taps()[-1]['what'] == 'mood'                                      # a restart still has them
+    for name in ('icon-192.png', 'icon-512.png', 'icon-maskable.png', 'apple-touch-icon.png'):
+        with urllib.request.urlopen(base + '/' + name, timeout=10) as r:
+            assert r.read()[:4] == b'\x89PNG'

@@ -68,7 +68,8 @@ wait in a queue: taps still arrive at once, and the page tells them their note i
 Earbuds send one media key: play/pause (on Skullcandy's Dime 3, double and triple presses only change the volume
 in the bud, and a long press opens the phone's assistant). So, while a set plays and "Earbud: talk" is on:
 - a press starts a voice note (a rising tone; the music ducks) and the next press sends it (a falling tone, then a
-  short chirp when it has arrived); a note stops itself after 60 s;
+  short chirp when it has arrived). A note never cuts them off mid-sentence: it runs until their press, 30 s of
+  quiet (a note left running in a pocket) or 10 minutes (a buzz and a tone 20 s before);
 - a short note that is only a command acts as one: "stop listening" stops the stream (a press starts it again),
   "love this", "change it up", "more energy", "calmer", "louder", "quieter", "pause the set", "resume the set" arrive
   as taps with `via: 'voice'` and the note's `id`. The words also arrive as `voice_text`: act once, not twice.
@@ -80,7 +81,15 @@ Only `phone_listen` counts as listening on the page; watching the inbox file doe
 ## What you can put on the page
 
 - `phone_now(now=, next=, recording_why=)`: the title, next up, and why recording is on or off. The page always
-  shows whether it is, read from the engine.
+  shows whether it is, read from the engine. On every chapter change, say what each piece is to them with
+  `now_mark=` / `next_mark=`: 'loved' (one they loved before, played again), 'replay' (played earlier, back
+  again) or 'new' (just made). A small mark sits beside it; without one, the page shows a heart when they tapped
+  Love this while that piece played.
+- What they tapped is kept: the page lists their taps and moods with the time and the piece that played, and
+  today's count (it survives a reload and a server restart). The keys are momentary: a press sends, lights SENT,
+  and the key is plain again.
+- Installing: the page installs as an app from Chrome (Install app in the footer, or Chrome's menu, Install). With
+  Notify on, what you `phone_say` while the app is in the background also arrives as a phone notification.
 - `phone_say(text)`: a caption and a toast. Use `pin=True` for the "since you left" summary when they come back
   (three lines: what changed and why). `speak=True` says it into the stream with the music ducked under it, so
   they hear it in their pocket. When the page is open but off the stream (it reloaded, or they use the phone as

@@ -6,6 +6,11 @@
 <meta name="theme-color" content="#0e0d0b">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon.svg">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="ismail">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..800&family=JetBrains+Mono:wght@400;600&display=swap">
@@ -84,7 +89,7 @@ button:active,button.down{background:var(--panel-2);box-shadow:inset 0 2px 0 rgb
 #love svg,#change svg{width:36px;height:36px}
 .key.sent{border-color:var(--accent);color:var(--accent)}
 .key.sent .lbl{color:var(--accent)}
-#love{color:var(--accent);border-color:var(--accent)}
+#love svg{color:var(--accent)}             /* the heart is the accent; the key itself only lights when a tap is sent */
 .pad{display:grid;grid-template-columns:1fr 1fr;gap:calc(var(--u)*2);margin-top:calc(var(--u)*2)}
 .pad button{min-height:64px;color:#d9d2c4}
 .section{margin-top:calc(var(--u)*6)}
@@ -93,8 +98,13 @@ button:active,button.down{background:var(--panel-2);box-shadow:inset 0 2px 0 rgb
 .detents{display:grid;grid-template-columns:repeat(4,1fr);border:1px solid var(--line);border-radius:var(--r)}
 .detents button{border:0;border-radius:0;min-height:48px;font-size:12px;background:transparent;color:var(--dim);position:relative}
 .detents button+button{border-left:1px solid var(--line)}
-.detents button.sel{color:var(--ink);background:var(--panel)}
-.detents button.sel::after{content:'';position:absolute;left:25%;right:25%;bottom:6px;height:2px;background:var(--accent)}
+.detents button.sent{color:var(--accent);background:var(--panel)}
+.detents button.sent::after{content:'';position:absolute;left:25%;right:25%;bottom:6px;height:2px;background:var(--accent)}
+#askedmood{color:var(--ink);letter-spacing:.08em}
+.mark{display:inline-block;width:14px;height:14px;margin-right:6px;vertical-align:-2px;font-style:normal}
+.mark:empty{display:none}
+.mark svg{width:14px;height:14px;fill:none;stroke:var(--accent);stroke-width:2.4;stroke-linecap:square}
+.mark.new{width:auto;height:auto;font:600 9px/1 var(--mono);letter-spacing:.12em;color:var(--accent);border:1px solid var(--accent);border-radius:2px;padding:2px 3px;vertical-align:2px}
 #agentbtns{display:grid;grid-template-columns:1fr 1fr;gap:calc(var(--u)*2)}
 #agentbtns:empty{display:none}
 #agentbtns button{border-style:dashed;min-height:52px;font-size:13px}
@@ -139,8 +149,8 @@ textarea{width:100%;background:var(--panel);color:var(--ink);border:1px solid va
 </div>
 
 <div class="dial">
-  <div class="row"><span class="cap">Now</span><span id="now">nothing playing</span></div>
-  <div class="row"><span class="cap">Next</span><span id="next">--</span></div>
+  <div class="row"><span class="cap">Now</span><span><i class="mark" id="nowmark"></i><span id="now">nothing playing</span></span></div>
+  <div class="row"><span class="cap">Next</span><span><i class="mark" id="nextmark"></i><span id="next">--</span></span></div>
 </div>
 <div class="note" id="pinned" hidden></div>
 <div class="note" id="last" hidden></div>
@@ -162,17 +172,18 @@ textarea{width:100%;background:var(--panel);color:var(--ink);border:1px solid va
   <button class="key" data-tap="pause" aria-label="Pause set"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14M16 5v14"/></svg><span class="lbl">Pause set</span></button><button class="key" data-tap="resume" aria-label="Resume set"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5 19 12 7 19Z"/></svg><span class="lbl">Resume set</span></button>
 </div>
 
-<div class="section"><span class="cap">Mood for the next chapter</span>
+<div class="section"><span class="cap">Mood for the next chapter <span id="askedmood"></span></span>
   <div class="detents" id="mood"><button data-mood="calm">Calm</button><button data-mood="steady">Steady</button><button data-mood="lift">Lift</button><button data-mood="peak">Peak</button></div>
 </div>
 <div class="section" id="agentwrap" hidden><span class="cap">From the DJ, right now</span><div id="agentbtns"></div></div>
 
 <div class="section" id="offerbox" hidden><span class="cap">Downloads</span><div id="offers"></div></div>
+<div class="section" id="mine" hidden><span class="cap">What you asked for <span id="tally"></span></span><div class="log" id="taps"></div></div>
 <div class="section"><span class="cap">DJ log</span><div class="log" id="feed"></div></div>
 
 <div class="foot">
   <span class="cap" id="listening">no agent listening</span>
-  <span><button id="keysset">Earbud: talk</button> <button id="quality">64 kbps</button> <button id="buzzset">Buzz on</button></span>
+  <span><button id="install" hidden>Install app</button> <button id="notify" hidden>Notify off</button> <button id="keysset">Earbud: talk</button> <button id="quality">64 kbps</button> <button id="buzzset">Buzz on</button></span>
 </div>
 
 <div id="sheet"><div id="panel"></div></div>
