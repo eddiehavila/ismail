@@ -212,7 +212,7 @@ def test_a_short_note_that_is_a_command_acts_as_one(phone):
     assert lines[0]['via'] == 'voice' and lines[0]['id'] == 'v1' and lines[0]['heard']['of'] == 'bar 9'
     assert any(c['type'] == 'stop_listening' for c in ph.cmds)
     page = urllib.request.urlopen(base + '/app.js', timeout=5).read().decode()
-    assert "h('pause', () => { if (want && keysOn) return keyNote();" in page and 'CUES' in page
+    assert "if (want && keysOn) return keyNote();" in page and "h('pause'" in page and 'CUES' in page
 
 
 def test_an_open_page_off_the_stream_still_hears_a_spoken_answer(phone):
@@ -259,3 +259,43 @@ def test_what_they_loved_is_kept_and_marks_the_piece_when_it_returns(phone):
     for name in ('icon-192.png', 'icon-512.png', 'icon-maskable.png', 'apple-touch-icon.png'):
         with urllib.request.urlopen(base + '/' + name, timeout=10) as r:
             assert r.read()[:4] == b'\x89PNG'
+
+
+def test_the_phone_session_is_a_take_on_one_clock(phone):
+    """Nate 10-06 08:16: 'can you see when I download stuff? where I'm scrolling? ... like a VR take, but for the
+    mobile interface ... do you know if I'm on my phone?' The page reports its actions, timed; phone_timeline lays
+    them over the voice notes with the bar playing in the room."""
+    ph, base, _ = phone
+    P.phone_now(now='chapter 3: rain piano')
+    ph.room = lambda age_s=0.0: {'beat': 400.0 - age_s * 2, 'bar': 101, 'of': 'bar 101'}
+    r = post(base, '/api/events', {'sid': None, 'events': [
+        {'what': 'open', 'mobile': True, 'app': True, 'w': 412, 'h': 915, 'age_ms': 9000},
+        {'what': 'scroll', 'to': 'downloads', 'y': 1200, 'age_ms': 4000},
+        {'what': 'download', 'file': 'take3.wav', 'age_ms': 3000},
+        {'what': 'Bad-Name', 'age_ms': 0},
+        {'what': 'note_end', 'dur': 72.5, 'by': 'quiet', 'sent': True, 'nested': {'x': 1}}]})
+    assert r['n'] == 4
+    rows = json.loads(P.phone_listen('dj', since=0, wait=0, page=True))['lines']
+    pg = [x for x in rows if x['kind'] == 'page']
+    assert [x['what'] for x in pg] == ['open', 'scroll', 'download', 'note_end']
+    assert pg[0]['mobile'] is True and 'ua' in pg[0] and pg[0]['room']['of'] == 'bar 101'
+    assert pg[0]['ts'] < pg[3]['ts'] and 'nested' not in pg[3] and pg[1]['now'] == 'chapter 3: rain piano'
+    assert not [x for x in json.loads(P.phone_listen('dj', since=0, wait=0))['lines'] if x['kind'] == 'page']
+    req = urllib.request.Request(base + '/api/voice?sid=&t=&dur=72.5&end=quiet', data=b'\x1a' * 2000,
+                                 headers={'Content-Type': 'audio/webm;codecs=opus'})
+    urllib.request.urlopen(req, timeout=5).read()
+    tl = P.phone_timeline(minutes=5)
+    assert '-- chapter 3: rain piano' in tl and 'download file=take3.wav' in tl and 'scroll to=downloads' in tl
+    assert 'voice note 72.5 s, ended by quiet' in tl and 'bar 101' in tl
+
+
+def test_an_open_panel_and_its_files_survive_a_restart(phone, tmp_path):
+    """10-06: a server restart (a merge) dropped an unanswered panel Nate had not read yet."""
+    ph, base, _ = phone
+    img = tmp_path / 'cover.png'
+    img.write_bytes(b'\x89PNG' + b'0' * 100)
+    P.phone_panel_show(panel_id='visibility', title='What the agents can see', text='...', image=str(img))
+    saved = json.loads((S.HOME / 'state.json').read_text(encoding='utf8'))
+    assert [x['id'] for x in saved['panels']] == ['visibility']
+    tok = saved['panels'][0]['image'].split('/')[-1]
+    assert saved['files'][tok].endswith('cover.png')

@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### The phone session is a take: the page reports what happens on it, on one clock (Nate, 10-06)
+
+- Nate: "can you see when I download stuff? where I'm scrolling ... like a VR take ... but for the mobile interface
+  ... do you know if I'm on my phone?" The page now sends its own actions, timed (`/api/events`, kind 'page'):
+  open with the device, Listen and Stop, hidden and visible, the section in view, downloads, clips, panels, note
+  start and end, earbud presses. Every line from the page carries `room` (the engine's bar, also off the stream)
+  and `now` (the piece); voice notes carry `dur_s` and `ended_by`.
+- `phone_timeline(minutes=)` lays the session on one clock with what they said. `phone_listen(page=True)`
+  includes the page's actions; without it they never wake a waiting agent.
+- An open panel or exam, and the files it offers, survive a server restart (a merge dropped an unread one).
+
 ### The phone page: momentary keys and a tap history, notes that never cut off, installable (Nate, 10-06)
 
 - Nate: a key "stays pressed even once that has been sent ... when I press it again, I'm unpressing the button".

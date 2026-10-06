@@ -126,14 +126,28 @@ def phone_status() -> str:
 
 
 @op()
-def phone_listen(who: str, since: int = None, wait: float = 25) -> str:
+def phone_listen(who: str, since: int = None, wait: float = 25, page: bool = False) -> str:
     """What the person sent from the phone, oldest first, as JSON {since, lines}: taps (love = cut a highlight,
     change = change it up now, energy_up/energy_down, louder/quieter, pause/resume, start_set), mood (calm, steady,
     lift, peak), voice (then voice_text with the words, same id), answer / exam (to phone_ask, phone_panel_show,
     phone_exam), button (phone_buttons). Every line carries heard {bar, beat, of} (what they actually heard, not the
     engine's now) and behind_s. who: your name (the page shows who is listening while you call at least every 90 s).
-    since: the last call's `since` (default: only new lines); wait: seconds to wait for one."""
-    return _call('listen', timeout=float(wait or 0) + 15, who=who, since=since, wait=wait)
+    since: the last call's `since` (default: only new lines); wait: seconds to wait for one. Every line also
+    carries room {bar, of} (the engine's bar then, there even when the page is off the stream) and now (the piece).
+    page=True also returns the page's own actions (kind 'page': open with the device, listen, stop, hidden/visible,
+    scroll to a section, download, clip play, panel open/close, note start/end); phone_timeline reads them best."""
+    return _call('listen', timeout=float(wait or 0) + 15, who=who, since=since, wait=wait, page=page)
+
+
+@op()
+def phone_timeline(minutes: float = 15, kinds: list = None, limit: int = 200) -> str:
+    """A take of the phone session: everything from the phone in the last `minutes` on one clock, oldest first, one
+    line each: the time, the bar in the room (and what the phone heard), then what happened: the page's own actions
+    (opened, on which device; Listen and Stop; hidden and back; which section they scrolled to; downloads; clips
+    played; panels), taps, moods, voice notes with their length and what they said. A line '-- <piece>' marks where
+    the piece changed. Use it to lay what they said over what they did. kinds: only these (page, tap, mood, voice,
+    voice_text, answer, exam, button)."""
+    return _call('timeline', minutes=minutes, kinds=kinds, limit=limit)
 
 
 @op()

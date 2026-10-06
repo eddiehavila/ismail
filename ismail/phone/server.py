@@ -64,8 +64,9 @@ STATUS = re.compile(r'live ([\d.]+) BPM (\d+)/4 \| heard bar (\d+)(?: beat ([\d.
                     r'mixed ahead ([\d.]+) s')
 
 
-def now_iso():
-    return datetime.datetime.now().isoformat(timespec='seconds')
+def now_iso(at=None):
+    t = datetime.datetime.fromtimestamp(at) if at else datetime.datetime.now()
+    return t.isoformat(timespec='seconds')
 
 
 def ffmpeg():
@@ -191,7 +192,8 @@ class Phone:
         saved = {}
         try:
             saved = json.loads((HOME / 'state.json').read_text(encoding='utf8'))
-            self.view.update({k: saved[k] for k in ('now', 'next', 'rec_why', 'mood', 'buttons', 'pinned') if k in saved})
+            self.view.update({k: saved[k] for k in ('now', 'next', 'rec_why', 'mood', 'buttons', 'pinned', 'panels')
+                              if k in saved})
         except (OSError, ValueError):
             pass
         self.view.setdefault('marks', {})         # piece text -> 'loved' | 'replay' | 'new' (the DJ's, phone_now)
@@ -200,7 +202,8 @@ class Phone:
         except NameError:
             pass
         self.taps = collections.deque(self._recent_taps(), maxlen=60)   # what they loved and asked for, newest last
-        self.files = {}                            # token -> path (only what an op offered is served)
+        self.files = {k: Path(v) for k, v in (saved.get('files') or {}).items()}   # token -> path (only what an op offered is served); a panel
+                                                      # or exam left open survives a restart with its clips
         self.page_seen = 0.0                       # the last time an open page asked for its state
         self.engine = None                         # the playing engine's parsed status
         self.agents = {}                           # who -> last time an agent called
@@ -270,10 +273,24 @@ class Phone:
             out.append(Path(self.engine['project']) / 'notes' / 'phone_inbox.jsonl')
         return out
 
+    def room(self, age_s=0.0):
+        """The bar playing in the room age_s seconds ago, from the engine's clock (heard is what the phone's stream
+        played; this is there even when the page is off the stream, on the room speakers or a JBL)."""
+        b, e = self.beat_now(), self.engine
+        if b is None or not e or not e.get('bpm'):
+            return {}
+        b -= max(0.0, age_s) * e['bpm'] / 60
+        bpb = e.get('bpb') or 4
+        return {'beat': round(b, 2), 'bar': int(b // bpb) + 1, 'of': bar_text(b, bpb)}
+
     def post(self, rec):
+        age = float(rec.pop('_age', 0) or 0)
+        if 'heard' in rec:                                   # from the page: where the set was, on one clock
+            rec.setdefault('room', self.room(age))
+            rec.setdefault('now', self.now_text())
         with self.cond:
             self.seq += 1
-            rec = {'n': self.seq, 'ts': now_iso(), **rec}
+            rec = {'n': self.seq, 'ts': now_iso(time.time() - age), **rec}
             line = json.dumps(rec, ensure_ascii=False) + '\n'
             for p in self.routes():
                 try:
@@ -330,9 +347,9 @@ class Phone:
 
     def save(self):
         try:
-            (HOME / 'state.json').write_text(json.dumps({k: self.view[k] for k in ('now', 'next', 'rec_why', 'mood',
-                                                                                    'buttons', 'pinned', 'marks')}),
-                                             encoding='utf8')
+            st = {k: self.view[k] for k in ('now', 'next', 'rec_why', 'mood', 'buttons', 'pinned', 'marks', 'panels')}
+            st['files'] = {k: str(v) for k, v in self.files.items()}
+            (HOME / 'state.json').write_text(json.dumps(st), encoding='utf8')
         except OSError:
             pass
 
@@ -512,13 +529,13 @@ class Phone:
         return out
 
     # ---- voice notes
-    def add_voice(self, data, mime, sid, t):
+    def add_voice(self, data, mime, sid, t, extra=None):
         vid = datetime.datetime.now().strftime('%Y%m%d_%H%M%S_') + secrets.token_hex(2)
         ext = 'webm' if 'webm' in (mime or '') else 'ogg' if 'ogg' in (mime or '') else 'm4a' if 'mp4' in (mime or '') else 'bin'
         f = HOME / 'voice' / f'{vid}.{ext}'
         f.write_bytes(data)
         rec = self.post({'kind': 'voice', 'id': vid, 'file': str(f), 'state': 'transcribing', 'sid': sid,
-                         'heard': self.heard(sid, t)})
+                         'heard': self.heard(sid, t), **(extra or {})})
         self.voice_state[vid] = 'queued'
         self.voice_q.append((vid, f, rec['heard'], sid))
         return rec
@@ -581,6 +598,7 @@ class Phone:
                 return k
         k = secrets.token_urlsafe(9)
         self.files[k] = p
+        self.save()
         return k
 
     # ---- state for the page
@@ -724,6 +742,7 @@ class Agent:
     def _panel(self, p, wait):
         v = self.ph.view
         v['panels'] = [x for x in v['panels'] if x['id'] != p['id']] + [p]
+        self.ph.save()
         self.ph.cmd('panel', panel=p)
         got = self._wait_answer(p['id'], wait)
         if got:
@@ -746,6 +765,7 @@ class Agent:
         v = self.ph.view
         had = any(x['id'] == panel_id for x in v['panels'])
         v['panels'] = [x for x in v['panels'] if x['id'] != panel_id]
+        self.ph.save()
         self.ph.cmd('close', ref=panel_id)
         return f"closed {panel_id}" if had else f"no open panel {panel_id}"
 
@@ -785,17 +805,56 @@ class Agent:
         self.ph.cmd('buzz', pattern=pattern or [200, 100, 200])
         return 'buzzed (if the page is open)'
 
-    def op_listen(self, who, since=None, wait=25):
+    def op_listen(self, who, since=None, wait=25, page=False):
         ph = self.ph
         ph.agents[who] = time.time()
         since = ph.seq if since is None else int(since)
         end = time.time() + float(wait or 0)
-        with ph.cond:
-            while ph.seq <= since and time.time() < end:
-                ph.cond.wait(min(5.0, end - time.time()))
-                ph.agents[who] = time.time()
-        rows = ph.read_inbox(since)
+        keep = (lambda r: True) if page else (lambda r: r.get('kind') != 'page')
+        rows = [r for r in ph.read_inbox(since) if keep(r)]
+        while not rows and time.time() < end:          # the page's own actions (scrolls, opens) do not wake you
+            seen = ph.seq
+            with ph.cond:
+                while ph.seq <= seen and time.time() < end:
+                    ph.cond.wait(min(5.0, end - time.time()))
+                    ph.agents[who] = time.time()
+            rows = [r for r in ph.read_inbox(since) if keep(r)]
         return json.dumps({'since': ph.seq, 'lines': rows}, ensure_ascii=False)
+
+    def op_timeline(self, minutes=15, kinds=None, limit=200):
+        """Everything from the phone in the last `minutes` on one clock, oldest first, one line each: time, the bar
+        in the room (and what the phone heard), the piece, then what happened. A take of the phone session."""
+        ph = self.ph
+        start = datetime.datetime.now() - datetime.timedelta(minutes=float(minutes))
+        want = set(kinds.split(',') if isinstance(kinds, str) else kinds or [])
+        rows = [r for r in ph.read_inbox(max(0, ph.seq - 5000))
+                if (r.get('ts') or '') >= start.strftime('%Y-%m-%dT%H:%M:%S') and (not want or r.get('kind') in want)]
+        L, piece = [], None
+        for r in rows[-int(limit):]:
+            k = r.get('kind')
+            if r.get('now') and r['now'] != piece:
+                piece = r['now']
+                L.append(f"            -- {piece}")
+            where = (r.get('room') or {}).get('of') or ''
+            h = (r.get('heard') or {}).get('of')
+            if h and h != where:
+                where += f" (phone heard {h})"
+            if k == 'page':
+                skip = ('n', 'ts', 'kind', 'what', 'sid', 'heard', 'room', 'now')
+                what = r['what'] + ''.join(f" {a}={v}" for a, v in r.items() if a not in skip)
+            elif k == 'voice_text':
+                what = f"said: \"{r.get('text', '')}\""
+            elif k == 'voice':
+                what = f"voice note {r.get('dur_s', '?')} s" + (f", ended by {r['ended_by']}" if r.get('ended_by') else '')
+            elif k == 'tap':
+                what = 'tap ' + str(r.get('what'))
+            elif k == 'mood':
+                what = 'mood ' + str(r.get('mood'))
+            else:
+                what = k + ' ' + json.dumps({a: v for a, v in r.items() if a in ('id', 'answer', 'label', 'state')},
+                                            ensure_ascii=False)
+            L.append(f"{(r.get('ts') or '')[11:19]}  {where:<22} {what}")
+        return '\n'.join(L) if L else f"nothing from the phone in the last {minutes} min"
 
 
 # ------------------------------------------------------------------ http
@@ -917,10 +976,35 @@ class Handler(BaseHTTPRequestHandler):
                 data = self._body()
                 if len(data) < 200:
                     return self._json(400, {'error': 'no audio'})
-                rec = ph.add_voice(data, self.headers.get('Content-Type'), g('sid'), g('t'))
+                extra = {}
+                try:
+                    if g('dur'):
+                        extra['dur_s'] = round(float(g('dur')), 1)        # how long they talked
+                        extra['_age'] = extra['dur_s']                    # the line is stamped when they started
+                except ValueError:
+                    pass
+                if g('end') in ('press', 'quiet', 'max'):
+                    extra['ended_by'] = g('end')                          # their press, 30 s of quiet, or 10 min
+                rec = ph.add_voice(data, self.headers.get('Content-Type'), g('sid'), g('t'), extra)
                 return self._json(200, {'ok': True, 'id': rec['id'], 'heard': rec['heard']})
             body = json.loads(self._body() or b'{}')
             sid, t = body.get('sid'), body.get('t')
+            if u.path == '/api/events':
+                n = 0
+                for ev in (body.get('events') or [])[:60]:
+                    what = str(ev.get('what', ''))[:40]
+                    if not re.fullmatch(r'[a-z_]+', what):
+                        continue
+                    fields = {k[:24]: (v[:300] if isinstance(v, str) else v) for k, v in ev.items()
+                              if k not in ('what', 'age_ms', 't', 'kind', 'n', 'ts', 'sid', 'heard', 'room', 'now')
+                              and isinstance(v, (str, int, float, bool)) and v is not None}
+                    if what == 'open':
+                        fields['ua'] = self.headers.get('User-Agent', '')[:300]
+                    age = max(0.0, min(3600.0, float(ev.get('age_ms') or 0) / 1000))
+                    ph.post({'kind': 'page', 'what': what, **fields, 'sid': sid, 'heard': ph.heard(sid, ev.get('t')),
+                             '_age': age})
+                    n += 1
+                return self._json(200, {'ok': True, 'n': n})
             if u.path == '/api/tap':
                 what = str(body.get('what', ''))
                 if what == 'mood':
@@ -963,6 +1047,7 @@ class Handler(BaseHTTPRequestHandler):
                     except OSError as e:
                         rec['answers_path_error'] = str(e)
                 ph.view['panels'] = [x for x in ph.view['panels'] if x['id'] != pid]
+                ph.save()
                 rec = ph.post(rec)
                 ph.cmd('close', ref=pid)
                 return self._json(200, {'ok': True, 'n': rec['n']})

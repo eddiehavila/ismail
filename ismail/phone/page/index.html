@@ -148,7 +148,7 @@ textarea{width:100%;background:var(--panel);color:var(--ink);border:1px solid va
   <div class="side"><div class="cap">Behind the room</div><div id="behind">--</div></div>
 </div>
 
-<div class="dial">
+<div class="dial" data-sec="now">
   <div class="row"><span class="cap">Now</span><span><i class="mark" id="nowmark"></i><span id="now">nothing playing</span></span></div>
   <div class="row"><span class="cap">Next</span><span><i class="mark" id="nextmark"></i><span id="next">--</span></span></div>
 </div>
@@ -156,32 +156,32 @@ textarea{width:100%;background:var(--panel);color:var(--ink);border:1px solid va
 <div class="note" id="last" hidden></div>
 <button id="startset" hidden>Ask the DJ for a set</button>
 
-<div class="transport">
+<div class="transport" data-sec="listen">
   <button id="back" aria-label="back 30 seconds">-30 s</button>
   <button id="play">Listen</button>
   <button id="golive">Live</button>
 </div>
 
-<button id="talk">Hold to talk<span id="meter"></span></button>
+<button id="talk" data-sec="talk">Hold to talk<span id="meter"></span></button>
 <div class="hint cap" id="talkhint">tap once for hands-free, tap again to send</div>
 
-<div class="keys2"><button class="key" id="love" aria-label="Love this"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20 4.6 12.6a4.4 4.4 0 0 1 7.4-5.1 4.4 4.4 0 0 1 7.4 5.1Z"/></svg><span class="lbl">Love this</span></button><button class="key" id="change" aria-label="Change it up"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h4l10 10h4M3 17h4l3-3M14 10l3-3h4M18 4l3 3-3 3M18 14l3 3-3 3"/></svg><span class="lbl">Change it up</span></button></div>
+<div class="keys2" data-sec="keys"><button class="key" id="love" aria-label="Love this"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20 4.6 12.6a4.4 4.4 0 0 1 7.4-5.1 4.4 4.4 0 0 1 7.4 5.1Z"/></svg><span class="lbl">Love this</span></button><button class="key" id="change" aria-label="Change it up"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h4l10 10h4M3 17h4l3-3M14 10l3-3h4M18 4l3 3-3 3M18 14l3 3-3 3"/></svg><span class="lbl">Change it up</span></button></div>
 <div class="pad">
   <button class="key" data-tap="energy_down" aria-label="Calmer"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5v14M12 10v9M19 15v4"/></svg><span class="lbl">Calmer</span></button><button class="key" data-tap="energy_up" aria-label="More energy"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 15v4M12 10v9M19 5v14"/></svg><span class="lbl">More energy</span></button>
   <button class="key" data-tap="quieter" aria-label="Quieter"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9h4l5-4v14l-5-4H3ZM16 12h5"/></svg><span class="lbl">Quieter</span></button><button class="key" data-tap="louder" aria-label="Louder"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9h4l5-4v14l-5-4H3ZM16 12h5M18.5 9.5v5"/></svg><span class="lbl">Louder</span></button>
   <button class="key" data-tap="pause" aria-label="Pause set"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14M16 5v14"/></svg><span class="lbl">Pause set</span></button><button class="key" data-tap="resume" aria-label="Resume set"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5 19 12 7 19Z"/></svg><span class="lbl">Resume set</span></button>
 </div>
 
-<div class="section"><span class="cap">Mood for the next chapter <span id="askedmood"></span></span>
+<div class="section" data-sec="mood"><span class="cap">Mood for the next chapter <span id="askedmood"></span></span>
   <div class="detents" id="mood"><button data-mood="calm">Calm</button><button data-mood="steady">Steady</button><button data-mood="lift">Lift</button><button data-mood="peak">Peak</button></div>
 </div>
-<div class="section" id="agentwrap" hidden><span class="cap">From the DJ, right now</span><div id="agentbtns"></div></div>
+<div class="section" id="agentwrap" hidden data-sec="dj buttons"><span class="cap">From the DJ, right now</span><div id="agentbtns"></div></div>
 
-<div class="section" id="offerbox" hidden><span class="cap">Downloads</span><div id="offers"></div></div>
-<div class="section" id="mine" hidden><span class="cap">What you asked for <span id="tally"></span></span><div class="log" id="taps"></div></div>
-<div class="section"><span class="cap">DJ log</span><div class="log" id="feed"></div></div>
+<div class="section" id="offerbox" hidden data-sec="downloads"><span class="cap">Downloads</span><div id="offers"></div></div>
+<div class="section" id="mine" hidden data-sec="your taps"><span class="cap">What you asked for <span id="tally"></span></span><div class="log" id="taps"></div></div>
+<div class="section" data-sec="dj log"><span class="cap">DJ log</span><div class="log" id="feed"></div></div>
 
-<div class="foot">
+<div class="foot" data-sec="settings">
   <span class="cap" id="listening">no agent listening</span>
   <span><button id="install" hidden>Install app</button> <button id="notify" hidden>Notify off</button> <button id="keysset">Earbud: talk</button> <button id="quality">64 kbps</button> <button id="buzzset">Buzz on</button></span>
 </div>
