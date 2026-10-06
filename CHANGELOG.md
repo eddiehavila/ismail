@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### The headset speaks when the server's voice is off
+
+- While speakwright is off, `stage_say` was silent in VR (the server answers 502). The page now says the line with the
+  headset browser's own speech engine instead (Web Speech), still waiting while the person talks; the event says
+  `voice_spoken` with `via: "headset speech (server voice off)"`, or `voice_error` when the browser has no engine or
+  voice. Lines in the speech cache still play from the server.
+
 ### The phone page in the README and the skills (Nate, 10-06: "this phone app feature should start gaining prominence")
 
 - README: the tagline names it, and a section "The phone page: the set in your pocket" says what it does (listen
