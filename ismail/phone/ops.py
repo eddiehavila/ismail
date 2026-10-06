@@ -182,14 +182,18 @@ def phone_say(text: str, speak: bool = False, pin: bool = False, buzz: bool = Fa
 
 @op()
 def phone_now(now: str = None, next: str = None, recording_why: str = None, mood: str = None,
-              now_mark: str = None, next_mark: str = None, sender: str = None) -> str:
+              now_mark: str = None, next_mark: str = None, length: float = None, sections: list = None,
+              into: float = None, sender: str = None) -> str:
     """What the page shows as now playing and next up (default: read from the engine), and why recording is on or
     off (the page always shows whether it is). '' clears a field. mood: set the mood chip (calm, steady, lift, peak).
     now_mark/next_mark: a small mark beside the piece, so they know what they are hearing: 'loved' (one they loved
     before, played again), 'replay' (played earlier, back again), 'new' (just made). Set it on every chapter change;
-    without one the page shows a heart when they tapped Love this while that piece played."""
+    without one the page shows a heart when they tapped Love this while that piece played.
+    length: the piece's length in seconds and sections: [{'at_s': 0, 'label': 'intro'}, {'at_s': 64, 'label':
+    'drop'}, ...]: the page keeps a position line on screen (elapsed / length, the next section). into: seconds into
+    the piece now, when it did not start as its name went up."""
     return _call('now', now=now, next=next, recording_why=recording_why, mood=mood, now_mark=now_mark,
-                 next_mark=next_mark, who=sender)
+                 next_mark=next_mark, length=length, sections=sections, into=into, who=sender)
 
 
 @op()
@@ -238,10 +242,14 @@ def phone_exam(title: str, clips: list, question: str = '', chips: list = None, 
 
 
 @op()
-def phone_offer(path: str, label: str = None, auto: bool = False, sender: str = None) -> str:
+def phone_offer(path: str, label: str = None, auto: bool = False, title: str = None, album: str = None,
+                artist: str = None, sender: str = None) -> str:
     """Offer a file for download on the phone (a render, a take, a PDF). auto=True starts it at once if the page is
-    open; otherwise it waits as a card with a Download button."""
-    return _call('offer', path=os.path.abspath(path), label=label, auto=auto, who=sender)
+    open; otherwise it waits as a card with a Download button. label: what the card says, and the downloaded file's
+    name (readable words, not a slug). An mp3 goes out as a tagged copy (their file is never changed): title (default
+    the label), artist (default 'ismail'), album (the song or set), the date, and ismail with its GitHub link."""
+    return _call('offer', path=os.path.abspath(path), label=label, auto=auto, title=title, album=album, artist=artist,
+                 who=sender)
 
 
 @op()
@@ -254,7 +262,9 @@ def phone_buttons(buttons: list = None, sender: str = None) -> str:
 @op()
 def phone_vibe(preset: str = None, ground: str = None, ink: str = None, accent: str = None, heading: str = None,
                image: str = None, blur: int = None, dim: float = None, effect: str = None, intensity: float = None,
-               transition_ms: int = None, reset: bool = False, menu: bool = False, sender: str = None) -> str:
+               transition_ms: int = None, reset: bool = False, menu: bool = False, layers: list = None,
+               hue_drift: float = None, at: str = None, ramp_beats: float = None, save: str = None, scene: str = None,
+               cancel_moves: bool = False, sender: str = None) -> str:
     """Set the phone page's look to fit the music, so the person feels you there (as the stage does in VR): change it
     with the mood, on chapter changes. preset: a starting point (default, rain, calm, warm, night, peak), then any
     part over it. ground/ink/accent: colours ('#rrggbb', 'rgb(r g b)', 'hsl(h s% l%)'); the ground stays dark, ink
@@ -263,10 +273,42 @@ def phone_vibe(preset: str = None, ground: str = None, ink: str = None, accent: 
     a Blender still, art another agent made) behind the page, blurred by `blur` px (0-40) and darkened by `dim`
     (0.2-0.9); '' removes it. effect: none, rain, particles, pulse (breathes on the set's beat), grain, aurora, at
     `intensity` 0-1. Changes fade over transition_ms. reset=True starts from the default skin; menu=True lists the
-    presets, faces and effects and the current vibe."""
+    presets, faces and effects, the current vibe, the saved scenes and the scheduled moves.
+    layers: up to 3 effects at once, drawn in order, each a dict: effect, intensity, speed (0.1-4), density (0-1),
+    size (0.25-4), angle (rain's slant, -60-60), opacity, color, color2, blend (normal, add, screen, multiply,
+    overlay); e.g. [{'effect': 'aurora', 'speed': 0.5}, {'effect': 'rain', 'density': 0.9, 'angle': 25, 'blend':
+    'add'}]. effect= alone replaces them with one. hue_drift: degrees a minute the colours turn (0 still).
+    at='bar:N': the look lands on bar N as the phone hears it (a drop on its downbeat); each call with at= adds a
+    move, building on the last one, and they play in bar order; ramp_beats: fade into it over that many beats.
+    cancel_moves=True drops the scheduled ones. save='name' keeps the resulting look as a scene; scene='name'
+    starts from a saved one (then any part over it)."""
     return _call('vibe', preset=preset, ground=ground, ink=ink, accent=accent, heading=heading, image=image, blur=blur,
                  dim=dim, effect=effect, intensity=intensity, transition_ms=transition_ms, reset=reset or None,
-                 menu=menu or None, who=sender)
+                 menu=menu or None, layers=layers, hue_drift=hue_drift, at=at, ramp_beats=ramp_beats, save=save,
+                 scene=scene, cancel_moves=cancel_moves or None, who=sender)
+
+
+@op()
+def phone_sounds(event: str = None, path: str = None, gain_db: float = 0.0, menu: bool = False,
+                 sender: str = None) -> str:
+    """Give the phone page its sounds: a short sound you made with ismail (render it, keep it under 5 s and 1 MB:
+    wav, ogg or mp3) plays on its event, so the page sounds like the set (Nate: every sound on it is crafted, as a
+    design rule). event: message (a phone_say caption arrives), note_start, note_end, note_sent, error (these replace
+    the built-in tones), tap (any key that sends, unless it has its own), love, change, mood, offer, panel (a panel,
+    question or exam opens), chapter (the piece changes); the stage's earcon names work too (incoming, rec_start,
+    rec_stop, sent). path='' clears one. gain_db: -30 to +6 on the page.
+    An event with no sound stays silent. menu=True (or no event) lists the events and what each plays now."""
+    if path:
+        path = os.path.abspath(path)
+    return _call('sounds', event=event, path=path, gain_db=gain_db, menu=menu or None, who=sender)
+
+
+@op()
+def phone_unsay(match: str = None, since: str = None, n: int = None) -> str:
+    """Take captions back off the phone page, its history and its pinned line: match='text' (several with '|',
+    case ignored), since='HH:MM' (today), or n=3 (the last three). Never put where the person lives, their name or
+    other personal details on the page: they may be recording the screen."""
+    return _call('unsay', match=match, since=since, n=n)
 
 
 @op()
@@ -278,5 +320,5 @@ def phone_buzz(pattern: list = None) -> str:
 @op()
 def phone_route(inbox: str = None) -> str:
     """Also write what the person sends to this file (a song's notes/phone_inbox.jsonl); none: back to the playing
-    engine's project."""
+    engine's project. The route stays across a server restart."""
     return _call('route', inbox=inbox)

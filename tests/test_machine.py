@@ -4,6 +4,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 
 import pytest
 
@@ -99,7 +100,7 @@ def test_a_busy_machine_turns_a_render_into_an_op_error_that_says_why(board, tmp
         with machine.slot('live', 'live set', threads=None):
             machine._held.depth = 0
             with pytest.raises(api.OpError) as e:
-                api.render(root)
+                api.render(root, wait='0')
             machine._held.depth = 1
         machine._held.depth = 1
     assert 'cpu slots are full' in str(e.value) and 'tears' in str(e.value)
@@ -304,9 +305,10 @@ def test_a_drive_under_the_floor_holds_every_heavy_job_and_says_where_the_space_
     root = str(tmp_path / 's')
     api.project_new(root, bpm=120, length_bars=1)
     api.track_add(root, 'k', instrument='preset:kick')
+    t = time.time()
     with pytest.raises(api.OpError) as e:
-        api.render(root)
-    assert 'cache=False skips the track cache' in str(e.value)
+        api.render(root)                                     # waits in line by default, but not for the disk
+    assert 'cache=False skips the track cache' in str(e.value) and time.time() - t < 10
     with machine.slot('live', 'live set', threads=None):     # a set on air is never held by the disk
         pass
 
@@ -339,12 +341,12 @@ def test_low_commit_holds_new_jobs_and_names_the_job_past_its_memory(board, monk
 
 def test_the_cli_says_over_memory_in_the_jobs_own_output(board):
     env = dict(os.environ, ISMAIL_MACHINE_DIR=str(board))
-    code = "import time; b = b'x' * (700 * 2 ** 20); time.sleep(2.5)"
-    out = subprocess.run([sys.executable, '-m', 'ismail.machine', 'run', '--cpu', '--force', '--mem', '0.05', '--what',
+    code = "import time; b = b'x' * (900 * 2 ** 20); time.sleep(2.5)"     # 2.5x: OVER, not paused (under 3x)
+    out = subprocess.run([sys.executable, '-m', 'ismail.machine', 'run', '--cpu', '--force', '--mem', '0.35', '--what',
                           'hog', '--', sys.executable, '-c', code], capture_output=True, text=True, env=env, timeout=120)
     assert out.returncode == 0 and 'OVER MEMORY' in out.stderr and "'hog'" in out.stderr
     j = [x for x in machine.history() if x['what'] == 'hog'][-1]
-    assert j['over_gb'] > 0.55 and j['mem_peak_gb'] >= 0.65
+    assert j['over_gb'] > 0.75 and j['mem_peak_gb'] >= 0.85 and not j.get('suspended')
 
 
 def test_a_render_in_a_big_process_is_not_over_its_estimate(board, monkeypatch):
@@ -475,3 +477,107 @@ def test_torch_takes_the_slots_threads_and_gets_its_own_back(board, monkeypatch)
     assert t.n == 8
     machine.cap_torch()                                          # outside a slot: nothing
     assert t.n == 8
+
+
+def test_a_priority_says_when_its_name_matches_no_job_and_takes_days(board):
+    """ledger:M143: `who` defaults to the working folder's name, so a grant to a session that does not set
+    ISMAIL_SESSION matched nothing, silently; and `--for 3d` (hq:D-15) raised."""
+    assert machine.duration_s('3d') == 3 * 86400
+    with machine.slot('cpu', 'render', who='ismail'):
+        pass
+    machine.set_priority('voice', 3600, by='the user')
+    miss = machine.priority_match()
+    assert "no job named 'voice'" in miss and 'ismail (1)' in miss and 'ISMAIL_SESSION' in miss
+    assert 'WARNING' in machine.board()
+    with machine.slot('cpu', 'round 41', who='voice'):
+        pass
+    assert machine.priority_match() == '' and 'WARNING' not in machine.board()
+    assert machine.main(['priority', 'voice', '--for', '3d', '--by', 'the user']) == 0
+    assert machine.priority()['until'] - time.time() > 2.9 * 86400
+
+
+def test_a_run_is_pinned_to_its_threads_cores_and_the_next_run_takes_other_cores(board):
+    """ledger:M153: a `run --cpu` with threads=2 used about 5 cores (CTranslate2 ignores the BLAS variables)."""
+    import psutil
+    if (psutil.cpu_count() or 1) < 4:
+        pytest.skip('needs 4 cores')
+    env = dict(os.environ, ISMAIL_MACHINE_DIR=str(board))
+    env.pop(machine.SLOT_ENV, None)
+    code = ("import os, psutil, subprocess, sys\n"
+            "kid = subprocess.run([sys.executable, '-c', 'import psutil; print(psutil.Process().cpu_affinity())'],"
+            " capture_output=True, text=True).stdout.strip()\n"
+            "print(psutil.Process().cpu_affinity(), kid, os.environ['NUMBA_NUM_THREADS'])")
+    out = subprocess.run([sys.executable, '-m', 'ismail.machine', 'run', '--cpu', '--force', '--threads', '2',
+                          '--what', 'pinned', '--', sys.executable, '-c', code],
+                         capture_output=True, text=True, env=env, timeout=120)
+    assert out.returncode == 0, out.stderr
+    n = psutil.cpu_count()
+    want = str([n - 2, n - 1])
+    assert out.stdout.split('] ')[0] + ']' == want and want in out.stdout.split('] ', 1)[1], out.stdout
+    assert out.stdout.split()[-1] == '2'
+    assert machine.pick_cores(n) is None
+    jdir = board / 'jobs'
+    jdir.mkdir(parents=True, exist_ok=True)
+    me = psutil.Process()
+    (jdir / 'x.json').write_text(json.dumps({'id': 'x', 'kind': 'cpu', 'what': 'w', 'who': 't', 'pid': me.pid,
+                                             'pid_start': me.create_time(), 'started': time.time(),
+                                             'cores': [n - 2, n - 1]}), encoding='utf8')
+    assert machine.pick_cores(2) == [n - 4, n - 3]                         # the next run takes the next two
+    assert 'on cores' in machine._describe(dict(json.loads((jdir / 'x.json').read_text()), threads=2))
+
+
+def test_a_job_far_past_its_memory_on_low_commit_is_paused_never_killed_and_resumes(board, monkeypatch):
+    """ledger:M154 (Nate: yes): a questcut ffmpeg declared 3 GB and grew to 37 GB; commit fell 31 -> 8 GB in 3 min
+    while a set played. At 3x its --mem with commit under 10 GB its processes are paused, and `resume` goes on."""
+    import psutil
+    monkeypatch.setattr(machine, 'METER_S', 0.05)
+    monkeypatch.setattr(machine, 'MEM_OVER_MIN_GB', 0.0)
+    monkeypatch.setattr(machine, 'memory', lambda: (8.0, 70.0, 30.0))
+    monkeypatch.setattr(machine, '_GpuSampler', lambda: type('G', (), {'stop': lambda self: {}})())
+    code = "import time; b = b'x' * (300 * 2 ** 20)\nfor i in range(400): print(i, flush=True); time.sleep(0.05)"
+    with machine.slot('cpu', 'questcut ffmpeg', mem_gb=0.01, who='steward') as job:
+        p = subprocess.Popen([sys.executable, '-c', code], stdout=subprocess.PIPE, text=True)
+        t = time.time()
+        while not (machine.jobs() and machine.jobs()[0].get('suspended')) and time.time() - t < 20:
+            time.sleep(0.05)
+        on_board = machine.jobs()[0]
+        assert on_board['suspended']['pids'] == [p.pid] and psutil.Process(p.pid).is_running()
+        assert 'SUSPENDED: OVER' in machine._describe(on_board) and 'resume' in machine._describe(on_board)
+        assert 'none is paused' not in machine.resume('nothing-like-it') and 'no paused job' in machine.resume('zzz')
+        out = machine.resume('questcut')
+        assert out.startswith("resumed 'questcut ffmpeg' (1 processes)") and 'memory is still low' in out
+        t = time.time()
+        while machine.jobs()[0].get('suspended') and time.time() - t < 10:
+            time.sleep(0.05)
+        time.sleep(0.5)
+        assert not machine.jobs()[0].get('suspended') and machine.jobs()[0].get('resumed')   # not paused again
+        p.kill()
+        p.wait()
+    assert machine.history()[-1]['suspended'] is True
+
+
+def test_a_render_waits_in_line_by_default(board, tmp_path, monkeypatch):
+    """ledger:M152 (dress rehearsal 2): a plain render refused on WAIT and told a newcomer's agent 'force=True only
+    if the user says so'. It stands in line instead, and says how long it waited."""
+    import threading
+    monkeypatch.setattr(machine, 'WAIT_POLL_S', 0.1)
+    root = str(tmp_path / 's')
+    api.project_new(root, bpm=120, length_bars=1)
+    api.track_add(root, 'k', instrument='preset:kick')
+    api.notes_write(root, 'k', 1, '0 C2 1')
+    held, free = threading.Event(), threading.Event()
+
+    def hog():
+        with machine.slot('cpu', 'render one', who='tears'):
+            held.set()
+            free.wait(10)
+    t = threading.Thread(target=hog)
+    t.start()
+    held.wait(5)
+    monkeypatch.setattr(machine, 'check', lambda *a, **k: '' if free.is_set() else 'the cpu slots are full')
+    threading.Timer(6.0, free.set).start()
+    out = api.render(root)
+    t.join(5)
+    assert 'rendered' in out and 'in line for the machine' in out
+    with pytest.raises(api.OpError, match="wait: "):
+        api.render(root, wait='soon')

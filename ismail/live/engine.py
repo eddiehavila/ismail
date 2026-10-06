@@ -51,6 +51,8 @@ DORMANT_NOISY_S = 8.0     # a path that hisses (amp, tape) keeps hissing through
 AHEAD_S = 0.5           # finished audio kept ahead of the device
 HORIZON_S = 8.0         # how far ahead events are sent to render (slow voices need the head start)
 PRELOAD_S = 60.0        # a clip queued for later renders up to this much of its first pass from the moment it is queued
+PRELOAD_WITHIN_BARS = 32    # ... once it starts within this many bars: further ahead it waits (ledger:M156: 160 clips
+                            # queued 21 minutes ahead made a backlog of 10,089 renders and 82 underruns in 6 bars)
 FEED_PER_WORKER = 2     # render jobs handed to each worker at a time; the rest wait in the engine, earliest-needed first
 AIR_S = 120.0           # output history kept for live_listen
 HOLD_S = 10             # live_status also shows each track's loudest level over this many seconds
@@ -406,6 +408,8 @@ class Engine:
                 b0 = m['placed'] if m['placed'] is not None else c.start
                 h = horizon
                 if c.start > now + EPS:
+                    if c.start - now > PRELOAD_WITHIN_BARS * self.bpb:
+                        continue                       # far ahead: nothing renders until it comes within range
                     # queued for later: render its first pass now, so loading ahead buys render time
                     h = max(h, min(c.start + c.length, c.start + PRELOAD_S / self.spb,
                                    c.end if c.end is not None else c.start + c.length))
@@ -2226,12 +2230,36 @@ class Engine:
                 self.mix_peak = 0.0
             if self.n_workers and len(self.ready) < self.n_workers:
                 lines.append(f"workers warming up: {len(self.ready)}/{self.n_workers} ready")
+            starving = self._starving()
+            if starving:
+                lines.append(starving)
             lines.append(f"render: {self.n_workers or 'inline'} workers, backlog {backlog}, late events "
                          f"{self.stats['late']} (never sounded {self.stats['lost']}; dropped unneeded renders "
                          f"{self.stats['skipped']})" + (f" (last: {self.last_late})" if self.last_late else '') +
                          f", rejected {self.stats['rejected']}, underruns {self.stats['underruns']}" +
                          (f" (last at {self.last_underrun})" if self.last_underrun else ''))
             return '\n'.join(lines)
+
+    def _starving(self):
+        """STARVING when the render line, earliest-needed first, cannot finish a render before its notes sound:
+        the jobs in the workers plus every job queued before it, at the measured render rates, spread over the
+        workers (ledger:M156: the DJ sees it before the underruns). '' when the line keeps up."""
+        if not self.n_workers or not self._backlog:
+            return ''
+        w = max(1, self.n_workers)
+        t = sum(j['est_s'] for j in self.jobs.values() if j.get('sent') and not j['warm']) / w
+        for need, _, jid, _ in sorted(self._backlog):
+            job = self.jobs.get(jid)
+            if job is None or job['warm']:
+                continue
+            t += job['est_s'] / w
+            to_s = (need - self.pos) / SR
+            if t > to_s + MARGIN_S:
+                return (f"STARVING: the render line needs about {t:.0f} s of work before "
+                        f"{fmt_bar(self.beat(need), self.bpb)} ({job['track']}), which sounds in {max(0.0, to_s):.0f} "
+                        f"s: queue less far ahead in one call (stream it), mute a heavy track, or let the machine "
+                        f"cool (machine_status)")
+        return ''
 
     def cmd_view(self, bars=8, clip=None):
         with self.lock:

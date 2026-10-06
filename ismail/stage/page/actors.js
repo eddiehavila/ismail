@@ -372,14 +372,16 @@ export function initActors(ed, live) {
     const st = { person, rig, frames, J, s, anchor, to, floor: ground, alignInv: align.clone().invert(), feet: { l: {}, r: {} },
       t0: performance.now(), loop: c.loop !== false, it, take: c.take, i: 0, rate: c.rate || 1, turn, meta,
       mirror, mirrorN: fc ? new THREE.Vector3(fc.z, 0, -fc.x) : null,
-      voice: c.voice == null ? null : !!c.voice };          // perform.js: the performance's voice with it
+      voice: c.voice == null ? null : !!c.voice,           // perform.js: the performance's voice with it
+      atMusic: c.at_music == null ? null : +c.at_music };   // on the music clock: the first frame at this song second
     // pinned in playback as while recording (the user, 2026-10-05: Sam's take played anchored by the feet, though
     // his hips were pinned to the stool): the take's own pins (meta.pins, Blender xyz), else this session's
     const pins = c.pins || meta.pins ? pinsFromMeta(c.pins || meta.pins) : anchors.get(person);
     if (pins && (pins.hips || pins.foot_l || pins.foot_r)) usePins(st, pins);
     await useStart(st, c);
     playing.set(person, st);
-    live.emit('actor_play', { person, actor: who, take: c.take, seconds: +(frames[frames.length - 1].t - frames[0].t).toFixed(1), scale: +s.toFixed(2) });
+    live.emit('actor_play', { person, actor: who, take: c.take, seconds: +(frames[frames.length - 1].t - frames[0].t).toFixed(1), scale: +s.toFixed(2),
+      ...(st.atMusic != null ? { at_music: st.atMusic, music: musicClock ? musicClock() : null } : {}) });
     return { person, actor: who, frames: frames.length, scale: +s.toFixed(2) };
   }
   // ---- follow: the person moves with the user, live, from where they stand (no take needed; a take on a person
@@ -500,6 +502,17 @@ export function initActors(ed, live) {
       }
       const T = st.frames[st.frames.length - 1].t, t0 = st.frames[0].t;
       let t = t0 + (performance.now() - st.t0) / 1000 * st.rate;
+      // on the music: the take's time is the song's (its first frame at song second atMusic), read every frame, so it
+      // stays on the beat however late it started and wherever the song loops (no music playing: the wall clock)
+      const m = st.atMusic != null && musicClock ? musicClock() : null;
+      if (m && m.playing) {
+        const span = Math.max(1e-3, T - t0);
+        t = t0 + (m.t - st.atMusic) * st.rate;
+        if (st.loop) t = t0 + ((((t - t0) % span) + span) % span);
+        else if (t > T) { stop({ person: st.person }); continue; } else if (t < t0) t = t0;
+        if (t < st.frames[st.i].t) { st.i = 0; st.feet = { l: {}, r: {} }; }   // the loop or the song wrapped
+        st.t0 = performance.now() - (t - t0) / st.rate * 1000;    // the wall clock carries on from here if it stops
+      }
       if (t > T) { if (!st.loop) { stop({ person: st.person }); continue; } st.t0 = performance.now(); t = t0; st.i = 0; st.feet = { l: {}, r: {} }; }
       while (st.i < st.frames.length - 1 && st.frames[st.i + 1].t <= t) st.i++;
       pose(st, st.frames[st.i]);
@@ -508,6 +521,8 @@ export function initActors(ed, live) {
   ed.preRender.push(update);
   const canPlay = (person) => !!world().actors[person];
   const setSource = (fn) => { source = fn; };
+  let musicClock = null;                                   // music.js now(): takes played on the music read it
+  const setMusicClock = (fn) => { musicClock = fn; };
   // where a playing take is now (its own clock, seconds) and its span
   const at = (person) => { const st = playing.get(person); return st && st.frames ? { t: st.frames[st.i].t, t0: st.frames[0].t, t1: st.frames[st.frames.length - 1].t } : null; };
   // the mirror of each person's latest Follow (kept after it stops: the take kept from it plays the same way)
@@ -717,5 +732,5 @@ export function initActors(ed, live) {
   };
   const control = initControl(ed, live, { rigOf, readProfile, setWorldQ, twoBone, pinPoint, anchor: (c) => anchor(c), pinsOf: (p) => pinsOf(p) });
   const pinsOf = (person) => { const st = playing.get(person); return st ? pinnedNames(st) : Object.keys(anchors.get(person) || {}).filter((k) => k !== 'legs' && anchors.get(person)[k]); };
-  return { play, stop, follow, setSource, playing, load, pose, canPlay, turnBy, setMode, moveTo, at, setMirror, anchor, pinsOf, control, rigOf, pinsMeta, mirrorOf };
+  return { play, stop, follow, setSource, playing, load, pose, canPlay, turnBy, setMode, moveTo, at, setMirror, anchor, pinsOf, control, rigOf, pinsMeta, mirrorOf, setMusicClock };
 }

@@ -2,6 +2,7 @@
 talk back just like I do in VR, and give live feedback through the phone ... while my phone screen is off", with the
 agents able to drive the page. The Live DJ asked for its words stamped with the bar he actually heard."""
 import json
+import subprocess
 import math
 import os
 import shutil
@@ -301,6 +302,18 @@ def test_an_open_panel_and_its_files_survive_a_restart(phone, tmp_path):
     assert saved['files'][tok].endswith('cover.png')
 
 
+def test_the_route_survives_a_restart(phone, tmp_path):
+    """ledger:M157: the DJ re-routed the inbox after every phone server restart."""
+    ph, base, _ = phone
+    (tmp_path / 'other' / 'notes').mkdir(parents=True)
+    dest = tmp_path / 'other' / 'notes' / 'phone_inbox.jsonl'
+    P.phone_route(inbox=str(dest))
+    assert json.loads((S.HOME / 'state.json').read_text(encoding='utf8'))['route'] == str(dest)
+    assert S.Phone().route == str(dest)                                     # what a restarted server loads
+    P.phone_route()
+    assert S.Phone().route is None
+
+
 def test_an_agent_sets_the_pages_vibe_and_it_stays_readable(phone, tmp_path):
     """Nate 10-06 08:18: 'change the colors ... how the headers look ... song covers in the background, blurred
     ... JavaScript effects ... I feel like you're there'. A vibe is data, checked by the server."""
@@ -351,3 +364,140 @@ def test_a_restart_is_announced_and_the_page_can_tell_it_happened(phone):
     c = [c for c in ph.cmds if c['type'] == 'restarting'][-1]
     assert c['back_in_s'] == 5.0
     assert S.page_build() == S.BUILD
+
+
+def test_downloads_have_names_and_mp3s_carry_ismail(phone, tmp_path):
+    """Nate 10-06 09:09: a readable download name, the title in the mp3, and 'ismail with the GitHub link in the ID3
+    data, very important for provenance whenever we ship mp3s'. Their own file is never changed."""
+    from ismail import tags
+    ph, base, _ = phone
+    if not S.ffmpeg():
+        pytest.skip('ffmpeg is not installed')
+    src = tmp_path / 'rec_20261006_090713_hl2.mp3'
+    subprocess.run([S.ffmpeg(), '-v', 'error', '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=mono', '-t', '1',
+                    '-b:a', '64k', str(src)], check=True)
+    before = src.read_bytes()
+    P.phone_offer(str(src), label='Clair de lune / rain bed (highlight)', album='ismail live 10-06')
+    o = get(base, '/api/state?since=0&wait=0')['offers'][-1]
+    assert o['name'] == 'Clair de lune rain bed (highlight).mp3'
+    with urllib.request.urlopen(base + o['url'] + '?dl=1', timeout=10) as r:
+        assert o['name'] in r.headers['Content-Disposition']
+        got = r.read()
+    out = tmp_path / 'got.mp3'
+    out.write_bytes(got)
+    t = tags.read_tags(str(out))
+    assert t['title'] == 'Clair de lune / rain bed (highlight)' and t['artist'] == 'ismail' and t['album'] == 'ismail live 10-06'
+    assert t['url'] == tags.HOME_URL and tags.HOME_URL in t['comment'] and t['encoder'] == 'ismail'
+    assert src.read_bytes() == before                                                   # their file is untouched
+
+
+def test_the_piece_has_a_shape_and_its_start_survives_a_restart(phone):
+    """Nate 10-06 09:12: where we are in the song, always on screen; and M139: a restart reset 'into_s'."""
+    ph, base, _ = phone
+    P.phone_now(now='chapter 9: sweet clair', length=324, into=40,
+                sections=[{'at_s': 64, 'name': 'melody'}, {'at_s': 0, 'label': 'intro'}])
+    s = get(base, '/api/state?since=0&wait=0')
+    assert s['shape']['length_s'] == 324 and [x['label'] for x in s['shape']['sections']] == ['intro', 'melody']
+    assert 40 <= s['into_s'] <= 45
+    saved = json.loads((S.HOME / 'state.json').read_text(encoding='utf8'))
+    assert saved['piece'][0] == 'chapter 9: sweet clair' and saved['shape']['length_s'] == 324
+    P.phone_now(now='chapter 10: plume')
+    assert get(base, '/api/state?since=0&wait=0')['shape'] == {}                        # a new piece clears it
+
+
+def test_an_agent_gives_the_page_its_sounds_and_they_stay(phone, tmp_path):
+    """Nate 10-06 14:42: "you make your sounds and then you attach it to this interface ... like a design
+    philosophy". One sound per event; none means silent; they survive a restart."""
+    import soundfile as sf
+    ph, base, _ = phone
+    ding = tmp_path / 'message.wav'
+    sf.write(str(ding), np.zeros(int(0.4 * 22050)), 22050)
+    long = tmp_path / 'long.wav'
+    sf.write(str(long), np.zeros(int(6 * 22050)), 22050)
+    assert '(none)' in P.phone_sounds(menu=True) and 'message' in P.phone_sounds()
+    out = P.phone_sounds(event='message', path=str(ding), gain_db=-3)
+    assert out.startswith('message: message.wav (0.40 s) at -3 dB'), out
+    s = get(base, '/api/state?since=0&wait=0')['sounds']['message']
+    assert s['url'].startswith('/files/') and s['gain_db'] == -3
+    with pytest.raises(Exception, match="event 'ding'"):
+        P.phone_sounds(event='ding', path=str(ding))
+    with pytest.raises(Exception, match='at most 5 s'):
+        P.phone_sounds(event='love', path=str(long))
+    assert '-> message.wav (-3 dB)' in P.phone_sounds(menu=True)
+    assert S.Phone().view['sounds']['message']['name'] == 'message.wav'          # a restarted server keeps it
+    assert P.phone_sounds(event='note_start', path='').endswith('(the built-in tone)')
+    assert P.phone_sounds(event='incoming', path=str(ding)).startswith('message: ')           # the stage's name
+    assert P.phone_sounds(event='message', path='') == 'message: cleared (silent)'
+    assert get(base, '/api/state?since=0&wait=0')['sounds'] == {}
+
+
+def test_the_dj_layers_effects_schedules_looks_on_bars_and_keeps_scenes(phone, monkeypatch):
+    """ledger:M160 (Nate 10-06 14:47: "way more creative control over the background"): up to three layers with
+    their own speed, density, slant, colours and blend; a look on the bar the phone hears; named scenes."""
+    ph, base, _ = phone
+    out = P.phone_vibe(reset=True, layers=[{'effect': 'aurora', 'speed': 0.6},
+                                           {'effect': 'rain', 'density': 0.9, 'angle': 25, 'blend': 'add'}],
+                       hue_drift=20, save='storm')
+    assert '1. aurora at 0.5 (speed 0.6); 2. rain at 0.5 (density 0.9, angle 25, blend add)' in out and 'storm' in out
+    v = get(base, '/api/state?since=0&wait=0')['vibe']
+    assert [x['effect'] for x in v['layers']] == ['aurora', 'rain'] and v['layers'][1]['op'] == 'lighter'
+    assert v['hue_drift'] == 20
+    for bad, why in (([{'effect': 'fire'}], "effect 'fire'"), ([{'effect': 'rain', 'wobble': 1}], 'unknown wobble'),
+                     ([{'effect': 'rain'}] * 4, 'at most 3'), ([{'effect': 'rain', 'blend': 'xor'}], "blend 'xor'")):
+        with pytest.raises(Exception, match=why):
+            P.phone_vibe(layers=bad)
+    assert 'effect pulse' in P.phone_vibe(effect='pulse')                     # one effect replaces the layers
+    out = P.phone_vibe(at='bar:9', preset='peak', ramp_beats=1)
+    assert out.startswith('at bar 9 (as the phone hears it), over 1 beats') and '1 scheduled' in out
+    P.phone_vibe(at='bar:17', scene='storm')
+    s = get(base, '/api/state?since=0&wait=0')
+    assert [m['at_bar'] for m in s['vibe_moves']] == [9, 17] and s['vibe']['effect'] == 'pulse'
+    assert s['vibe_moves'][1]['vibe']['layers'][1]['angle'] == 25                # the scene came back whole
+    monkeypatch.setattr(S.Phone, 'room', lambda self, age_s=0.0: {'beat': 4 * 18, 'bar': 19, 'of': 'bar 19'})
+    s = get(base, '/api/state?since=0&wait=0')                                 # the room is 10 bars past bar 9
+    assert [m['at_bar'] for m in s['vibe_moves']] == [17] and s['vibe']['heading'] == 'bebas'
+    assert 'cancelled' in P.phone_vibe(cancel_moves=True, effect='none')
+    assert get(base, '/api/state?since=0&wait=0')['vibe_moves'] == []
+    with pytest.raises(Exception, match='bar:N'):
+        P.phone_vibe(at='soon')
+    with pytest.raises(Exception, match="scene 'gone'"):
+        P.phone_vibe(scene='gone')
+    assert 'scenes: storm' in P.phone_vibe(menu=True)
+
+
+def test_a_caption_can_be_taken_back_off_the_page(phone):
+    """Nate 10-06 15:03: a caption named where he lives while he recorded the screen."""
+    ph, base, _ = phone
+    P.phone_say('a story set in Sometown, Somecountry')
+    P.phone_say('the piano is playing')
+    P.phone_say('pinned summary from Sometown', pin=True)
+    out = P.phone_unsay(match='sometown|elsewhere')
+    assert out.startswith('took 3 line(s) off the page'), out
+    s = get(base, '/api/state?since=0&wait=0')
+    assert [c['text'] for c in s['captions']] == ['the piano is playing'] and s['pinned'] is None
+    assert any(c['type'] == 'unsay' for c in ph.cmds)
+    assert P.phone_unsay(n=1).startswith('took 1 line(s)')
+    assert 'none matched' in P.phone_unsay(match='nothing like it')
+    with pytest.raises(Exception, match='say which'):
+        P.phone_unsay()
+
+
+def test_a_pause_tap_stops_the_set_with_no_agent_awake(phone, monkeypatch):
+    """The Live DJ's HANDOFF 50 (Nate 10-06 15:08): he pressed pause and the set played 70 s more."""
+    ph, base, _ = phone
+    stopped = []
+    monkeypatch.setattr(ph, 'stop_set', lambda project: stopped.append(project) or 'live engine stopped')
+    ph.engine = dict(ph.engine or {}, project='D:/songs/x', bpm=120)
+    send = lambda what: urllib.request.urlopen(urllib.request.Request(                 # noqa: E731
+        base + '/api/tap', data=json.dumps({'what': what}).encode(), headers={'Content-Type': 'application/json'}),
+        timeout=5).read()
+    send('pause')
+    t = time.time()
+    while not any(c['type'] == 'caption' and c['text'].startswith('Paused') for c in ph.cmds) and time.time() - t < 5:
+        time.sleep(0.05)
+    assert stopped == ['D:/songs/x']
+    rows = [json.loads(x) for x in open(S.HOME / 'inbox.jsonl', encoding='utf8')]
+    assert rows[-1]['kind'] == 'control' and rows[-1]['what'] == 'paused' and rows[-1]['by'] == 'phone server'
+    send('pause')                                                       # a second press within 15 s does nothing more
+    time.sleep(0.3)
+    assert stopped == ['D:/songs/x']

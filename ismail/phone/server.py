@@ -40,12 +40,35 @@ import numpy as np
 
 try:                                       # a package module in ismail; a plain script when phone_start runs it
     from . import vibe
+    from .. import tags
 except ImportError:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     import vibe
+    import tags
 
 HOME = Path(os.environ.get('ISMAIL_PHONE_HOME') or Path.home() / '.ismail' / 'phone')
 PAGE = Path(__file__).resolve().parent / 'page'
+# The page's sounds (Nate 10-06 14:42: "you make your sounds and then you attach it to this interface ... the same
+# thing applies to everything as like a design philosophy"). An agent makes each one with ismail and attaches it with
+# phone_sounds; an event with none stays silent, except the four note tones, which fall back to the built-in ones.
+SOUND_EVENTS = {
+    'message': 'a phone_say caption arrives (a message to them)',
+    'note_start': 'a voice note starts (built-in: a rising tone)',
+    'note_end': 'a voice note ends (built-in: a falling tone)',
+    'note_sent': 'a voice note has arrived (built-in: a chirp)',
+    'error': 'something failed: a blocked mic, a note too short (built-in: a low tone)',
+    'tap': 'any key they press that sends (love, change it up, a mood, an agent button), unless it has its own',
+    'love': 'they press Love this', 'change': 'they press Change it up', 'mood': 'they pick a mood',
+    'offer': 'a file is offered to them', 'panel': 'a panel, a question or an exam opens',
+    'chapter': 'the piece playing changes',
+}
+# the VR stage's earcon names (ismail/stage/page/voice.js) mean the same events here, so one set of names serves both
+SOUND_ALIASES = {'incoming': 'message', 'rec_start': 'note_start', 'rec_stop': 'note_end', 'sent': 'note_sent'}
+PAUSE_FADE_S = 4.0      # a pause tap fades the set out over this long and stops it (no agent needs to be awake)
+MOVE_SETTLE_BARS = 8   # a scheduled vibe becomes the standing one this many bars after the room passed its bar
+SOUND_EXT = ('.wav', '.ogg', '.mp3', '.m4a', '.webm', '.flac')
+SOUND_MAX_S, SOUND_MAX_BYTES = 5.0, 1 << 20
 SPEAK = os.environ.get('ISMAIL_SPEAK') or 'http://127.0.0.1:8765'
 SR = 44100
 BLOCK = 2048                       # frames fed per step (46 ms)
@@ -84,6 +107,13 @@ VOICE_CMDS = [(r'stop (?:listening|the stream|streaming)', 'stop_listening'), (r
               (r'resume the set', 'resume')]
 STATUS = re.compile(r'live ([\d.]+) BPM (\d+)/4 \| heard bar (\d+)(?: beat ([\d.]+))? \((\d+) s\) \| '
                     r'mixed ahead ([\d.]+) s')
+
+
+def readable_name(text):
+    """A file name a person can read: the label's words, no slashes or odd characters (a download is named this)."""
+    s = re.sub(r'[\\/:*?"<>|]+', ' ', str(text)).replace('_', ' ')
+    s = re.sub(r'\s+', ' ', s).strip(' .')[:80]
+    return s or 'ismail'
 
 
 def now_iso(at=None):
@@ -206,25 +236,29 @@ class Phone:
         (HOME / 'voice').mkdir(exist_ok=True)
         self.cond = threading.Condition()
         self.route = inbox
+        self.paused_at = 0.0
         self.seq = self._last_seq()
         self.cmd_id = 0
         self.cmds = []
         self.view = {'now': None, 'next': None, 'rec_why': None, 'mood': None, 'captions': [], 'pinned': None,
-                     'buttons': [], 'panels': [], 'offers': []}
+                     'buttons': [], 'panels': [], 'offers': [], 'sounds': {}, 'vibe_moves': [], 'scenes': {}}
         saved = {}
         try:
             saved = json.loads((HOME / 'state.json').read_text(encoding='utf8'))
-            self.view.update({k: saved[k] for k in ('now', 'next', 'rec_why', 'mood', 'buttons', 'pinned', 'panels')
-                              if k in saved})
+            self.view.update({k: saved[k] for k in ('now', 'next', 'rec_why', 'mood', 'buttons', 'pinned', 'panels',
+                                                    'shape', 'sounds', 'vibe_moves', 'scenes')
+                              if k in saved and saved[k] is not None})
         except (OSError, ValueError):
             pass
+        if not self.route and saved.get('route') and Path(saved['route']).parent.is_dir():
+            self.route = saved['route']               # phone_route survives a restart (ledger:M157)
         self.view.setdefault('marks', {})         # piece text -> 'loved' | 'replay' | 'new' (the DJ's, phone_now)
         try:
             self.view['marks'] = dict(saved.get('marks') or {})
         except NameError:
             pass
         self.taps = collections.deque(self._recent_taps(), maxlen=60)   # what they loved and asked for, newest last
-        self.piece = (None, time.time())
+        self.piece = tuple(saved.get('piece') or (None, time.time()))   # when the playing piece began (M139)
         try:
             self.view['vibe'] = vibe.resolve(saved.get('vibe') or {})
             if saved.get('vibe', {}).get('image'):
@@ -286,6 +320,9 @@ class Phone:
         t = self.view['now'] or (', '.join(e['playing']) if e and e['playing'] else None)
         if t != self.piece[0]:
             self.piece = (t, time.time())          # when this piece began (for "2:31 into it", Nate 10-06 08:24)
+            if self.view.get('shape', {}).get('of') != t:
+                self.view['shape'] = {}            # a new piece: its length and sections come with its phone_now
+            self.save()
         return t
 
     def into_s(self, age_s=0.0):
@@ -312,6 +349,18 @@ class Phone:
         elif self.engine and self.engine.get('project'):
             out.append(Path(self.engine['project']) / 'notes' / 'phone_inbox.jsonl')
         return out
+
+    def vibe_now(self):
+        """The vibe in force: moves whose bar the room passed MOVE_SETTLE_BARS ago become the vibe (the page applied
+        each on the bar it heard; this keeps a page that opens later, or one off the stream, in step)."""
+        moves, r = self.view.get('vibe_moves') or [], self.room()
+        if moves and r.get('bar'):
+            due = [m for m in moves if m['at_bar'] <= r['bar'] - MOVE_SETTLE_BARS]
+            if due:
+                self.view['vibe'] = due[-1]['vibe']
+                self.view['vibe_moves'] = [m for m in moves if m not in due]
+                self.save()
+        return self.view['vibe']
 
     def room(self, age_s=0.0):
         """The bar playing in the room age_s seconds ago, from the engine's clock (heard is what the phone's stream
@@ -344,7 +393,46 @@ class Phone:
             if rec.get('kind') in ('tap', 'mood'):
                 self.taps.append(self._tap_item(rec))
         self._hooks(rec)
+        if rec.get('kind') == 'tap' and rec.get('what') == 'pause':
+            self.pause_set(rec)
         return rec
+
+    def pause_set(self, rec):
+        """A pause tap (the key, or "pause the set" said) stops the set here and now (Nate 10-06 15:08: "Did you not
+        see my pause button press? I would definitely stop"; the DJ was mid-task for 70 s). The server fades the
+        engine out over PAUSE_FADE_S and stops it, then says so on the page and in the inbox; starting again is the
+        DJ's, on their word."""
+        e = self.engine
+        if not e or not e.get('project') or time.time() - self.paused_at < 15:
+            return
+        self.paused_at = time.time()
+        project = e['project']
+
+        def go():
+            try:
+                msg = self.stop_set(project)
+            except Exception as ex:                       # say it failed; the DJ still sees the tap
+                msg = f"could not stop it: {type(ex).__name__}: {ex}"
+            ok = not msg.startswith('could not')
+            self.post({'kind': 'control', 'what': 'paused' if ok else 'pause_failed', 'by': 'phone server',
+                       'ref': rec.get('n'), 'result': str(msg)[:300]})
+            text = ('Paused: the set faded out. Say or tap Resume when you want it back.' if ok else
+                    'Pause did not reach the set: ' + str(msg)[:120])
+            cap = {'text': text, 'ts': now_iso(), 'who': 'phone'}
+            self.view['captions'] = (self.view['captions'] + [cap])[-20:]
+            self.cmd('caption', text=text, who='phone', buzz=True)
+        threading.Thread(target=go, daemon=True).start()
+
+    def stop_set(self, project):
+        """live_stop on the playing engine, in a child process (the op table is not loaded here)."""
+        code = ("import sys; from ismail.live import ops; "
+                f"print(ops.live_stop(sys.argv[1], fade_sec={PAUSE_FADE_S}))")
+        r = subprocess.run([sys.executable, '-c', code, str(project)], capture_output=True, text=True, timeout=60,
+                           cwd=str(Path(__file__).resolve().parents[2]))
+        out = (r.stdout or '').strip().splitlines()
+        if r.returncode:
+            raise RuntimeError(((r.stderr or '').strip().splitlines() or ['failed'])[-1])
+        return out[-1] if out else 'stopped'
 
     def _hooks(self, rec):
         try:
@@ -388,8 +476,10 @@ class Phone:
 
     def save(self):
         try:
-            st = {k: self.view[k] for k in ('now', 'next', 'rec_why', 'mood', 'buttons', 'pinned', 'marks', 'panels',
-                                            'vibe')}
+            st = {k: self.view.get(k) for k in ('now', 'next', 'rec_why', 'mood', 'buttons', 'pinned', 'marks',
+                                                'panels', 'vibe', 'shape', 'sounds', 'vibe_moves', 'scenes')}
+            st['piece'] = list(self.piece)
+            st['route'] = str(self.route) if self.route else None
             st['files'] = {k: str(v) for k, v in self.files.items()}
             (HOME / 'state.json').write_text(json.dumps(st), encoding='utf8')
         except OSError:
@@ -654,7 +744,8 @@ class Phone:
         today = time.strftime('%Y-%m-%d')
         tally = collections.Counter(x['what'] for x in self.taps if (x['ts'] or '').startswith(today))
         moods = [x for x in self.taps if x['what'] == 'mood']
-        return {'engine': {'playing': bool(e), 'bpm': e['bpm'] if e else None, 'now': now_t, 'next': next_t,
+        return {'engine': {'playing': bool(e), 'bpm': e['bpm'] if e else None, 'bpb': (e.get('bpb') or 4) if e else None,
+                           'now': now_t, 'next': next_t,
                            'now_mark': self.mark(now_t), 'next_mark': self.mark(next_t)},
                 'taps': list(self.taps)[-8:][::-1], 'tally': dict(tally),
                 'asked_mood': moods[-1] if moods else None,
@@ -663,7 +754,9 @@ class Phone:
                 'offers': self.view['offers'][-4:], 'listening': agents,
                 'voice': [{'id': k, 'state': v} for k, v in self.voice_state.items()],
                 'heard': self.heard(sid, t) if sid else {}, 'cmd': self.cmd_id,
-                'vibe': self.view['vibe'], 'into_s': self.into_s(), 'clock': time.strftime('%H:%M:%S'),
+                'vibe': self.vibe_now(), 'vibe_moves': self.view.get('vibe_moves') or [], 'room': self.room(),
+                'sounds': self.view.get('sounds') or {}, 'into_s': self.into_s(), 'clock': time.strftime('%H:%M:%S'),
+                'shape': self.view.get('shape') or {},
                 'boot': BOOT, 'build': BUILD}
 
 
@@ -717,6 +810,7 @@ class Agent:
 
     def op_route(self, inbox=None):
         self.ph.route = inbox or None
+        self.ph.save()
         return f"inbox routed to {', '.join(str(p) for p in self.ph.routes())}"
 
     def op_say(self, text, speak=False, pin=False, buzz=False, voice=None, who=None):
@@ -750,7 +844,8 @@ class Agent:
                 out += f" (not spoken: the speech server does not answer: {e})"
         return out
 
-    def op_now(self, now=None, next=None, recording_why=None, mood=None, now_mark=None, next_mark=None, who=None):
+    def op_now(self, now=None, next=None, recording_why=None, mood=None, now_mark=None, next_mark=None, length=None,
+               sections=None, into=None, who=None):
         v, ph = self.ph.view, self.ph
         for k, val in (('now', now), ('next', next), ('rec_why', recording_why), ('mood', mood)):
             if val is not None:
@@ -766,6 +861,17 @@ class Agent:
                 v['marks'].pop(text, None)
         while len(v['marks']) > 200:
             v['marks'].pop(next(iter(v['marks'])))
+        t = ph.now_text()
+        if into is not None and t:                  # the piece did not start when its name went up: say where it is
+            ph.piece = (t, time.time() - max(0.0, float(into)))
+        if length is not None or sections is not None:
+            sh = v['shape'] if v.get('shape', {}).get('of') == t else {'of': t}
+            if length is not None:
+                sh['length_s'] = round(max(0.0, float(length)), 1)
+            if sections is not None:
+                sh['sections'] = sorted(({'at_s': round(float(s['at_s']), 1), 'label': str(s.get('label') or s.get('name') or '')[:40]}
+                                         for s in sections), key=lambda s: s['at_s'])[:24]
+            v['shape'] = sh
         ph.save()
         ph.cmd('view')
         return (f"now={v['now']!r} ({ph.mark(ph.now_text()) or 'no mark'}) next={v['next']!r} "
@@ -827,10 +933,24 @@ class Agent:
              'who': who}
         return self._panel(p, wait)
 
-    def op_offer(self, path, label=None, auto=False, who=None):
-        k = self.ph.offer_file(path)
-        o = {'url': '/files/' + k, 'name': Path(path).name, 'label': label or Path(path).name, 'auto': bool(auto),
-             'ts': now_iso()}
+    def op_offer(self, path, label=None, auto=False, title=None, album=None, artist=None, who=None):
+        src = Path(path).expanduser().resolve()
+        if not src.is_file():
+            raise ValueError(f'no file {path}')
+        nice = readable_name(label or src.stem) + src.suffix.lower()
+        if src.suffix.lower() == '.mp3':              # a tagged copy with a readable name; their file stays as it is
+            d = HOME / 'offers'
+            d.mkdir(parents=True, exist_ok=True)
+            out = d / nice
+            shutil.copy2(src, out)
+            try:
+                tags.tag_mp3(str(out), title=title or label or src.stem.replace('_', ' '), artist=artist, album=album)
+            except Exception as e:                    # a broken mp3 still downloads; say the tags failed
+                print(f'[phone] tags for {out.name}: {e}', flush=True)
+            src = out
+        k = self.ph.offer_file(str(src))
+        o = {'url': '/files/' + k, 'name': src.name if src.parent == HOME / 'offers' else nice,
+             'label': label or Path(path).name, 'auto': bool(auto), 'ts': now_iso()}
         self.ph.view['offers'].append(o)
         self.ph.cmd('offer', offer=o)
         return f"offered {o['name']} on the phone" + (" (starts downloading if the page is open)" if auto else '')
@@ -846,30 +966,152 @@ class Agent:
         return f"buttons on the phone: {[b['label'] for b in bs] or 'none'}; a tap arrives as kind 'button'"
 
     def op_vibe(self, preset=None, ground=None, ink=None, accent=None, heading=None, image=None, blur=None, dim=None,
-                effect=None, intensity=None, transition_ms=None, reset=False, menu=False, who=None):
+                effect=None, intensity=None, transition_ms=None, reset=False, menu=False, layers=None,
+                hue_drift=None, at=None, ramp_beats=None, save=None, scene=None, cancel_moves=False, who=None):
         ph = self.ph
+        moves = ph.view.setdefault('vibe_moves', [])
+        scenes = ph.view.setdefault('scenes', {})
         if menu:
-            return vibe.menu() + '\n' + vibe.describe(ph.view['vibe'])
+            out = vibe.menu() + '\n' + vibe.describe(self.ph.vibe_now())
+            if scenes:
+                out += '\nscenes: ' + ', '.join(scenes)
+            if moves:
+                out += '\nscheduled: ' + '; '.join(f"bar {m['at_bar']}: {vibe.describe(m['vibe'])}" for m in moves)
+            return out
+        if cancel_moves:
+            n = len(moves)
+            ph.view['vibe_moves'] = moves = []
         if preset is not None and preset not in vibe.PRESETS:
             raise ValueError(f"preset {preset!r}: one of {sorted(vibe.PRESETS)} (or set the parts yourself)")
-        cur = {} if reset else {k: v for k, v in ph.view['vibe'].items() if k in vibe.DEFAULT}
+        if scene is not None and scene not in scenes:
+            raise ValueError(f"scene {scene!r}: " + (f"saved ones: {', '.join(scenes)}" if scenes else
+                                                     "none saved yet (phone_vibe(save='name') keeps the current look)"))
+        at_bar = None
+        if at not in (None, '', 'now'):
+            m = re.fullmatch(r'(?:bar:?\s*)?(\d+)', str(at).strip().lower())
+            if not m:
+                raise ValueError(f"at {at!r}: 'bar:N' (the bar the phone hears it on), or leave it out for now")
+            at_bar = int(m.group(1))
+        # a move builds on the last scheduled look, so a list of moves reads like a score
+        base = moves[-1]['vibe'] if moves and at_bar is not None else ph.vibe_now()
+        cur = {} if reset else {k: v for k, v in base.items() if k in vibe.DEFAULT}
+        if scene is not None:
+            cur = {k: v for k, v in scenes[scene].items() if k in vibe.DEFAULT}
         if preset:
             cur.update({k: v for k, v in vibe.DEFAULT.items() if k not in ('image', 'blur', 'dim')})
             cur.update(vibe.PRESETS[preset])
+        if (effect is not None or intensity is not None) and layers is None:
+            cur['layers'] = None                       # the one-effect shortcut replaces the layers
         for k, v in (('ground', ground), ('ink', ink), ('accent', accent), ('heading', heading), ('blur', blur),
-                     ('dim', dim), ('effect', effect), ('intensity', intensity), ('transition_ms', transition_ms)):
+                     ('dim', dim), ('effect', effect), ('intensity', intensity), ('transition_ms', transition_ms),
+                     ('layers', layers), ('hue_drift', hue_drift)):
             if v is not None:
                 cur[k] = v
+        if preset and layers is None and effect is None:
+            cur['layers'] = None
         name = ph.view['vibe'].get('image_name')
         if image is not None:
             cur['image'] = '/files/' + ph.offer_file(image) if image else None
             name = Path(image).name if image else None
         v = vibe.resolve(cur)
         v['image_name'] = name if v.get('image') else None
+        if save:
+            scenes[str(save)] = v
+        ramp = None if ramp_beats is None else round(max(0.0, min(64.0, float(ramp_beats))), 2)
+        if at_bar is not None:
+            moves.append({'at_bar': at_bar, 'vibe': v, 'ramp_beats': ramp})
+            moves.sort(key=lambda m: m['at_bar'])
+            ph.save()
+            ph.cmd('vibe_moves', moves=moves)
+            return (f"at bar {at_bar} (as the phone hears it)" + (f", over {ramp:g} beats" if ramp else '') + ": "
+                    + vibe.describe(v) + (f" (saved as scene {save!r})" if save else '')
+                    + f"; {len(moves)} scheduled")
+        if ramp:
+            v['ramp_beats'] = ramp
         ph.view['vibe'] = v
         ph.save()
         ph.cmd('vibe', vibe=v)
-        return vibe.describe(v) + " (on the page now, fading over " + str(v['transition_ms']) + " ms)"
+        if cancel_moves:
+            ph.cmd('vibe_moves', moves=[])
+        return (vibe.describe(v) + (f" (saved as scene {save!r})" if save else '') + " (on the page now, "
+                + (f"over {ramp:g} beats" if ramp else f"fading over {v['transition_ms']} ms") + ")"
+                + (f"; {n} scheduled moves cancelled" if cancel_moves and n else ''))
+
+    def op_sounds(self, event=None, path=None, gain_db=0.0, menu=False, who=None):
+        ph = self.ph
+        snd = ph.view.setdefault('sounds', {})
+
+        def one(k):
+            if k not in snd:
+                return '(none)'
+            g = snd[k].get('gain_db') or 0
+            return '-> ' + snd[k]['name'] + (f" ({g:+g} dB)" if g else '')
+
+        def listing():
+            return '\n'.join(f"  {k:<10} {one(k):<34} {v}" for k, v in SOUND_EVENTS.items())
+        if menu or event is None:
+            return 'the page\'s sounds (phone_sounds(event, path) attaches one; path="" clears it):\n' + listing()
+        event = SOUND_ALIASES.get(event, event)
+        if event not in SOUND_EVENTS:
+            raise ValueError(f"event {event!r}: one of {', '.join(SOUND_EVENTS)}")
+        if not path:
+            snd.pop(event, None)
+            ph.save()
+            ph.cmd('sounds', sounds=snd)
+            return f"{event}: cleared (" + ('the built-in tone' if event in ('note_start', 'note_end', 'note_sent', 'error')
+                                           else 'silent') + ")"
+        p = Path(path).expanduser()
+        if not p.is_file():
+            raise ValueError(f"no file {path}")
+        if p.suffix.lower() not in SOUND_EXT:
+            raise ValueError(f"{p.name}: a sound is {', '.join(SOUND_EXT)} (render it with mp3='also', or an ogg)")
+        if p.stat().st_size > SOUND_MAX_BYTES:
+            raise ValueError(f"{p.name} is {p.stat().st_size / 2 ** 20:.1f} MB: a page sound is at most 1 MB (a short "
+                             f"mp3 or ogg)")
+        try:
+            import soundfile as sf
+            dur = sf.info(str(p)).duration
+        except Exception:
+            dur = None
+        if dur is not None and dur > SOUND_MAX_S:
+            raise ValueError(f"{p.name} is {dur:.1f} s: a page sound is at most {SOUND_MAX_S:g} s (it plays over the "
+                             f"set; trim it)")
+        g = max(-30.0, min(6.0, float(gain_db or 0.0)))
+        snd[event] = {'url': '/files/' + ph.offer_file(str(p)), 'name': p.name, 'gain_db': g}
+        ph.save()
+        ph.cmd('sounds', sounds=snd)
+        return (f"{event}: {p.name}" + (f" ({dur:.2f} s)" if dur else '') + (f" at {g:+g} dB" if g else '') +
+                " (the page plays it from now on; it never plays on its own, only on its event)")
+
+    def op_unsay(self, match=None, since=None, n=None, who=None):
+        """Take captions back off the page (Nate 10-06 15:03: a caption named where he lives while he recorded the
+        screen): every caption whose text contains `match` (any of several, '|' between them, case ignored), every
+        one since `since` ('HH:MM' today or an ISO time), or the last `n`. The pinned line too, when it matches."""
+        ph = self.ph
+        caps = ph.view['captions']
+        if not (match or since or n):
+            raise ValueError("say which: match='text' (or 'a|b'), since='HH:MM', or n=3 (the last three)")
+        words = [w.strip().lower() for w in str(match).split('|') if w.strip()] if match else []
+        if since:
+            t = str(since).strip()
+            if re.fullmatch(r'\d{1,2}:\d{2}', t):
+                t = datetime.date.today().isoformat() + 'T' + t.zfill(5)
+        gone = []
+        for i, c in enumerate(caps):
+            hit = (words and any(w in c['text'].lower() for w in words)) or (since and c['ts'] >= t) or \
+                  (n and i >= len(caps) - int(n))
+            if hit:
+                gone.append(c)
+        ph.view['captions'] = [c for c in caps if c not in gone]
+        pin = ph.view.get('pinned')
+        if pin and ((words and any(w in pin['text'].lower() for w in words)) or pin in gone):
+            ph.view['pinned'] = None
+            gone.append(pin)
+        ph.save()
+        ph.cmd('unsay', texts=[c['text'] for c in gone])
+        return (f"took {len(gone)} line(s) off the page" + (": " + '; '.join(c['text'][:50] for c in gone[:5]) if gone
+                                                            else " (none matched)")
+                + ". A screenshot or recording already made keeps them; the page's notification is closed too")
 
     def op_restarting(self, back_in_s=5, why='updating'):
         """Tell the open page the server is about to restart: it says so, then reconnects the stream at once."""
@@ -976,7 +1218,9 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header('Content-Length', str(len(data)))
         self.send_header('Cache-Control', 'no-cache')
         if download:
-            self.send_header('Content-Disposition', f'attachment; filename="{p.name}"')
+            name = next((o['name'] for o in self.ph.view['offers'] if o['url'].endswith('/' + self.path.split('/')[2]
+                                                                                     .split('?')[0])), p.name)
+            self.send_header('Content-Disposition', f'attachment; filename="{name}"')
         self.end_headers()
         self.wfile.write(data)
 
