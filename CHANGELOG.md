@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### First session: one opening, the person's words, calmer setup (ledger:M151 G-1, G-2, U-1..U-4)
+
+- One opening: guide's FIRST SESSION block is the only one. SKILL.md's step 0 no longer asks for a recording first
+  (one is welcome, never required), and the skill's first-session section, README, AGENTS.md and setup.md point to
+  the block. At most two questions before any sound: what it is for and whether they play, then a mood or a
+  reference.
+- `guide(first_answer=<their words>)` says which words to use from then on: musician (they name an instrument they
+  play, a style they trained in, or reading music; a negated mention does not count), with their trade's words, or
+  plain words. user-experience.md has the rule.
+- setup.md: before the first command, "about 10 to 20 Allow boxes" (how it was counted is in a comment beside it);
+  the plugin added from the shell when a `claude` command is there, otherwise both lines in one block with one
+  sentence, or one line on Claude Code 2.1.275+; "Quit Claude from the tray" on Windows; Documents found through
+  the known-folder path (OneDrive moves it), replacing the `%USERPROFILE%\Documents` setx line; every wait named
+  with its time from the dress rehearsals (install, warm-up, first call, first sketch). The first-session block
+  says the sketch times too.
+
 ### A pause tap stops the set by itself (the Live DJ's HANDOFF 50, Nate 10-06 15:08)
 
 - The phone server fades the playing engine out over 4 s and stops it when the person taps Pause or says "pause the
