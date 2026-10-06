@@ -503,6 +503,8 @@ function renderPanel() {
       + (c.note ? `<div class="hint">${esc(c.note)}</div>` : '')
       + (p.chips && p.chips.length ? `<div class="chips">${p.chips.map((w) => `<button data-chip="${esc(w)}">${esc(w)}</button>`).join('')}</div>` : '') + '</div>').join('');
     if (p.choices && p.choices.length) h += `<div class="btns">${p.choices.map((c) => `<button class="choice" data-choice="${esc(c)}">${esc(c)}</button>`).join('')}</div>`;
+    const dev = store.get('listen_on', '');
+    h += `<div class="hint">Listening on</div><div class="chips" id="listenon">${['Earbuds', 'Headphones', 'Phone speaker', 'Speaker'].map((w) => `<button data-on="${w}" class="${w === dev ? 'sel' : ''}">${w}</button>`).join('')}</div>`;
     h += `<textarea id="examnote" placeholder="a note (optional)"></textarea><div class="btns"><button id="submit" style="font-weight:700">Submit</button></div>`;
   } else {
     h += `<div class="btns">${(p.buttons || ['OK']).map((b) => `<button data-answer="${esc(b)}">${esc(b)}</button>`).join('')}</div>`;
@@ -514,6 +516,7 @@ function renderPanel() {
     if (j) { toast('sent: ' + b.dataset.answer); } } });
   box.querySelectorAll('.playclip').forEach((b) => { b.onclick = () => playClip(b.dataset.url, b.closest('.clip')); });
   box.querySelectorAll('[data-chip]').forEach((b) => { b.onclick = () => b.classList.toggle('sel'); });
+  box.querySelectorAll('[data-on]').forEach((b) => { b.onclick = () => { box.querySelectorAll('[data-on]').forEach((x) => x.classList.remove('sel')); b.classList.add('sel'); store.set('listen_on', b.dataset.on); }; });
   box.querySelectorAll('[data-choice]').forEach((b) => { b.onclick = () => { box.querySelectorAll('[data-choice]').forEach((x) => x.classList.remove('sel')); b.classList.add('sel'); }; });
   const sub = box.querySelector('#submit');
   if (sub) sub.onclick = async () => {
@@ -521,9 +524,23 @@ function renderPanel() {
       note: (box.querySelector('#examnote') || {}).value || '' };
     box.querySelectorAll('.clip').forEach((c) => { const lab = p.clips[+c.dataset.i].label; answers.clips[lab] = [...c.querySelectorAll('[data-chip].sel')].map((x) => x.dataset.chip); });
     if (p.choices && p.choices.length && !answers.choice) { toast('pick one answer first'); return; }
+    answers.device = await deviceInfo((box.querySelector('[data-on].sel') || { dataset: {} }).dataset.on || '');
     const j = await send('/api/answer', { id: p.id, answers });
     if (j) { toast('submitted, thank you'); stopClip(); }
   };
+}
+// What the person listened on, for an exam's answers: their pick, and what the browser can name (Chrome on a computer
+// lists outputs; a phone usually does not, so the pick matters there). Labels need the page's mic permission.
+async function deviceInfo(pick) {
+  const out = { listening_on: pick || null, mobile: /Mobi|Android/i.test(navigator.userAgent) };
+  try {
+    const ds = await navigator.mediaDevices.enumerateDevices();
+    const o = ds.filter((d) => d.kind === 'audiooutput' && d.label), i = ds.filter((d) => d.kind === 'audioinput' && d.label);
+    if (o.length) out.output = (o.find((d) => d.deviceId === 'default') || o[0]).label;
+    if (talk.stream && talk.stream.getAudioTracks()[0]) out.mic = talk.stream.getAudioTracks()[0].label;
+    else if (i.length) out.mic = (i.find((d) => d.deviceId === 'default') || i[0]).label;
+  } catch (e) {}
+  return out;
 }
 function renderOffers() {
   const os = state.offers || [];
