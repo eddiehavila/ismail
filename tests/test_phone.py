@@ -403,3 +403,29 @@ def test_the_piece_has_a_shape_and_its_start_survives_a_restart(phone):
     assert saved['piece'][0] == 'chapter 9: sweet clair' and saved['shape']['length_s'] == 324
     P.phone_now(now='chapter 10: plume')
     assert get(base, '/api/state?since=0&wait=0')['shape'] == {}                        # a new piece clears it
+
+
+def test_an_agent_gives_the_page_its_sounds_and_they_stay(phone, tmp_path):
+    """Nate 10-06 14:42: "you make your sounds and then you attach it to this interface ... like a design
+    philosophy". One sound per event; none means silent; they survive a restart."""
+    import soundfile as sf
+    ph, base, _ = phone
+    ding = tmp_path / 'message.wav'
+    sf.write(str(ding), np.zeros(int(0.4 * 22050)), 22050)
+    long = tmp_path / 'long.wav'
+    sf.write(str(long), np.zeros(int(6 * 22050)), 22050)
+    assert '(none)' in P.phone_sounds(menu=True) and 'message' in P.phone_sounds()
+    out = P.phone_sounds(event='message', path=str(ding), gain_db=-3)
+    assert out.startswith('message: message.wav (0.40 s) at -3 dB'), out
+    s = get(base, '/api/state?since=0&wait=0')['sounds']['message']
+    assert s['url'].startswith('/files/') and s['gain_db'] == -3
+    with pytest.raises(Exception, match="event 'ding'"):
+        P.phone_sounds(event='ding', path=str(ding))
+    with pytest.raises(Exception, match='at most 5 s'):
+        P.phone_sounds(event='love', path=str(long))
+    assert '-> message.wav (-3 dB)' in P.phone_sounds(menu=True)
+    assert S.Phone().view['sounds']['message']['name'] == 'message.wav'          # a restarted server keeps it
+    assert P.phone_sounds(event='note_start', path='').endswith('(the built-in tone)')
+    assert P.phone_sounds(event='incoming', path=str(ding)).startswith('message: ')           # the stage's name
+    assert P.phone_sounds(event='message', path='') == 'message: cleared (silent)'
+    assert get(base, '/api/state?since=0&wait=0')['sounds'] == {}

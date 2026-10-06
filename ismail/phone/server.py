@@ -49,6 +49,24 @@ except ImportError:
 
 HOME = Path(os.environ.get('ISMAIL_PHONE_HOME') or Path.home() / '.ismail' / 'phone')
 PAGE = Path(__file__).resolve().parent / 'page'
+# The page's sounds (Nate 10-06 14:42: "you make your sounds and then you attach it to this interface ... the same
+# thing applies to everything as like a design philosophy"). An agent makes each one with ismail and attaches it with
+# phone_sounds; an event with none stays silent, except the four note tones, which fall back to the built-in ones.
+SOUND_EVENTS = {
+    'message': 'a phone_say caption arrives (a message to them)',
+    'note_start': 'a voice note starts (built-in: a rising tone)',
+    'note_end': 'a voice note ends (built-in: a falling tone)',
+    'note_sent': 'a voice note has arrived (built-in: a chirp)',
+    'error': 'something failed: a blocked mic, a note too short (built-in: a low tone)',
+    'tap': 'any key they press that sends (love, change it up, a mood, an agent button), unless it has its own',
+    'love': 'they press Love this', 'change': 'they press Change it up', 'mood': 'they pick a mood',
+    'offer': 'a file is offered to them', 'panel': 'a panel, a question or an exam opens',
+    'chapter': 'the piece playing changes',
+}
+# the VR stage's earcon names (ismail/stage/page/voice.js) mean the same events here, so one set of names serves both
+SOUND_ALIASES = {'incoming': 'message', 'rec_start': 'note_start', 'rec_stop': 'note_end', 'sent': 'note_sent'}
+SOUND_EXT = ('.wav', '.ogg', '.mp3', '.m4a', '.webm', '.flac')
+SOUND_MAX_S, SOUND_MAX_BYTES = 5.0, 1 << 20
 SPEAK = os.environ.get('ISMAIL_SPEAK') or 'http://127.0.0.1:8765'
 SR = 44100
 BLOCK = 2048                       # frames fed per step (46 ms)
@@ -220,12 +238,12 @@ class Phone:
         self.cmd_id = 0
         self.cmds = []
         self.view = {'now': None, 'next': None, 'rec_why': None, 'mood': None, 'captions': [], 'pinned': None,
-                     'buttons': [], 'panels': [], 'offers': []}
+                     'buttons': [], 'panels': [], 'offers': [], 'sounds': {}}
         saved = {}
         try:
             saved = json.loads((HOME / 'state.json').read_text(encoding='utf8'))
             self.view.update({k: saved[k] for k in ('now', 'next', 'rec_why', 'mood', 'buttons', 'pinned', 'panels',
-                                                    'shape') if k in saved and saved[k] is not None})
+                                                    'shape', 'sounds') if k in saved and saved[k] is not None})
         except (OSError, ValueError):
             pass
         if not self.route and saved.get('route') and Path(saved['route']).parent.is_dir():
@@ -404,7 +422,7 @@ class Phone:
     def save(self):
         try:
             st = {k: self.view.get(k) for k in ('now', 'next', 'rec_why', 'mood', 'buttons', 'pinned', 'marks',
-                                                'panels', 'vibe', 'shape')}
+                                                'panels', 'vibe', 'shape', 'sounds')}
             st['piece'] = list(self.piece)
             st['route'] = str(self.route) if self.route else None
             st['files'] = {k: str(v) for k, v in self.files.items()}
@@ -680,7 +698,7 @@ class Phone:
                 'offers': self.view['offers'][-4:], 'listening': agents,
                 'voice': [{'id': k, 'state': v} for k, v in self.voice_state.items()],
                 'heard': self.heard(sid, t) if sid else {}, 'cmd': self.cmd_id,
-                'vibe': self.view['vibe'], 'into_s': self.into_s(), 'clock': time.strftime('%H:%M:%S'),
+                'vibe': self.view['vibe'], 'sounds': self.view.get('sounds') or {}, 'into_s': self.into_s(), 'clock': time.strftime('%H:%M:%S'),
                 'shape': self.view.get('shape') or {},
                 'boot': BOOT, 'build': BUILD}
 
@@ -915,6 +933,52 @@ class Agent:
         ph.save()
         ph.cmd('vibe', vibe=v)
         return vibe.describe(v) + " (on the page now, fading over " + str(v['transition_ms']) + " ms)"
+
+    def op_sounds(self, event=None, path=None, gain_db=0.0, menu=False, who=None):
+        ph = self.ph
+        snd = ph.view.setdefault('sounds', {})
+
+        def one(k):
+            if k not in snd:
+                return '(none)'
+            g = snd[k].get('gain_db') or 0
+            return '-> ' + snd[k]['name'] + (f" ({g:+g} dB)" if g else '')
+
+        def listing():
+            return '\n'.join(f"  {k:<10} {one(k):<34} {v}" for k, v in SOUND_EVENTS.items())
+        if menu or event is None:
+            return 'the page\'s sounds (phone_sounds(event, path) attaches one; path="" clears it):\n' + listing()
+        event = SOUND_ALIASES.get(event, event)
+        if event not in SOUND_EVENTS:
+            raise ValueError(f"event {event!r}: one of {', '.join(SOUND_EVENTS)}")
+        if not path:
+            snd.pop(event, None)
+            ph.save()
+            ph.cmd('sounds', sounds=snd)
+            return f"{event}: cleared (" + ('the built-in tone' if event in ('note_start', 'note_end', 'note_sent', 'error')
+                                           else 'silent') + ")"
+        p = Path(path).expanduser()
+        if not p.is_file():
+            raise ValueError(f"no file {path}")
+        if p.suffix.lower() not in SOUND_EXT:
+            raise ValueError(f"{p.name}: a sound is {', '.join(SOUND_EXT)} (render it with mp3='also', or an ogg)")
+        if p.stat().st_size > SOUND_MAX_BYTES:
+            raise ValueError(f"{p.name} is {p.stat().st_size / 2 ** 20:.1f} MB: a page sound is at most 1 MB (a short "
+                             f"mp3 or ogg)")
+        try:
+            import soundfile as sf
+            dur = sf.info(str(p)).duration
+        except Exception:
+            dur = None
+        if dur is not None and dur > SOUND_MAX_S:
+            raise ValueError(f"{p.name} is {dur:.1f} s: a page sound is at most {SOUND_MAX_S:g} s (it plays over the "
+                             f"set; trim it)")
+        g = max(-30.0, min(6.0, float(gain_db or 0.0)))
+        snd[event] = {'url': '/files/' + ph.offer_file(str(p)), 'name': p.name, 'gain_db': g}
+        ph.save()
+        ph.cmd('sounds', sounds=snd)
+        return (f"{event}: {p.name}" + (f" ({dur:.2f} s)" if dur else '') + (f" at {g:+g} dB" if g else '') +
+                " (the page plays it from now on; it never plays on its own, only on its event)")
 
     def op_restarting(self, back_in_s=5, why='updating'):
         """Tell the open page the server is about to restart: it says so, then reconnects the stream at once."""

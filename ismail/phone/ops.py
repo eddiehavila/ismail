@@ -278,6 +278,21 @@ def phone_vibe(preset: str = None, ground: str = None, ink: str = None, accent: 
 
 
 @op()
+def phone_sounds(event: str = None, path: str = None, gain_db: float = 0.0, menu: bool = False,
+                 sender: str = None) -> str:
+    """Give the phone page its sounds: a short sound you made with ismail (render it, keep it under 5 s and 1 MB:
+    wav, ogg or mp3) plays on its event, so the page sounds like the set (Nate: every sound on it is crafted, as a
+    design rule). event: message (a phone_say caption arrives), note_start, note_end, note_sent, error (these replace
+    the built-in tones), tap (any key that sends, unless it has its own), love, change, mood, offer, panel (a panel,
+    question or exam opens), chapter (the piece changes); the stage's earcon names work too (incoming, rec_start,
+    rec_stop, sent). path='' clears one. gain_db: -30 to +6 on the page.
+    An event with no sound stays silent. menu=True (or no event) lists the events and what each plays now."""
+    if path:
+        path = os.path.abspath(path)
+    return _call('sounds', event=event, path=path, gain_db=gain_db, menu=menu or None, who=sender)
+
+
+@op()
 def phone_buzz(pattern: list = None) -> str:
     """Vibrate the phone (if the page is open): pattern in ms, e.g. [200, 100, 200]."""
     return _call('buzz', pattern=pattern)

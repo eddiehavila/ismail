@@ -162,6 +162,7 @@ const SAID = { love: 'love this', change: 'change it up', energy_up: 'more energ
   quieter: 'quieter', pause: 'pause the set', resume: 'resume the set', start_set: 'start a set' };
 async function tap(what, extra) {
   buzz([40]);
+  sound(what) || sound(String(what).split(':')[0] === 'button' ? 'tap' : (extra && extra.mood ? 'mood' : 'tap')) || (what !== 'tap' && sound('tap'));
   const j = await send('/api/tap', Object.assign({ what }, extra || {}));
   if (j) toast((SAID[what] || extra && extra.mood || what) + (j.heard && j.heard.of ? ', at ' + j.heard.of : '') + ': sent');
 }
@@ -229,7 +230,15 @@ const CUES = { start: wav([[660, 90], [0, 30], [990, 120]]), end: wav([[990, 90]
 const MADE = {};
 ['start', 'end', 'sent', 'error'].forEach((n) => { const a = new Audio('cues/' + n + '.mp3'); a.preload = 'auto';
   a.addEventListener('canplaythrough', () => { MADE[n] = a.src; }, { once: true }); });
-function cue(name) { try { const a = new Audio(MADE[name] || CUES[name]); a.volume = 0.8; a.play().catch(() => {}); } catch (e) {} }
+// the sounds an agent attached (phone_sounds): one per event, played on that event only; none means silent
+let SOUNDS = {};
+function sound(evn) {
+  const s = SOUNDS[evn]; if (!s) return false;
+  try { const a = new Audio(s.url); a.volume = Math.min(1, 0.8 * Math.pow(10, (s.gain_db || 0) / 20)); a.play().catch(() => {}); } catch (e) {}
+  return true;
+}
+const CUE_EVENT = { start: 'note_start', end: 'note_end', sent: 'note_sent', error: 'error' };
+function cue(name) { if (sound(CUE_EVENT[name])) return; try { const a = new Audio(MADE[name] || CUES[name]); a.volume = 0.8; a.play().catch(() => {}); } catch (e) {} }
 async function armMic() {
   if (!micKeep) return false;               // the mic opens when a note starts
   if (talk.stream && talk.stream.active) return true;
@@ -535,7 +544,7 @@ function renderPanel() {
   const p = ps[ps.length - 1];
   if (!p) { if (shown) { $('sheet').classList.remove('show'); stopClip(); shown = null; } return; }
   if (shown === p.id) return;
-  shown = p.id; buzz([80, 60, 80]); ev('panel_open', { id: p.id, title: p.title || '' });
+  shown = p.id; buzz([80, 60, 80]); sound('panel'); ev('panel_open', { id: p.id, title: p.title || '' });
   const box = $('panel');
   let h = `<h2>${esc(p.title)}</h2>` + (p.text ? `<p>${esc(p.text)}</p>` : '') + (p.image ? `<img src="${esc(p.image)}">` : '');
   if (p.kind === 'exam') {
@@ -599,6 +608,9 @@ function render() {
   if (clockMode) showInto();
   else { $('heardcap').textContent = 'Heard'; $('bar').innerHTML = m ? `BAR ${m[1]}<span>.${esc(Math.floor(+(m[2] || 1)))}</span>` : 'BAR <span>---</span>'; }
   applyVibe(state.vibe); showPos();
+  SOUNDS = state.sounds || {};
+  if (e.now && render.now !== undefined && e.now !== render.now) sound('chapter');   // not on the first look
+  render.now = e.now || null;
   $('behind').textContent = want && h.behind_s != null ? '+' + h.behind_s.toFixed(1) + ' s' : '--';
   catchUp(h.behind_s);
   $('now').textContent = e.now || (e.playing ? 'playing' : 'nothing playing');
@@ -624,7 +636,8 @@ function render() {
   renderFeed(); renderPanel(); renderOffers(); mediaSession();
 }
 function onCmd(c) {
-  if (c.type === 'caption') { toast(c.text); if (c.buzz) buzz([150, 80, 150]); notifyBg(c.who || 'ismail live', c.text); }
+  if (c.type === 'sounds') SOUNDS = c.sounds || {};
+  else if (c.type === 'caption') { sound('message'); toast(c.text); if (c.buzz) buzz([150, 80, 150]); notifyBg(c.who || 'ismail live', c.text); }
   else if (c.type === 'buzz') buzz(c.pattern);
   else if (c.type === 'restarting') { restarting = Date.now(); toast('updating, back in a few seconds'); }
   else if (c.type === 'say_clip') {                // spoken to the page itself: nobody was on the stream
@@ -632,7 +645,8 @@ function onCmd(c) {
   }
   else if (c.type === 'stop_listening') { if (want) { setPlaying(false); cue('end'); toast('stopped listening: press the earbud or Listen to start again'); } }
   else if (c.type === 'heard') { const it = feedItems.find((x) => x.id === c.ref); if (it) it.text = '“' + c.text + '”'; else addFeed({ me: true, id: c.ref, ts: new Date().toTimeString().slice(0, 5), text: '“' + c.text + '”' }); }
-  else if (c.type === 'offer' && c.offer && c.offer.auto && document.visibilityState === 'visible') {
+  if (c.type === 'offer') sound('offer');
+  if (c.type === 'offer' && c.offer && c.offer.auto && document.visibilityState === 'visible') {
     const a = document.createElement('a'); a.href = c.offer.url + '?dl=1'; a.download = c.offer.name; document.body.appendChild(a); a.click(); a.remove(); toast('downloading ' + c.offer.name);
   }
 }

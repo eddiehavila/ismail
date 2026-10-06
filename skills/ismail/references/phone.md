@@ -80,6 +80,16 @@ in the bud, and a long press opens the phone's assistant). So, while a set plays
   mic" records with the phone's own microphone, so the earbuds may stay in music quality throughout. If the phone
   will not open the mic (the screen off, or blocked), a low tone and a line say so.
 
+## The page's sounds: make them, attach them
+
+Every sound the page makes is crafted (Nate, 10-06: "the same thing applies to everything as like a design
+philosophy"). Make each one with ismail like any sound (short, under 5 s, its peak well under the set: about
+-14 dBFS), render it with `mp3='also'`, and attach it: `phone_sounds(event='message', path=...)`. Events: `message`
+(a `phone_say` caption arrives), `note_start`, `note_end`, `note_sent`, `error` (these replace the built-in tones),
+`tap` (any key that sends, unless it has its own), `love`, `change`, `mood`, `offer`, `panel` (a panel, question or
+exam opens), `chapter` (the piece changes). An event without a sound is silent, so nothing plays that nobody chose;
+`phone_sounds(menu=True)` lists what each plays, and `path=''` clears one. Sounds stay across server restarts.
+
 Only `phone_listen` counts as listening on the page; watching the inbox file does not show them anyone is there.
 
 ## Restarting the server
