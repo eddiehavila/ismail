@@ -28,6 +28,7 @@ import { initCues } from './cues.js';
 import { initAnchors } from './anchor.js';
 import { initPerform } from './perform.js';
 import { loadWorld } from './world.js';
+import { initLoadSets } from './loadsets.js';
 import { setPickEmit } from './pickcycle.js';
 
 // the scene: ?scene=, else the server's default (scenes/stage.json "default", else its first scene)
@@ -74,6 +75,9 @@ live.handlers.take_view = (c) => takes4d.show(c);
 live.handlers.take_view_clear = () => takes4d.clear();
 const actors = initActors(ed, live);
 actors.setSource(() => hands.frameNow());   // live follow: the user's body this moment
+const loadSets = initLoadSets(ed, live, () => actors);   // named sets unloaded to keep the Quest light (loadsets.js)
+window.VR_sets = loadSets;
+actors.setUnloaded((p) => loadSets.isUnloadedPerson(p));
 // countdown: seconds to count before it starts, so the user can take the pose first (the menu's Follow counts 3)
 // an agent's Follow opens the Follow panel too (Stop, Mic off): one an agent began had none, and the user was stuck
 // inside its performance for seven minutes (2026-10-05)
@@ -104,7 +108,7 @@ live.handlers.actor_stop = (c) => actors.stop(c);
 window.VR_actors = actors;
 // scenes from inside: go to another scene, or take a re-export of this one, under the construct (scenes.js)
 window.VR_scenes = initScenes(ed, live, xr, construct, { get actors() { return actors; }, get view() { return takes4d; } });
-ed.addEventListener('switched', () => loadWorld(ed.sceneName));
+ed.loadWorld = loadWorld;                          // a scene switch reads the new world before staging (editor.js)
 ed.addEventListener('switched', () => fetch(`scenes/${encodeURIComponent(ed.sceneName)}/names.json`, { cache: 'no-store' })
   .then((r) => (r.ok ? r.json() : {})).then((n) => { ed.names = n; }).catch(() => { ed.names = {}; }));
 panels.registerPokeable(xr.panelMesh, (uv) => xr.pressUV(uv), (uv) => xr.hoverUV(uv));   // the colour panel takes a fingertip too
