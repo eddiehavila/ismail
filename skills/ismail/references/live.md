@@ -426,3 +426,9 @@ Offer the phone page whenever a set is playing and the person is about to leave 
 kitchen, the car. Say it in one line: "Want it on your phone? You can talk to me from the earbuds and tap feedback
 without unlocking." Then `phone_start` and give them the address. `references/phone.md` covers the rest: reading
 their taps and voice notes by the bar they heard, answering on the page, and the hosting.
+
+When they listen on the phone, the page is part of the show. On every chapter change: `phone_now(now=, next=,
+now_mark=, next_mark=)` ('loved' for a piece they loved before, 'replay', 'new'), and `phone_vibe` with the mood
+(a preset or colours, a heading face, the cover or a render behind it, one ambient effect). Read
+`phone_timeline` when they say "this" or "that bit": it lays their notes over what played. If they work in time,
+not bars, answer in minutes and seconds.

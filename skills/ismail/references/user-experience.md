@@ -72,6 +72,17 @@ a view of the stage) has been the fastest route to a good result. The rules that
 - Two or three numbered questions, one per variable.
 - Log every answer verbatim in the song's `notes/feedback.md`, carry a lock into the build as a constant, and note
   any new words in the lexicon.
+- Bring the page to where they are. Away from the desk the phone page is their whole channel (`phone.md`): exams
+  with `phone_exam`, questions with `phone_ask`, answers with `phone_say`. Nate (10-06) loved doing his voice tests
+  on the phone and spends whole days away from the desk for his health: plan exams that work on a phone and
+  earbuds.
+
+## Bars or time: their unit
+
+ismail's habit is bars, as in a DAW. A casual listener thinks in time: "the part at two minutes", "the last 30
+seconds". Both are measured, so answer in their unit. Lines from the phone carry the bar and `into_s` (seconds into
+the piece); the page has a Bars/Time switch. Say bars only to someone who works in bars (a producer, a musician
+reading along), and minutes and seconds to everyone else, the way a music player shows them.
 
 ## When the person is inside the work
 

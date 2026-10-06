@@ -10,6 +10,33 @@
   carries `shadowFrames` (frames in the window that re-drew the shadow maps), `playing` (people playing or following)
   and `eyes` (2 in the headset: triangles and calls count both eyes).
 
+### Takes keep what was said while recording
+
+- A take's audio is transcribed as it lands (`takes/<id>/voice.json`, a `take_voice` event), with word times on the
+  take's clock, snapped onto the measured voice. A take kept from a Follow, or recorded during one, takes its words
+  from the performance's voice clips that fall inside it.
+- `stage_takes(scene, query, person, kept)`: takes newest first with what was said, label and notes; `query` finds
+  takes by their words, label or notes, and shows each hit with its second. `stage_take_note(scene, take, label,
+  note, at)` names a take or adds a note; `stage_take_transcribe(scene, take)` fills in an older take's words. The
+  person asked for it: he says a take's name and notes while recording, and records many takes of one thing.
+
+### The headset speaks when the server's voice is off
+
+- While speakwright is off, `stage_say` was silent in VR (the server answers 502). The page now says the line with the
+  headset browser's own speech engine instead (Web Speech), still waiting while the person talks; the event says
+  `voice_spoken` with `via: "headset speech (server voice off)"`, or `voice_error` when the browser has no engine or
+  voice. Lines in the speech cache still play from the server.
+
+### The phone page in the README and the skills (Nate, 10-06: "this phone app feature should start gaining prominence")
+
+- README: the tagline names it, and a section "The phone page: the set in your pocket" says what it does (listen
+  with the screen off, earbud voice notes, taps and history, exams, the vibe, bars or time, install, the timeline).
+  203 tools (17 `phone_*`).
+- Skills: SKILL.md (away from the desk all day; answer in time to a casual listener), user-experience.md (bring the
+  page to where they are; a new "Bars or time" section), blind-tests.md (exams on the phone), live.md (the page is
+  part of the show: marks and vibe on every chapter change, the timeline), setup.md (optional: the phone page and
+  Tailscale).
+
 ### The phone server restarts without dropping the person; a stream that fell behind catches up
 
 - A restart after a merge dropped Nate's stream mid-set (10-06 08:38, "Why'd you stop?"), and a page whose command
