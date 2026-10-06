@@ -9,7 +9,10 @@
   the mic can line a sung part up with the beat heard, with no recording on. Heard from the room speaker with the
   stream off, the start is a guess from the note's arrival and the ref spans 20 s either side.
 - A hum is told from the note itself, with no button (Nate): pitched, holding its notes, few words. It reaches the
-  inbox as kind `hum`. `phone_hum(voice_id)` answers for any note. The notes, grid and swing come from the Live DJ's
+  inbox as kind `hum`. `phone_hum(voice_id)` answers for any note.
+- The page records raw by default ("Mic: raw"; "Mic: cleaned" turns the phone's echo cancelling, noise suppression
+  and gain control back on): the processing stripped the bleed on Nate's first hum. Each note carries `mic` (the
+  route and what the browser applied) and how long ago it ended, so an upload that waited offline still lines up. The notes, grid and swing come from the Live DJ's
   measuring once it holds on real hums. 213 tools.
 
 ### The update card lists every change waiting

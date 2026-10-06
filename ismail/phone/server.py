@@ -685,9 +685,11 @@ class Phone:
         f = HOME / 'voice' / f'{vid}.{ext}'
         f.write_bytes(data)
         heard = self.heard(sid, t)
-        meta = {'heard': heard, 'dur_s': (extra or {}).get('dur_s')}
+        extra = dict(extra or {})
+        ago = extra.pop('_ago', None)
+        meta = {'heard': heard, 'dur_s': extra.get('dur_s'), 'mic': extra.get('mic')}
         try:
-            meta.update(self._save_ref(vid, sid, t, meta['dur_s']))
+            meta.update(self._save_ref(vid, sid, t, meta['dur_s'], ago))
         except Exception as e:                               # never lose the note over its reference
             meta['ref_why'] = f'saving it failed ({type(e).__name__}: {e})'
         (HOME / 'voice' / f'{vid}_meta.json').write_text(json.dumps(meta), encoding='utf8')
@@ -697,7 +699,7 @@ class Phone:
         self.voice_q.append((vid, f, rec['heard'], sid))
         return rec
 
-    def _save_ref(self, vid, sid, t, dur):
+    def _save_ref(self, vid, sid, t, dur, ago=None):
         """The master the page played under a voice note, from REF_LEAD_S before it began to REF_TAIL_S after it
         ended, as <id>_ref.wav beside it, with the beat at points through it (<id>_ref.json). The music bleeding
         into the mic lines the note up with it (ledger:M163). -> meta keys."""
@@ -712,7 +714,7 @@ class Phone:
                 tl = list(self.timeline)
             if not tl:
                 return {'ref_why': 'no engine was playing (the server keeps the master only while one plays)'}
-            began = time.time() - float(dur or 0) - 1.0      # about a second to upload
+            began = time.time() - float(dur or 0) - (ago if ago is not None else 1.0)   # the page says how long ago
             p, wall = min(tl, key=lambda x: abs(x[1] - began))[:2]
             start = p + (began - wall)
             lead, tail = REF_GUESS_S, REF_GUESS_S
@@ -1444,6 +1446,13 @@ class Handler(BaseHTTPRequestHandler):
                     pass
                 if g('end') in ('press', 'quiet', 'max'):
                     extra['ended_by'] = g('end')                          # their press, 30 s of quiet, or 10 min
+                if g('mic'):
+                    extra['mic'] = g('mic')[:80]                          # route and processing: 'phone raw ec0 ns0 agc0'
+                try:
+                    if g('ago'):
+                        extra['_ago'] = min(3600.0, max(0.0, float(g('ago'))))   # how long since it ended (an upload
+                except ValueError:                                                # that waited offline included)
+                    pass
                 rec = ph.add_voice(data, self.headers.get('Content-Type'), g('sid'), g('t'), extra)
                 return self._json(200, {'ok': True, 'id': rec['id'], 'heard': rec['heard']})
             body = json.loads(self._body() or b'{}')

@@ -87,7 +87,12 @@ stopped (`<id>_ref.wav` beside the note, with the beat at points through it in `
 last two and a half minutes of the master in memory for this, whenever an engine plays, page open or not, so nothing
 has to be recording (`ISMAIL_PHONE_KEEP_MASTER=0` turns that off). When they listen on the room speaker with the
 stream off, the note's start is a guess from when it arrived, and the ref spans 20 s either side
-(`start_is_guess`, `search_s`): search that window, and the room route gets its own latency. The music bleeds into
+(`start_is_guess`, `search_s`): search that window, and the room route gets its own latency.
+
+The page records raw by default ("Mic: raw"): the phone's echo cancelling, noise suppression and gain control strip
+the bleed, and the first real hum would not line up through them (PSR 5 to 7, against 17 to 51 on clean tests).
+"Mic: cleaned" turns them back on. Every note says what it was recorded with (`mic`: 'phone raw ec0 ns0 agc0', what
+the browser actually applied), so keep each route's numbers apart. The music bleeds into
 their mic a little, and that is the sync signal: cross-correlate the note with its ref and every sample of what they
 sang maps to the beat they heard, with the stream delay and the latency of their input folded in.
 
