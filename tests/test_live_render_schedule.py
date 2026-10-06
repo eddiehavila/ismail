@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 
 from ismail.dsp import SR
-from ismail.live.engine import BLOCK, Engine
+from ismail.live.engine import BLOCK, PRELOAD_WITHIN_BARS, Engine
 
 
 def run(eng, seconds):
@@ -51,6 +51,29 @@ def test_a_clip_queued_ahead_renders_its_first_pass_now(eng):
     eng.cmd_queue([{'track': 'p', 'notes': '0 C4 1; 12 E4 1', 'bars': 4, 'at': 'bar:20'}])   # bar 20 = 38 s away
     eng.tick()
     assert len(sent) == 2                                           # both notes, well before the 8 s horizon
+
+
+def test_a_clip_queued_far_ahead_waits_until_it_is_near(eng):
+    """ledger:M156: the DJ queued a 21-minute piano set in one call; every clip rendered its first pass at once."""
+    sent = as_pool(eng, workers=8)
+    far = 1 + PRELOAD_WITHIN_BARS + 8
+    eng.cmd_queue([{'track': 'p', 'notes': '0 C4 1; 12 E4 1', 'bars': 4, 'at': f'bar:{far}'}])
+    eng.tick()
+    assert len(sent) == 0 and not eng._backlog                      # nothing yet: it is 40 bars away
+    eng.pos = eng.sample((far - 1 - PRELOAD_WITHIN_BARS) * 4 + 1)    # now within 32 bars
+    eng.tick()
+    assert len(sent) == 2
+
+
+def test_status_says_starving_before_the_underruns(eng):
+    sent = as_pool(eng, workers=1)
+    eng.cmd_queue([{'track': 'p', 'notes': '; '.join(f'{b} C4 1' for b in range(0, 16)), 'bars': 4, 'at': 'bar:2'}])
+    eng.tick()
+    assert 'STARVING' not in eng.cmd_status()                       # a pluck renders far faster than real time
+    for j in eng.jobs.values():
+        j['est_s'] = 3.0                                            # as if the machine were hot: 3 s per note
+    out = eng.cmd_status()
+    assert 'STARVING: the render line needs about' in out and '(p)' in out, out
 
 
 def test_notes_lost_to_a_late_render_are_said(eng):
