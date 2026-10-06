@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### render stands in line when the machine is busy (ledger:M152, hq:D-30)
+
+- A plain `render` refused on WAIT and told a newcomer's agent "force=True only if the user says so" (first-run dress
+  rehearsal 2). It now waits in line up to `wait='10m'` (the default), says how long it waited, and `wait='0'`
+  refuses at once as before.
+
 ### Exams know the devices; exam_check hears a band-limited take and lopsided sides (ledger:M146, Nate's approval 10-06)
 
 - vox:r39 was wasted: the takes went through Bluetooth earbuds' microphone (16 kHz audio, nothing above 7 kHz), the
