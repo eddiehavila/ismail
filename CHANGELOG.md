@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Spectrogram windows for eyes (ledger:M165 step 1, moved from vox)
+
+- `spectrogram(seconds=, f_lo=, f_hi=, ruler=, words=)` and `analysis.spectrogram_png(...)`: one sound on a fixed
+  plot box (two pictures of a window line up pixel for pixel), a ms ruler, words drawn and named, and a `.json` map
+  from pixel to (s, Hz); `analysis.eye_address` names a spot the way the person and the agent both read it. Parity
+  with vox's `eyeword.crop_png2` and its page's address: 20 of 20 pictures identical on its own files, every click
+  on the plot box the same address. The mel view with bar lines is unchanged.
+
 ### The update card lists every change waiting
 
 - The left-wrist update card lists the changes waiting (up to five, the most important first, then "+N more") and

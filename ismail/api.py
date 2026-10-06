@@ -1918,16 +1918,25 @@ def align(project: str, a: str = 'render', b: str = 'ref', bars: list = None, ba
 
 
 @op()
-def spectrogram(project: str, source: str = None, bars: list = None, out: str = None) -> str:
-    """Write a mel spectrogram PNG with bar lines (the one non-text view). Returns the PNG path."""
+def spectrogram(project: str, source: str = None, bars: list = None, out: str = None, seconds: list = None,
+                f_lo: float = None, f_hi: float = None, words: list = None, ruler: bool = False) -> str:
+    """Write a mel spectrogram PNG with bar lines (the one non-text view). Returns the PNG path.
+    For eyes (zoomed on one sound, to compare two by picture): seconds=[t0, t1] inside bars (or the source), the band
+    f_lo..f_hi Hz, ruler=True (ms from the window start), words=[{'w', 't0', 't1'}] in s. That picture sits on a fixed
+    plot box, so two of the same window line up pixel for pixel, and a .json beside it maps a pixel to (s, Hz)."""
     P = _load(project)
     path, g = P.source(source, bars)
     a, b = (g.bar_time(bars[0]), g.bar_time(bars[1] + 1)) if bars else (0.0, None)
+    if seconds:
+        a, b = a + float(seconds[0]), a + float(seconds[1])
     outp = out or os.path.join('renders', f"spec_{source.replace(':', '_').replace('/', '_')}_{bars[0] if bars else 'all'}.png")
     if not os.path.isabs(outp):
         outp = os.path.join(P.root, outp)  # relative paths are relative to the project
     os.makedirs(os.path.dirname(outp), exist_ok=True)
-    return A.spectrogram_png(path, outp, a, b, g)
+    try:
+        return A.spectrogram_png(path, outp, a, b, g, f_lo=f_lo, f_hi=f_hi, words=words, ruler=ruler)
+    except ValueError as e:
+        raise OpError(f"spectrogram: {e}")
 
 
 @op(mutates=True)
