@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Skill: loudness matching is one fixed gain, never ffmpeg loudnorm as a filter (ledger:S55, the Live DJ's handoff 51)
+
+- instruments.md (A/B clips) and mastering.md: measure, then apply one fixed gain; `loudnorm` as the filter rides the
+  level, even two-pass with `linear=true` when the true-peak ceiling would break.
+
 ### The update card lists every change waiting
 
 - The left-wrist update card lists the changes waiting (up to five, the most important first, then "+N more") and
