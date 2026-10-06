@@ -228,6 +228,8 @@ class Phone:
                                                     'shape') if k in saved and saved[k] is not None})
         except (OSError, ValueError):
             pass
+        if not self.route and saved.get('route') and Path(saved['route']).parent.is_dir():
+            self.route = saved['route']               # phone_route survives a restart (ledger:M157)
         self.view.setdefault('marks', {})         # piece text -> 'loved' | 'replay' | 'new' (the DJ's, phone_now)
         try:
             self.view['marks'] = dict(saved.get('marks') or {})
@@ -404,6 +406,7 @@ class Phone:
             st = {k: self.view.get(k) for k in ('now', 'next', 'rec_why', 'mood', 'buttons', 'pinned', 'marks',
                                                 'panels', 'vibe', 'shape')}
             st['piece'] = list(self.piece)
+            st['route'] = str(self.route) if self.route else None
             st['files'] = {k: str(v) for k, v in self.files.items()}
             (HOME / 'state.json').write_text(json.dumps(st), encoding='utf8')
         except OSError:
@@ -732,6 +735,7 @@ class Agent:
 
     def op_route(self, inbox=None):
         self.ph.route = inbox or None
+        self.ph.save()
         return f"inbox routed to {', '.join(str(p) for p in self.ph.routes())}"
 
     def op_say(self, text, speak=False, pin=False, buzz=False, voice=None, who=None):
