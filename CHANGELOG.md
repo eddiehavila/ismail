@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Security floor part B1: pairing and principals (report mode)
+
+- Devices pair once with a six-digit code (`stage_pair`, single use, two minutes; started only on this PC or by an
+  agent, never through tailscale serve) and send their key in `X-Stage-Key`; agents send the token the server keeps
+  beside the registry (`X-Stage-Agent`, via link.py). `stage_devices` lists them, `stage_unpair` revokes one at once
+  (an open long-poll with its key closes). The device file (~/.ismail/stage_devices.json) keeps a hash of each key.
+- Every event and command carries a `principal` stamped by the server: a person's device, an agent for a person,
+  the server, or unpaired; a client's own `principal` is kept only as `said_by`. ~/.ismail/stage.json `"auth"`:
+  `report` (the default: everyone accepted, the unpaired counted in /health) or `enforce` (the unpaired refused, and
+  only a person's paired device sends their voice). Wrong codes are rate-limited.
+
 ### The stage's security floor, part A (server only)
 
 - Only the stage server makes the person's words: a client posting `voice_message`, `voice_in`, `voice_heard`,
