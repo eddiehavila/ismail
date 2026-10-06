@@ -83,6 +83,16 @@ def pcm(path):
     return np.frombuffer(r.stdout, dtype=np.int16).astype(np.float32) / 32768.0
 
 
+STOP_SAID = re.compile(r"\b(?:stop|end|finish|cut)\s+(?:the\s+|this\s+)?(?:performance|performing|recording)\b", re.I)
+
+
+def asks_stop(text):
+    """The words that ask for the performance to end ("stop the performance", "stop the recording", "end
+    performance"), or None."""
+    m = STOP_SAID.search(text or '')
+    return m.group(0) if m else None
+
+
 def voiced(x):
     """Per 20 ms frame: is it voice? (power above the recording's own floor + ABOVE_FLOOR_DB)"""
     n = int(SR * FRAME_S)

@@ -496,6 +496,36 @@ def stage_take_transcribe(scene: str, take: str) -> str:
     return f"{take}: \"{v['text']}\"" + (f" ({len(v['words'])} words)" if v.get('words') else f" ({v.get('words_missing')})")
 
 
+@op(mutates=True)
+def stage_actor_start(scene: str, person: str, pose: str | dict = 'rest', mode: str = 'relative', clear: bool = False) -> str:
+    """A person's start pose, saved in their actor's profile (actors/<body>.json "start"), used by every Follow and
+    every playback of a take on them. mode 'relative': at GO (after the countdown) they hold the start pose and the
+    user's motion plays as changes from the user's pose at GO (head and spine turn as the head turns, hands move as
+    the wrists move, scaled to the body, fingers turn as the user's turn; hips and legs keep the pose); 'snap': they
+    take the user's pose (as without a start pose). pose: 'rest' (the body's own rest pose, standing at the person's
+    spot), {"take": id, "frame": n} (a frame of a recorded take), or a pose exported from Blender:
+    {"bones": {name: {"rest": {"head", "tail", "x"}, "pose": {"head", "tail", "x"}}}}, Blender metres, rest in armature
+    space (bone.head_local, bone.tail_local, bone.matrix_local x axis) and pose in world (armature.matrix_world @
+    pose_bone.head / .tail / x axis of armature.matrix_world @ pose_bone.matrix), the pelvis at least. Each bone takes
+    the world turn from its rest frame to its posed frame, the pelvis goes where the pose has it. clear=True removes
+    it. stage_actor_pose reads the joints back. The page reads it at the next Follow or playback."""
+    from . import rigs
+    adir, who = _body_of(scene, person)
+    if not (adir / f'{who}.glb').is_file():
+        raise OpError(f'{person} is played by {who}, but there is no {adir.parent.name}/actors/{who}.glb')
+    if clear:
+        f = rigs.save_start(adir, who, None)
+        return f'removed the start pose of {who} (plays {person}) in {f}'
+    try:
+        start = rigs.check_start(pose, mode)
+    except ValueError as e:
+        raise OpError(str(e))
+    f = rigs.save_start(adir, who, start)
+    what = 'rest' if start['pose'] == 'rest' else (f"take {start['pose']['take']} frame {start['pose']['frame']}"
+                                                  if 'take' in start['pose'] else f"a Blender pose of {len(start['pose']['bones'])} bones")
+    return f"start pose of {who} (plays {person}): {what}, {mode}; saved in {f}"
+
+
 NOT_IN_BATCH = {'stage_batch', 'stage_start', 'stage_stop', 'stage_listen', 'stage_scene_export', 'stage_scene_new',
                 'stage_scene_go'}
 

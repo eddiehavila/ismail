@@ -123,7 +123,7 @@ export function initPanels(ed, xrApi, hands, voice, live, body) {
     const mesh = new THREE.Mesh(new THREE.PlaneGeometry(width, width / 4),
       new THREE.MeshBasicMaterial({ map: tex, transparent: true, toneMapped: false, side: THREE.DoubleSide, depthTest: false, depthWrite: false }));   // drawn over the world, like Quest system panels (the user, 2026-10-03: a panel cut through a seated man)
     mesh.layers.set(GIZMO); mesh.renderOrder = 990;
-    const p = { id, title: c.title || '', text: c.text || '', buttons: (c.buttons || []).map(String), img: null, cv, tex, mesh,
+    const p = { id, title: c.title || '', text: c.text || '', buttons: (c.buttons || []).map(String), img: null, cv, tex, mesh, stay: !!c.stay,
       width, from: c.from ? String(c.from) : null, hover: null, answer: null, resolve: null, timer: null, t0: performance.now(),
       body: onBody ? { deg: ((c.side || senderSide(c.from)) === 'left' ? -1 : 1) * (c.angle ?? BODY_DEG), dist: c.distance ?? BODY_DIST, dy: -BODY_DROP } : null };
     if (c.image) {
@@ -191,8 +191,25 @@ export function initPanels(ed, xrApi, hands, voice, live, body) {
     voice.EAR.sent();
     const res = { id: p.id, answer: a, via, seconds: +((performance.now() - p.t0) / 1000).toFixed(1) };
     live.emit('panel_answer', res);
-    setTimeout(() => close(p.id, 'answered'), 600);        // a moment to see the choice light up
+    if (!p.stay) setTimeout(() => close(p.id, 'answered'), 600);   // a moment to see the choice light up
     if (p.resolve) { p.resolve(res); p.resolve = null; }
+  }
+  // a panel shown with stay: new content in place (a title, text, an image) and the next answer: the gallery's next
+  // image is the same panel, where it is (a new panel each time faded the old one out and opened the new one 30 cm
+  // aside: "closes the whole gallery and opens it again", the user, 2026-10-05)
+  async function rewrite(id, c) {
+    const p = panels.get(id);
+    if (!p) return { id, answer: null, why: 'closed' };
+    if (c.image) {
+      const im = await new Promise((res) => { const x = new Image(); x.onload = () => res(x); x.onerror = () => res(null); x.src = c.image; });
+      if (!panels.has(id)) return { id, answer: null, why: 'closed' };
+      p.img = im;
+    }
+    if (c.title != null) p.title = String(c.title);
+    if (c.text != null) p.text = String(c.text);
+    p.answer = null; p.hover = null; p.t0 = performance.now();
+    draw(p);
+    return new Promise((resolve) => { p.resolve = resolve; });
   }
   function close(id, why = 'closed') {
     const p = panels.get(id);
@@ -401,5 +418,5 @@ export function initPanels(ed, xrApi, hands, voice, live, body) {
   // a surface the pointer ray stops on, highlights and pinches, like a panel (waypoints.js: the pins' cards)
   function addRayTarget(mesh, api) { mesh.userData.panelApi = api; xrApi.addTarget(mesh); }
   function removeRayTarget(mesh) { xrApi.removeTarget(mesh); delete mesh.userData.panelApi; }
-  return { show, close, update, registerPokeable, panels, uiDistance, addRayTarget, removeRayTarget };
+  return { show, rewrite, close, update, registerPokeable, panels, uiDistance, addRayTarget, removeRayTarget };
 }
