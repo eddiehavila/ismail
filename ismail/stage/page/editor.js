@@ -253,6 +253,7 @@ export class Editor extends THREE.EventDispatcher {
     await this._applySaved();
     this.loaded = true;
     this.emit('loaded');                             // the user is placed first (xr.js), so the nearest pieces come first
+    this.emit('staging');                            // loadsets.js hides the unloaded sets: they never reach the GPU
     // the room assembles piece by piece around the user (reveal.js): never the whole room in one frame
     const r = await this.stage(this.root);
     console.log(`[vr] room revealed: ${r.meshes} pieces in ${r.seconds} s`);
@@ -355,6 +356,9 @@ export class Editor extends THREE.EventDispatcher {
     this.skyMode = undefined;                               // each scene keeps its own remembered sky
     this._world(got.man);
     this.emit('manifest', { man: got.man });
+    // the new scene's world.json before its room is staged: its unloaded sets (loadsets.js) and its resting people
+    // (actors.js, on 'revealed') read it; main.js sets loadWorld
+    if (this.loadWorld) await this.loadWorld(name).catch((e) => console.warn('[vr] world', e));
     const info = await this._swapIn(got.man, got.gltf, {}, null);
     this.emit('switched', { from: prev, to: name, ...info });
     return { from: prev, to: name, ...info };
@@ -393,6 +397,7 @@ export class Editor extends THREE.EventDispatcher {
     const res = this.applyEdits(unsaved, true);
     const sel = selName ? this.byName.get(selName) || null : null;
     this.select(sel, 'reload');
+    this.emit('staging');
     const r = await this.stage(this.root, replace ? { replace, oldRoot: old, minS: QUEST_UA ? 4 : 1 } : {});
     if (replace) drop(old);
     this.emit('revealed', r);

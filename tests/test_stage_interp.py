@@ -94,3 +94,37 @@ def test_python_turns_take_the_short_way_and_read_the_mode_from_anim():
     assert 2 * math.degrees(math.acos(min(1, abs(w)))) == pytest.approx(67.5, abs=0.2) and abs(x) + abs(y) < 1e-9
     assert PI.sample_anim(anim, 'cam', 2.5)['location'] == [3, 1, 0.5]
     assert PI.sample_anim({'objects': {'cam': ROT}}, 'cam', 1.25)['location'] == PI.sample(ROT, 1.25, 'stop')['location']
+
+
+def test_take_playback_mixes_between_samples_without_touching_them():
+    """Playback (actors.js) poses the frame between the two samples around t: positions lerp, quaternions nlerp the
+    short way and stay unit, names and a hand missing in one sample come from the nearer one, and the buffer it
+    writes into is never a recorded sample."""
+    s = math.sqrt(0.5)
+    a = {'t': 0, 'head': [0, 1.6, 0, 0, 0, 0, 1], 'left': {'g': 'none', 'j': [[0, 1, 0, 0, 0, 0, 1, 0.01]]}, 'right': None,
+         'body': {'hips': [0, 1, 0, 0, 0, 0, 1]}}
+    b = {'t': 0.05, 'head': [1, 1.6, 0, 0, -s, 0, -s], 'left': {'g': 'fist', 'j': [[1, 1, 0, 0, 0, 0, 1, 0.03]]},
+         'right': {'g': 'none', 'j': []}, 'body': {'hips': [2, 1, 0, 0, 0, 0, 1]}}
+    got = _node(f"""(() => {{ const a = {json.dumps(a)}, b = {json.dumps(b)}, a0 = JSON.stringify(a), b0 = JSON.stringify(b);
+        const m1 = m.mixFrame(a, b, 0.25), n1 = Math.hypot(...m1.head.slice(3, 7)), keep = m1;
+        const m2 = m.mixFrame(b, a, 0.5, m1);                       // the next frame reuses the buffer
+        const m3 = m.mixFrame(a, b, 0.75, m2);
+        return {{ m1head: JSON.parse(JSON.stringify(m.mixFrame(a, b, 0.25).head)), n1, reused: m2 === keep && m3 === keep,
+          m3: {{ t: m3.t, x: m3.head[0], g: m3.left.g, r: m3.left.j[0][7], hips: m3.body.hips[0], right: m3.right }},
+          untouched: JSON.stringify(a) === a0 && JSON.stringify(b) === b0 }}; }})()""")
+    assert got['untouched'] and got['reused']
+    assert abs(got['n1'] - 1) < 1e-9
+    h = got['m1head']
+    assert abs(h[0] - 0.25) < 1e-9 and h[6] > 0.9          # the short way: b's quaternion was given negated
+    assert 0.15 < h[4] < 0.25                                # a quarter of the way into the 90 degree turn (sin 11.25 deg = 0.195)
+    m3 = got['m3']
+    assert abs(m3['t'] - 0.0375) < 1e-9 and abs(m3['x'] - 0.75) < 1e-9 and abs(m3['hips'] - 1.5) < 1e-9
+    assert m3['g'] == 'fist' and abs(m3['r'] - 0.025) < 1e-9 and m3['right'] == {'g': 'none', 'j': []}
+
+
+def test_take_playback_mixes_only_what_posing_reads():
+    a = {'t': 0, 'head': [0, 1.6, 0, 0, 0, 0, 1], 'left': None, 'right': None, 'body': {'hips': [0, 1, 0, 0, 0, 0, 1]}}
+    b = {'t': 0.1, 'head': [1, 1.6, 0, 0, 0, 0, 1], 'left': None, 'right': None, 'body': {'hips': [2, 1, 0, 0, 0, 0, 1]}}
+    got = _node(f"""(() => {{ const a = {json.dumps(a)}, b = {json.dumps(b)}, o = m.mixTake(a, b, 0.5);
+        return {{ x: o.head[0], t: o.t, bodySame: o.body === a.body, again: m.mixTake(b, a, 0.5, o) === o }}; }})()""")
+    assert got == {'x': 0.5, 't': 0.05, 'bodySame': True, 'again': True}

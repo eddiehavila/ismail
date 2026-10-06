@@ -120,16 +120,16 @@ def check_drive(d, parts):
     return {k: v for k, v in d.items() if v is not None}
 
 
-def check_start(pose, mode):
+def check_start(pose, mode, idle=True):
     """A start pose: 'rest', {take, frame}, or {bones: {name: {rest: {head, tail, x}, pose: {head, tail, x}}}} (Blender
     metres; rest in armature space, pose in world). Raises ValueError."""
     if mode not in ('relative', 'snap'):
         raise ValueError("mode is 'relative' (hold the start pose, the user's motion as changes from GO) or 'snap'")
     if pose == 'rest':
-        return {'pose': 'rest', 'mode': mode}
+        return {'pose': 'rest', 'mode': mode, 'idle': bool(idle)}
     if isinstance(pose, dict) and pose.get('take'):
         return {'pose': {'take': str(pose['take']), 'frame': int(pose.get('frame') or 0),
-                         **({'scene': pose['scene']} if pose.get('scene') else {})}, 'mode': mode}
+                         **({'scene': pose['scene']} if pose.get('scene') else {})}, 'mode': mode, 'idle': bool(idle)}
     if isinstance(pose, dict) and isinstance(pose.get('bones'), dict):
         def vec(v):
             return isinstance(v, (list, tuple)) and len(v) == 3 and all(isinstance(x, (int, float)) for x in v)
@@ -140,7 +140,7 @@ def check_start(pose, mode):
                     raise ValueError(f"bone {name}: {side} needs head, tail and x, each [x, y, z] in Blender metres")
         if 'pelvis' not in pose['bones']:
             raise ValueError('a Blender pose needs at least the pelvis (it places the body)')
-        return {'pose': {'bones': pose['bones']}, 'mode': mode}
+        return {'pose': {'bones': pose['bones']}, 'mode': mode, 'idle': bool(idle)}
     raise ValueError("pose is 'rest', {'take': id, 'frame': n}, or {'bones': {...}} exported from Blender")
 
 

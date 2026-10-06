@@ -224,6 +224,11 @@ A person in a headset cannot see your terminal. Contact is part of the interface
 - **Find takes by what was said.** The person names takes and talks about them while recording; every take keeps
   those words. `stage_takes(query="glass")` finds them with the second each word was said; `stage_take_note` names
   a take or adds your own note.
+- **Put dances on the beat by number.** `stage_take_sync(scene, takes, bpm)` reads each take's pulse, its own BPM,
+  the rate that puts it on the beat, its seam, and the lag between takes; `loops=True` lists the best whole-bar
+  windows of a long take (clear pulse on the beat, small seam, little travel). `stage_take_loop(take, name, bpm=)`
+  cuts the best one into a seamless silent loop (or `start=`, `end=`), and `stage_take_warp(take, name, bpm, bars)`
+  moves its hits onto the beats. Play it with `stage_actor_play(take=, loop=True, at_music=)` so it stays on the song.
 - **Hand the take loop to a helper when you are busy.** `stage-takes.md` has the brief: the helper keeps the fast
   loop with the person, you keep the scene.
 
@@ -231,6 +236,12 @@ A person in a headset cannot see your terminal. Contact is part of the interface
   frame of a take, or a pose exported from Blender: the actor's rest is an A-pose standing at the origin, not the
   pose the scene shows); every Follow and playback then starts there, and the user's motion plays as changes from
   their pose at GO. Check it by number with `stage_actor_pose` (the hands on the bar top, the pelvis over the seat).
+  With a start pose they also rest in it whenever nothing plays on them, instead of the statue baked into the scene.
+- **Keep the headset light with load sets.** When the work moves to one group (the band), unload the others (the
+  dancers): `stage_set_define(scene, 'dancers', items=['person_couple_*'], note='the six dancers')` once, then
+  `stage_set_load(scene, 'dancers', loaded=False)`. They are not drawn, compiled or uploaded, their people neither
+  play nor rest, and a ghost box per member with the set's name stands in their place, so the room still says what
+  is in the film. The page replies with the meshes and triangles it took out; load them again before a take with them.
 - **Set up a moment in one call.** `stage_batch(scene, ops=[...])` runs several stage ops in order (seat a person,
   mark the clip, show a card): the page commands land together, and a failure stops the rest.
 - **Say who you are.** Pass `sender=` (your name as the person knows it, e.g. "crossroads film") on `stage_say` and
