@@ -1761,7 +1761,7 @@ def separate(project: str, source: str = 'ref', model: str = 'htdemucs_ft') -> s
     P = _load(project)
     path = P.resolve_audio(source)
     outdir = os.path.join(P.root, 'stems', os.path.splitext(os.path.basename(path))[0])
-    with machine.slot('gpu' if uses_gpu() else 'cpu', f"separate {os.path.basename(path)}"):
+    with machine.slot('gpu' if uses_gpu() else 'cpu', f"separate {os.path.basename(path)}", threads=4):  # demucs on 4
         names = sep(path, outdir, model)
     if source == 'ref':
         P.d['reference']['stems_dir'] = outdir
