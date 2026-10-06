@@ -3,6 +3,7 @@ page on another origin cannot write to the stage, unknown Host names are refused
 scenes folder. The real page (same origin) and agents (no Origin) keep working."""
 import http.client
 import json
+import os
 
 from ismail.stage import server as S
 from test_stage import _get, stage  # noqa: F401  (the fixture)
@@ -121,4 +122,6 @@ def test_scenes_paths_stay_inside_the_scenes_folder(stage):
                  f"scenes/{str(secret).replace(':', '%3A').replace(chr(92), '/')}", 'scenes/C%3A/Windows/win.ini'):
         code, body = _req(p, 'GET', path)
         assert code == 404 and body != b'nope', path
-    assert _refused(p) == {'path outside the scenes folder': 4}       # %2E%2E is dropped as '..': a 404 inside, not a refusal
+    # %2E%2E is dropped as '..' (a 404 inside, not a refusal); the absolute sentinel path only has a drive colon on
+    # Windows, and elsewhere it is a missing path inside the folder (a 404, nothing read)
+    assert _refused(p) == {'path outside the scenes folder': 4 if os.name == 'nt' else 3}
