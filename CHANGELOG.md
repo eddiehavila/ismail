@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### phone_route survives a restart (ledger:M157, hq:D-30)
+
+- The route is kept in the phone's state.json and loaded again when the server starts (when its folder still
+  exists), so a restart no longer sends the person's notes back to the playing engine's project.
+
 ### Exams know the devices; exam_check hears a band-limited take and lopsided sides (ledger:M146, Nate's approval 10-06)
 
 - vox:r39 was wasted: the takes went through Bluetooth earbuds' microphone (16 kHz audio, nothing above 7 kHz), the
