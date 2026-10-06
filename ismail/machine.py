@@ -17,7 +17,11 @@ dying with a MemoryError. Disk and commit hold for everyone: no new heavy job wh
 songs folder's, the working directory's) has less than DISK_FLOOR_GB free, or while less than COMMIT_FLOOR_GB of
 commit is free (on Windows a job past its memory grows the pagefile, and the pagefile takes the disk: 2026-10-05 a
 job that declared 7 GB took 10.7 GB and D: went from 9 GB to 0.2 GB in nine minutes). A running job past its
-declared memory by MEM_OVER is flagged on the board and in its own output. A refused job says what is running, whose it is and when to retry; force=True (only when
+declared memory by MEM_OVER is flagged on the board and in its own output; one at MEM_SUSPEND times its declared
+memory while commit runs low (under SUSPEND_COMMIT_GB) has its processes paused, never killed, until someone runs
+`python -m ismail.machine resume <job>` (2026-10-06: an ffmpeg declared 3 GB and took 37 GB during a live set). A
+`run` command is held to its threads by its environment and by CPU affinity (the libraries that ignore the thread
+variables, CTranslate2 among them, still get only that many cores). A refused job says what is running, whose it is and when to retry; force=True (only when
 the user says so) runs it anyway. Jobs of processes that died are cleared on the next look.
 
 Waiting and priority: a job may wait for its slot (`run --wait 30m`, `slot(..., wait=1800)`) instead of being
@@ -65,6 +69,8 @@ DISK_WARN_GB = 30.0                # the board warns below this
 COMMIT_FLOOR_GB = 6.0              # no new heavy job while less commit than this is free (the pagefile would grow)
 MEM_OVER = 1.25                    # a running job past its declared memory by this much is flagged
 MEM_OVER_MIN_GB = 0.5              # ... and by at least this much (a small render's estimate is not worth a flag)
+MEM_SUSPEND = 3.0                  # a job at this many times its declared memory ...
+SUSPEND_COMMIT_GB = 10.0           # ... while less commit than this is free is paused (ledger:M154; never killed)
 JOB_NOTE_S = 15.0                  # a running job writes its memory to its board file this often
 # What wins when a live set is on air and a render wants the machine (ledger:M127, hq:D-11). Nate, 2026-10-05, after
 # two real dropouts in a set: GPU jobs and Blender renders wait while a set plays, "only for now during sets". It is a
@@ -77,7 +83,9 @@ ON_AIR_DEFAULT = 'set_first'
 ON_AIR_HELD = re.compile(r'blender|eevee|cycles', re.I)   # CPU jobs that are renders on the GPU in all but name
 SLOT_ENV = 'ISMAIL_SLOT'           # the slot `machine run` hands its command: a slot asked for under it runs in it
 THREAD_ENV = ('OMP_NUM_THREADS', 'OPENBLAS_NUM_THREADS', 'MKL_NUM_THREADS', 'NUMEXPR_NUM_THREADS',
-              'VECLIB_MAXIMUM_THREADS')   # a command in a slot starts with the slot's thread cap (torch reads OMP's)
+              'VECLIB_MAXIMUM_THREADS', 'NUMBA_NUM_THREADS', 'RAYON_NUM_THREADS')
+# a command in a slot starts with the slot's thread cap (torch and CTranslate2 read OMP's); `run` also pins it to that
+# many cores (ledger:M153: faster-whisper with threads=2 still used about 5 cores)
 
 
 class MachineBusy(RuntimeError):
@@ -328,7 +336,7 @@ def names_seen(hours=48):
 
 def priority_match(who=None):
     """'' when a grant's name matches jobs seen in the last 48 h, else a warning naming the names in use (ledger:M143:
-    `who` defaults to the working folder's name, so nearly every job from D:\ismail is 'ismail' and a grant to a
+    `who` defaults to the working folder's name, so nearly every job from D:/ismail is 'ismail' and a grant to a
     session matched nothing unless that session sets ISMAIL_SESSION)."""
     pr = priority()
     who = who or (pr and pr['who'])
@@ -469,6 +477,11 @@ def _describe(job):
         mem = f", using {job['mem_now_gb']:.1f} GB" + (f" of {job['mem_gb']:g} declared" if job.get('mem_gb') else '')
     if job.get('over'):
         mem += f", OVER: peaked at {job['over']:.1f} GB"
+    if job.get('suspended'):
+        mem += (f", SUSPENDED: OVER since {_ago(job['suspended']['at'])} (paused, not killed; "
+                f"python -m ismail.machine resume {job['id']})")
+    if job.get('cores'):
+        thr += f" on cores {','.join(map(str, job['cores']))}"
     return f"{job['kind']} '{what}' ({job['who']}, pid {job['pid']}, {_ago(job['started'])}{thr}{eta}{mem})"
 
 
@@ -650,6 +663,42 @@ def _handed_down(kind):
     return job if job.get('pid') in ancestors and _alive(job) else None
 
 
+def pick_cores(n):
+    """n logical cores for a `run` command (ledger:M153), or None when n covers the machine: the highest-numbered
+    cores no other job on the board is pinned to (the live engine and the desktop keep the low ones), then the
+    least shared."""
+    total = psutil.cpu_count() or 1
+    if not n or n >= total:
+        return None
+    taken = {}
+    for j in jobs():
+        for c in j.get('cores') or []:
+            taken[c] = taken.get(c, 0) + 1
+    order = sorted(range(total), key=lambda c: (taken.get(c, 0), -c))
+    return sorted(order[:n])
+
+
+def resume(name):
+    """Go on with a job paused for its memory: the job id, its pid, or a word of its name. -> what was done."""
+    js = [j for j in jobs() if j.get('suspended')]
+    hit = [j for j in js if name in (j['id'], str(j['pid']))] or [j for j in js if name.lower() in str(j['what']).lower()]
+    if len(hit) != 1:
+        head = f"no paused job matches {name!r}" if not hit else f"{len(hit)} paused jobs match {name!r}: use the id"
+        return head + (": paused now: " + '; '.join(f"{j['id']} '{str(j['what'])[:40]}'" for j in js) if js
+                       else ': none is paused')
+    j = hit[0]
+    for pid in j['suspended']['pids']:
+        try:
+            psutil.Process(pid).resume()
+        except psutil.Error:
+            pass
+    with open(os.path.join(board_dir(), 'jobs', j['id'] + '.resume'), 'w', encoding='utf8') as f:
+        f.write(str(time.time()))
+    free = memory()[0]
+    return (f"resumed '{str(j['what'])[:60]}' ({len(j['suspended']['pids'])} processes); it will not be paused again. "
+            f"{free:.1f} GB of commit free" + (": watch it, memory is still low" if free < SUSPEND_COMMIT_GB else ''))
+
+
 def child_env(job=None, env=None):
     """The environment for a command a slot holder starts: it carries the slot, so a render the command asks for
     runs in it instead of deadlocking on a second slot (ledger:M81), and the slot's thread cap for BLAS, OpenMP and
@@ -712,6 +761,7 @@ class _Meter:
     def __init__(self, job, gpu_sampler=True, path=None):
         self.job, self.cpu, self.rss_peak, self.stop_ = job, {}, 0, threading.Event()
         self.path, self.priv_peak, self.wrote, self.noted = path, 0, {}, 0.0
+        self.resumed, self.pinned = False, set()
         me = psutil.Process()
         t = me.cpu_times()
         self.base = (me.pid, t.user + t.system)       # the holder's CPU before the slot is not the job's
@@ -741,7 +791,11 @@ class _Meter:
                 w = _write_bytes(p)
                 if w is not None:
                     self.wrote[key] = w
-            except psutil.Error:
+                if self.job.get('cores') and p.pid != self.base[0] and key not in self.pinned:
+                    if p.cpu_affinity() != self.job['cores']:   # a child that set its own: back to the slot's cores
+                        p.cpu_affinity(self.job['cores'])
+                    self.pinned.add(key)
+            except (psutil.Error, AttributeError, NotImplementedError):
                 pass
         self.rss_peak = max(self.rss_peak, rss)
         self.priv_peak = max(self.priv_peak, priv)
@@ -760,10 +814,67 @@ class _Meter:
                   f"smaller pieces.", file=sys.stderr, flush=True)
         if over:
             self.job['over'] = round(max(self.job.get('over') or 0, now_gb), 2)
+        self._resume_asked()
+        if decl and now_gb >= decl * MEM_SUSPEND and not self.job.get('suspended') and not self.resumed:
+            free = memory()[0]
+            if free < SUSPEND_COMMIT_GB:
+                self._suspend(now_gb, free)
         if self.path and (over or time.time() - self.noted >= JOB_NOTE_S):
             self.noted = time.time()
             self.job['mem_now_gb'] = round(now_gb, 2)
             _write_job(self.path, self.job)
+
+    def _suspend(self, now_gb, free):
+        """Pause every process the job started (ledger:M154). Only the children: the holder keeps metering, and a
+        job whose memory is in the holder itself is only warned about. Reversible: `machine resume`."""
+        try:
+            kids = psutil.Process().children(recursive=True)
+        except psutil.Error:
+            kids = []
+        paused = []
+        for k in kids:
+            try:
+                k.suspend()
+                paused.append(k.pid)
+            except psutil.Error:
+                pass
+        what, decl = str(self.job['what'])[:60], self.job.get('mem_gb') or 0
+        if not paused:
+            if not self.job.get('suspend_failed'):
+                self.job['suspend_failed'] = True
+                print(f"[ismail.machine] OVER MEMORY x{now_gb / decl:.0f}: '{what}' uses {now_gb:.1f} GB with "
+                      f"{free:.1f} GB of commit free, in this process itself, so it cannot be paused: stop it now",
+                      file=sys.stderr, flush=True)
+            return
+        self.job['suspended'] = {'why': 'OVER', 'at': time.time(), 'gb': round(now_gb, 2), 'pids': paused}
+        print(f"[ismail.machine] SUSPENDED: OVER: '{what}' uses {now_gb:.1f} GB, declared {decl:g} GB (--mem), and "
+              f"{free:.1f} GB of commit is free, so its processes are paused (not killed; nothing is lost). When memory "
+              f"is free again: python -m ismail.machine resume {self.job['id']}. Or end it, and next time declare "
+              f"what it needs or work in smaller pieces.", file=sys.stderr, flush=True)
+        if self.path:
+            _write_job(self.path, self.job)
+
+    def _resume_asked(self):
+        """`machine resume` leaves <job>.resume beside the job's board file: go on, and never pause it again."""
+        if not self.path:
+            return
+        marker = self.path[:-5] + '.resume'
+        if not os.path.exists(marker):
+            return
+        for pid in (self.job.get('suspended') or {}).get('pids', []):
+            try:
+                psutil.Process(pid).resume()
+            except psutil.Error:
+                pass
+        try:
+            os.remove(marker)
+        except OSError:
+            pass
+        self.resumed = True
+        if self.job.get('suspended'):
+            self.job['resumed'] = time.time()
+        self.job['suspended'] = None
+        _write_job(self.path, self.job)
 
     def _loop(self):
         while not self.stop_.wait(METER_S):
@@ -788,6 +899,8 @@ class _Meter:
                'mem_peak_gb': round(self.priv_peak / 2 ** 30, 2), 'write_gb': round(w / 2 ** 30, 3)}
         if self.job.get('over'):
             out['over_gb'] = self.job['over']
+        if self.job.get('suspended') or self.job.get('resumed'):
+            out['suspended'] = True
         if self.gpu is not None:
             out.update(self.gpu.stop())
         return out
@@ -1232,6 +1345,8 @@ def main(argv=None):
                    help=f'numeric threads the command may use (BLAS, OpenMP, torch; default {THREADS} for --cpu, no cap '
                         f'for --gpu; 0: no cap). While a set is on air the CPU jobs share {on_air_threads()}')
     r.add_argument('command', nargs=argparse.REMAINDER)
+    rs = sub.add_parser('resume', help='go on with a job paused for its memory: resume <job id, pid or name>')
+    rs.add_argument('job')
     p = sub.add_parser('priority', help='the user gives a session first place in line: priority vox --for 3h --by "the user"')
     p.add_argument('who', nargs='?', help="the session's name as the board shows it")
     p.add_argument('--for', dest='for_', default='2h', help='how long: 30m, 3h, 3d (default 2h)')
@@ -1277,6 +1392,9 @@ def main(argv=None):
         except ValueError as e:
             ap.error(str(e))
         return 0
+    if a.cmd == 'resume':
+        print(resume(a.job))
+        return 0
     if a.cmd == 'disk':
         print(disk_text(a.top))
         return 0
@@ -1314,6 +1432,13 @@ def main(argv=None):
                 psutil.Process(p.pid).nice(psutil.BELOW_NORMAL_PRIORITY_CLASS if sys.platform == 'win32' else 10)
             except (psutil.Error, AttributeError):
                 pass
+            cores = pick_cores(threads)
+            if cores:
+                try:                                         # its children inherit it; the meter catches strays
+                    psutil.Process(p.pid).cpu_affinity(cores)
+                    job['cores'] = cores
+                except (psutil.Error, AttributeError, NotImplementedError, ValueError):
+                    pass
             job['exit'] = p.wait()
             try:
                 secs = _child_cpu_s(p, before)

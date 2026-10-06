@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### The governor holds a run to its threads and pauses a job far past its memory (ledger:M153, M154, hq:D-30)
+
+- `machine run` pins its command to as many cores as its threads (the highest cores no other job holds; children
+  inherit it, and the meter sets it again on a child that changed it), and the thread variables now include Numba's
+  and Rayon's. A `run --cpu` at 2 threads used about 5 cores, because CTranslate2 ignores the BLAS variables.
+- A job at 3 times its `--mem` while less than 10 GB of commit is free has its processes paused, never killed: the
+  board says SUSPENDED: OVER and how to go on, `python -m ismail.machine resume <job id, pid or name>`, after which
+  it is not paused again. 10-06: an ffmpeg declared 3 GB and took 37 GB during a live set.
+- A docstring's `D:\ismail` made an invalid escape warning; it reads D:/ismail now.
+
 ### Exams know the devices; exam_check hears a band-limited take and lopsided sides (ledger:M146, Nate's approval 10-06)
 
 - vox:r39 was wasted: the takes went through Bluetooth earbuds' microphone (16 kHz audio, nothing above 7 kHz), the
