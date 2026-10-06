@@ -127,7 +127,7 @@ def test_the_next_round_takes_the_persons_words():
 def test_a_brief_sketch_and_a_next_round_from_it(tmp_path):
     song = str(tmp_path / 'songs' / 'trip')
     out = api.sketch(song, 'trip-hop with rhodes and a guitar melody, A minor, 88 BPM', n=1, bars=4)
-    assert "SAY TO THE PERSON: the rhodes voice plays real samples" in out and 'a) as asked' in out and 'LUFS' in out
+    assert "FOR YOU: the rhodes voice plays real samples" in out and "SAY TO THE PERSON" in out and 'a) as asked' in out and 'LUFS' in out
     out = api.sketch(song, 'no guitar, slower', base='a', n=1, bars=4)
     assert 'b) as asked' in out and 'changed from the base' in out and 'no melody' in out
     with open(os.path.join(song, 'sketches', 'b-as-asked', 'sketch.json'), encoding='utf8') as f:
@@ -184,3 +184,26 @@ def test_a_gentle_church_prelude_is_classical_soft_and_closes_home():
         assert max(n[4] for n in mel['notes']) < 76                                  # played softly
     assert SK.read_brief('a hymn in D minor')['feel'] == 'classical'
     assert SK.read_brief('rock band with strings')['parts']['bass'] == 'pbass70'        # a named bass stays
+
+
+def test_the_first_sketch_comes_first_says_it_plainly_and_is_balanced(tmp_path, monkeypatch):
+    """ledger:M151 (first-session spec S-2..S-5) and M150: A was ready at 1:43 but the reply came at ~5 min; the
+    three sounded alike; the reply said voice IDs; the tune sat 1 to 13 LU over the parts."""
+    import threading
+    song = str(tmp_path / 'songs' / 'walk')
+    spawned = []
+    monkeypatch.setattr(api, '_sketch_spawn', lambda jobs, sd: spawned.append(
+        threading.Thread(target=api._sketch_finish, args=(jobs,))) or spawned[-1].start())
+    out = api.sketch(song, 'lo-fi beat with flute and gritty vocals', n=2, bars=4)
+    say = out.split('SAY TO THE PERSON (read it out as it is):')[1].split('\nFOR YOU')[0]
+    assert 'the first is ready now' in say and 'A: a violin plays the tune' in say and 'B: ' in say
+    assert 'unlike A:' in say and 'flute; that isn' in say and "isn't something I can make yet" in say
+    assert 'grand_piano' not in say and 'kit70' not in say and 'voice' not in say.replace('singing voice', '')
+    assert 'PLAY A NOW' in out and 'rendering in the background' in out
+    spawned[0].join(300)
+    got = api.sketch_wait(song, wait=5)
+    assert got.count(': ready') == 2 and 'the tune' in got, got
+    import json as _j
+    for d in os.listdir(os.path.join(song, 'sketches')):
+        r = _j.load(open(os.path.join(song, 'sketches', d, 'sketch_ready.json'), encoding='utf8'))
+        assert 'sits' in r['balance'] or 'moved it' in r['balance']

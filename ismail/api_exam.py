@@ -20,3 +20,32 @@ def exam_check(clips: list = None, page: str = None, key: dict = None, secrets: 
     except (OSError, ValueError) as e:
         raise OpError(f"exam_check: {e}")
     return '\n'.join(lines)
+
+
+@op()
+def exam_eye_crops(pairs: list, out: str, windows: list = None, n_windows: int = 3, seed: int = 0) -> str:
+    """The blind crop check, step 1 (a gate before a real-vs-made exam): the same time window cut from the real and
+    the made clip of each pair, as spectrogram images side by side ("1" and "2" in a random order), with the key
+    hidden. pairs: [[real_path, made_path], ...]; windows: per pair, [[t0, t1], ...] in seconds (a word +-60 ms),
+    else n_windows through each clip. Look at every out/q*.png and pick the side that looks real, WITHOUT opening
+    out/key.json, then exam_eye_score(out, {1: '2', 2: '1', ...}). If you can tell from the picture, so can they."""
+    from . import exam_check as EC
+    try:
+        n = EC.eye_crops(pairs, out, windows, n_windows, seed=seed)
+    except (OSError, ValueError, RuntimeError) as e:
+        raise OpError(f"exam_eye_crops: {e}")
+    return (f"{n} crop pairs in {out} (q01.png ... q{n:02d}.png; questions.json says each one's pair and window). "
+            f"Do not open key.json. Look at each and pick the side that looks real, then exam_eye_score(out, "
+            f"{{1: '1' or '2', ...}}).")
+
+
+@op()
+def exam_eye_score(out: str, answers: dict) -> str:
+    """The blind crop check, step 2: score your picks from exam_eye_crops against the hidden key. NOT READY when
+    you beat chance (p < 0.05): the picture gives the real side away, so the person will likely hear it too."""
+    from . import exam_check as EC
+    try:
+        ok, lines = EC.eye_score(out, answers)
+    except (OSError, ValueError) as e:
+        raise OpError(f"exam_eye_score: {e}")
+    return '\n'.join(lines)
