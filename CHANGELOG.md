@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### The update card lists every change waiting
+
+- The left-wrist update card lists the changes waiting (up to five, the most important first, then "+N more") and
+  grows to fit, instead of naming only one (the user, q44: panels "listing what changed in each update").
+  `updates_waiting` carries the titles. The titles come from `stage_note`, one per change landed.
+
 ### phone_route survives a restart (ledger:M157, hq:D-30)
 
 - The route is kept in the phone's state.json and loaded again when the server starts (when its folder still
