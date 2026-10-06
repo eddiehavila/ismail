@@ -339,7 +339,29 @@ function showInto() {                      // how far into the piece they are he
   $('heardcap').textContent = 'Into the piece, ' + (state.clock || '').slice(0, 5);
   $('bar').innerHTML = `${mmss(s)}<span> in</span>`;
 }
-setInterval(() => { if (clockMode) showInto(); }, 1000);
+setInterval(() => { if (clockMode) showInto(); showPos(); }, 1000);
+// Nate 10-06 09:12: "something that's always on screen ... that shows where we are in the song". The DJ sends the
+// piece's length and sections with phone_now; the line runs between polls, in time or bars like the counter.
+let posKey = '';
+function showPos() {
+  const sh = state.shape || {}, len = sh.length_s, e = state.engine || {}, h = state.heard || {};
+  const ok = len && state.into_s != null && sh.of && sh.of === e.now;
+  $('pos').hidden = !ok; if (!ok) return;
+  const s = Math.min(len, Math.max(0, state.into_s + (Date.now() - polledAt) / 1000 - (want && h.behind_s ? h.behind_s : 0)));
+  const bars = (x) => Math.floor(x * (e.bpm || 120) / 240) + 1;
+  const fmt = (x) => clockMode ? mmss(x) : 'bar ' + bars(x);
+  const secs = sh.sections || [];
+  const k = JSON.stringify([sh.of, len, secs]);
+  if (k !== posKey) {
+    posKey = k;
+    $('postrack').querySelectorAll('b').forEach((b) => b.remove());
+    secs.forEach((x) => { if (x.at_s > 0 && x.at_s < len) { const b = document.createElement('b'); b.style.left = (100 * x.at_s / len) + '%'; b.title = x.label; $('postrack').appendChild(b); } });
+  }
+  $('posfill').style.width = (100 * s / len) + '%';
+  const cur = secs.filter((x) => x.at_s <= s).pop(), nx = secs.find((x) => x.at_s > s);
+  $('poselapsed').textContent = `${fmt(s)} / ${fmt(len)}` + (cur && cur.label ? ` · ${cur.label}` : '');
+  $('posnext').textContent = nx ? `${nx.label || 'next'} in ${mmss(nx.at_s - s)}` : `ends in ${mmss(len - s)}`;
+}
 function clockLabel() { $('clockset').textContent = clockMode ? 'Time' : 'Bars'; }
 clockLabel();
 $('clockset').onclick = () => { clockMode = !clockMode; store.set('clock', clockMode); clockLabel(); ev('setting', { clock: clockMode ? 'time' : 'bars' }); render(); };
@@ -496,7 +518,7 @@ function render() {
   polledAt = Date.now();
   if (clockMode) showInto();
   else { $('heardcap').textContent = 'Heard'; $('bar').innerHTML = m ? `BAR ${m[1]}<span>.${esc(Math.floor(+(m[2] || 1)))}</span>` : 'BAR <span>---</span>'; }
-  applyVibe(state.vibe);
+  applyVibe(state.vibe); showPos();
   $('behind').textContent = want && h.behind_s != null ? '+' + h.behind_s.toFixed(1) + ' s' : '--';
   catchUp(h.behind_s);
   $('now').textContent = e.now || (e.playing ? 'playing' : 'nothing playing');

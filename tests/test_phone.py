@@ -2,6 +2,7 @@
 talk back just like I do in VR, and give live feedback through the phone ... while my phone screen is off", with the
 agents able to drive the page. The Live DJ asked for its words stamped with the bar he actually heard."""
 import json
+import subprocess
 import math
 import os
 import shutil
@@ -351,3 +352,42 @@ def test_a_restart_is_announced_and_the_page_can_tell_it_happened(phone):
     c = [c for c in ph.cmds if c['type'] == 'restarting'][-1]
     assert c['back_in_s'] == 5.0
     assert S.page_build() == S.BUILD
+
+
+def test_downloads_have_names_and_mp3s_carry_ismail(phone, tmp_path):
+    """Nate 10-06 09:09: a readable download name, the title in the mp3, and 'ismail with the GitHub link in the ID3
+    data, very important for provenance whenever we ship mp3s'. Their own file is never changed."""
+    from ismail import tags
+    ph, base, _ = phone
+    if not S.ffmpeg():
+        pytest.skip('ffmpeg is not installed')
+    src = tmp_path / 'rec_20261006_090713_hl2.mp3'
+    subprocess.run([S.ffmpeg(), '-v', 'error', '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=mono', '-t', '1',
+                    '-b:a', '64k', str(src)], check=True)
+    before = src.read_bytes()
+    P.phone_offer(str(src), label='Clair de lune / rain bed (highlight)', album='ismail live 10-06')
+    o = get(base, '/api/state?since=0&wait=0')['offers'][-1]
+    assert o['name'] == 'Clair de lune rain bed (highlight).mp3'
+    with urllib.request.urlopen(base + o['url'] + '?dl=1', timeout=10) as r:
+        assert o['name'] in r.headers['Content-Disposition']
+        got = r.read()
+    out = tmp_path / 'got.mp3'
+    out.write_bytes(got)
+    t = tags.read_tags(str(out))
+    assert t['title'] == 'Clair de lune / rain bed (highlight)' and t['artist'] == 'ismail' and t['album'] == 'ismail live 10-06'
+    assert t['url'] == tags.HOME_URL and tags.HOME_URL in t['comment'] and t['encoder'] == 'ismail'
+    assert src.read_bytes() == before                                                   # their file is untouched
+
+
+def test_the_piece_has_a_shape_and_its_start_survives_a_restart(phone):
+    """Nate 10-06 09:12: where we are in the song, always on screen; and M139: a restart reset 'into_s'."""
+    ph, base, _ = phone
+    P.phone_now(now='chapter 9: sweet clair', length=324, into=40,
+                sections=[{'at_s': 64, 'name': 'melody'}, {'at_s': 0, 'label': 'intro'}])
+    s = get(base, '/api/state?since=0&wait=0')
+    assert s['shape']['length_s'] == 324 and [x['label'] for x in s['shape']['sections']] == ['intro', 'melody']
+    assert 40 <= s['into_s'] <= 45
+    saved = json.loads((S.HOME / 'state.json').read_text(encoding='utf8'))
+    assert saved['piece'][0] == 'chapter 9: sweet clair' and saved['shape']['length_s'] == 324
+    P.phone_now(now='chapter 10: plume')
+    assert get(base, '/api/state?since=0&wait=0')['shape'] == {}                        # a new piece clears it
