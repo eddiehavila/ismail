@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### The first sketches: mastered, balanced, the first one first, said plainly (ledger:M148, M150, M151 S-1..S-5)
+
+- S-1 (M148): every sketch goes through a master stage for its style (a low cut, glue, mono low end, a limiter at
+  -1 dB, the loudness its style wants: four-on-the-floor about -9.5 LUFS, classical about -17) and a hall bus; keys
+  get a little warmth. Before, a sketch was the dry mix at about -16 LUFS ("is this mastered?").
+- M150: a stems render weighs the tune against the other parts and moves its fader so it sits 4-6 LU over them
+  (it sat +1 to +13 LU with fixed faders).
+- S-2: the first sketch comes back as soon as it is rendered; the others render in a background process
+  (`sketch_wait(project)` says when they land). background=False waits for all.
+- S-3: the readings differ for real: within what the words fixed, the sparser one moves key and the busier one gets
+  an intro and an ending (so another length). The reply says how each differs from A.
+- S-4: the reply opens with SAY TO THE PERSON, in a musician's words: what each sketch is, what was swapped
+  ("you asked for a flute; that isn't here yet, so a violin plays the tune"), words it can't make yet ("'gritty'"),
+  with no voice IDs. The engine detail moves to FOR YOU lines.
+- S-5: a voice that is not in the curated showcase never plays a first sketch; its part is left out and said.
+
 ### A pause tap stops the set by itself (the Live DJ's HANDOFF 50, Nate 10-06 15:08)
 
 - The phone server fades the playing engine out over 4 s and stops it when the person taps Pause or says "pause the

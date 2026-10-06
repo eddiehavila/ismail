@@ -110,6 +110,57 @@ SECTIONS = {'intro': 'intro', 'verse': 'groove', 'groove': 'groove', 'main': 'gr
             'bridge': 'breakdown', 'build': 'build', 'buildup': 'build', 'return': 'groove', 'reprise': 'groove',
             'outro': 'outro', 'fade': 'outro', 'fades': 'outro', 'fade out': 'outro', 'fade-out': 'outro',
             'fades out': 'outro', 'fading out': 'outro', 'ending': 'outro'}
+# what a musician would call each showcase voice (first-session spec S-4: no voice IDs, no engine words)
+PLAIN = {'grand_piano': 'a grand piano', 'violin': 'a violin', 'cello': 'a cello', 'contrabass': 'a double bass',
+         'kit70': 'a drum kit', 'rusty': 'a real drum kit', 'strat70_rhythm': 'a rhythm guitar',
+         'strat70_clean': 'an electric guitar', 'emily': 'a clean electric guitar', 'pbass70': 'a bass guitar',
+         'sub_bass': 'a deep sub bass', 'growl': 'a growling synth bass', 'rhodes': 'a Rhodes electric piano',
+         'crackle': 'record crackle'}
+PLAIN_ROLE = {'melody': 'the tune', 'keys': 'the chords', 'harmony': 'the chords', 'chords': 'the chords',
+              'counter': 'a second line', 'pad': 'the long notes', 'bass': 'the bass', 'sub': 'the low end',
+              'drums': 'the drums', 'fx': 'the texture'}
+# brief words read as a wish for a sound that no voice or setting models yet: said, not silently dropped
+UNMODELLED = r'gritty|lush|airy|punchy|glitch\w*|distorted|fuzz\w*|swirl\w*|shimmer\w*|wobbl\w*|tape[- ]?saturat\w*|' \
+             r'chopped|vocal chops|sidechain\w*|reverse\w*|stutter\w*|bitcrush\w*|lo[- ]?fi tape'
+
+
+def plain(voice):
+    return PLAIN.get(voice, voice.replace('_', ' '))
+
+
+def plain_parts(parts):
+    """{role: voice} -> 'a violin plays the tune over a cello, a double bass and a grand piano'."""
+    lead = parts.get('melody')
+    rest = [plain(v) for r, v in ((r, parts[r]) for r in ROLE_ORDER if r in parts) if r != 'melody']
+    rest = list(dict.fromkeys(rest))                    # the piano's two hands are one piano
+    if lead and plain(lead) in rest:
+        rest.remove(plain(lead))
+    tail = (', '.join(rest[:-1]) + ' and ' + rest[-1]) if len(rest) > 1 else (rest[0] if rest else '')
+    if not lead:
+        return tail
+    return f"{plain(lead)} plays the tune" + (f" over {tail}" if tail else ' alone')
+
+
+def contrast(a, b):
+    """How sketch b differs from sketch a, in plain words: key or mode, tempo, length, lead, density, form."""
+    out = []
+    if a['key'] != b['key']:
+        out.append(f"in {b['key']}" if a['key'].split()[1] == b['key'].split()[1] else f"{b['key'].split()[1]} ({b['key']})")
+    if abs(a['bpm'] - b['bpm']) >= 0.06 * a['bpm']:
+        out.append(('slower' if b['bpm'] < a['bpm'] else 'faster') + f" ({b['bpm']:g} BPM)")
+    if a['bars'] != b['bars']:
+        out.append('longer' if b['bars'] > a['bars'] else 'shorter')
+    la, lb = a['parts'].get('melody', {}).get('voice'), b['parts'].get('melody', {}).get('voice')
+    if la != lb and lb:
+        out.append(f"{plain(lb)} on the tune")
+    na, nb = (sum(len(p['notes']) for p in x['parts'].values()) for x in (a, b))
+    if na and abs(nb - na) >= 0.15 * na:
+        out.append('sparser' if nb < na else 'busier')
+    if (a.get('form') or []) != (b.get('form') or []):
+        out.append('with an intro and an ending' if b.get('form') else 'one groove throughout')
+    return out
+
+
 ROLE_ORDER = ['drums', 'sub', 'bass', 'chords', 'keys', 'harmony', 'pad', 'counter', 'melody', 'fx']
 
 
@@ -230,7 +281,7 @@ def read_brief(brief):
     text = ' ' + (brief or '') + ' '
     spec = {'bpm': None, 'key': None, 'feel': None, 'bpm_range': None, 'parts': {}, 'form': None, 'dense': 0,
             'blues': False, 'sevenths': False, 'ride': False, 'crisp': False, 'said': [], 'named': False,
-            'removed': [], 'soft': False, 'genre_word': None}
+            'removed': [], 'soft': False, 'genre_word': None, 'subs': [], 'unmodelled': []}
     m = re.search(r'(\d{2,3})\s*bpm', text, re.I)
     if m:
         spec['bpm'] = float(m.group(1))
@@ -257,6 +308,7 @@ def read_brief(brief):
             line = f"asked for {word}: " + note.format(word=word) if note else None
             if line and not any(x.lower().split(':')[1:] == line.lower().split(':')[1:] for x in spec['said']):
                 spec['said'].append(line)
+                spec['subs'].append({'asked': word, 'role': role, 'plays': voice})
             if role == 'section':
                 for r, v in SECTION.items():               # in a band, its own bass stays the bass
                     if r != 'bass' or spec['feel'] in (None, 'classical'):
@@ -264,6 +316,8 @@ def read_brief(brief):
             elif role and role not in spec['parts']:
                 spec['parts'][role] = voice
             rest = rest[:m.start()] + ' ' * (m.end() - m.start()) + rest[m.end():]   # each word counts once
+    spec['unmodelled'] = list(dict.fromkeys(m.group(0).lower() for m in re.finditer(
+        r'(?<!\w)(?:' + UNMODELLED + r')(?!\w)', text, re.I)))
     spec['ride'] = bool(_find(r'ride', text))
     spec['crisp'] = bool(_find(r'crisp|bright|tight', text))
     spec['blues'] = bool(_find(r'blues\w*|bluesy', text))
@@ -298,6 +352,7 @@ def read_brief(brief):
         spec['parts']['melody'] = 'grand_piano'               # every sketch carries a tune
         if spec['named'] and len(spec['parts']) > 2 and 'grand_piano' not in [spec['parts'][r] for r in spec['asked']]:
             spec['said'].append("no instrument was named for the melody: grand_piano plays it")
+            spec['subs'].append({'asked': None, 'role': 'melody', 'plays': 'grand_piano'})
     if spec['parts'] and 'drums' not in spec['parts'] and spec['feel'] is None and spec['ride']:
         spec['parts']['drums'] = 'kit70'
     if 'drums' in spec['parts'] and not spec['feel']:
@@ -346,6 +401,31 @@ def _stand_ins(spec):
                     f"plays it for now")
             if line not in spec['said']:
                 spec['said'].append(line)
+                spec.setdefault('subs', []).append({'asked': voice, 'role': role, 'plays': v['standin'],
+                                                    'download_mb': st['size_mb']})
+
+
+def say_plain(spec):
+    """The SAY TO THE PERSON lines for what was swapped or not honoured, in a musician's words (spec S-4)."""
+    out = []
+    for s in spec.get('subs') or []:
+        who = plain(s['plays']) if s.get('plays') else None
+        if s.get('download_mb'):
+            out.append(f"the real {plain(s['asked']).split(' ', 1)[-1]} needs a download of about {s['download_mb']} "
+                       f"MB first; {who} plays its part until you say yes to it")
+        elif s.get('asked') is None:
+            out.append(f"you didn't name an instrument for the tune, so {who} plays it")
+        elif s['role'] == 'section':
+            out.append(f"for '{s['asked']}' you hear one violin, one cello and a double bass, one player each; a "
+                       f"full string section isn't here yet")
+        elif who is None:
+            out.append(f"you asked for {s['asked']}; there's no singing voice yet, so it's left out")
+        else:
+            what = PLAIN_ROLE.get(s['role'], 'its part')
+            out.append(f"you asked for {s['asked']}; that isn't here yet, so {who} plays {what}")
+    for w in spec.get('unmodelled') or []:
+        out.append(f"'{w}' isn't something I can make yet, so these don't try")
+    return out
 
 
 def apply_words(base, words):
@@ -398,6 +478,7 @@ def apply_words(base, words):
             spec[k] = True
             changed.append(k)
     spec['said'] = new['said']
+    spec['subs'], spec['unmodelled'] = new.get('subs', []), new.get('unmodelled', [])
     return spec, changed
 
 
@@ -630,6 +711,8 @@ def plan_spec(spec, brief='', seed=0, variant=0, bars=None, progression=None, la
     """-> a dict: what it is, key, bpm, bars, form, chords, every part's notes as (bar, beat, pitch, dur, vel)."""
     rng = random.Random(f"{seed}:{variant}:{brief}:{sorted(spec['parts'].items())}")
     tonic, mode = parse_key(spec.get('key'), brief)
+    if not spec.get('key') and spec.get('key_shift'):        # a reading in another key, the mode the words chose
+        tonic = (tonic + spec['key_shift']) % 12
     lo_b, hi_b = spec.get('bpm_range') or (80, 100)
     soft, classical = spec.get('soft'), spec.get('feel') == 'classical'
     if soft:                                                 # gentle, quiet, slow: never a fast reading
@@ -765,6 +848,14 @@ def specs_for(brief, key=None, bpm=None, n=3, base=None):
     for label, d in VARIANTS[:n]:
         s = copy.deepcopy(spec)
         s['dense'] = d if label != 'as asked' else s.get('dense', 0)
+        # spec S-3: real contrast. Within what the words fixed: the sparser reading moves key (up a fourth, same
+        # mode), the busier one takes a form with an intro and an ending (so a different length too)
+        if d < 0 and not spec.get('key'):
+            s['key_shift'] = 5
+            label = 'sparser, other chords, other key'
+        if d > 0 and not spec.get('form') and spec.get('feel') != 'classical':
+            s['form'] = ['intro', 'groove', 'groove', 'outro']
+            label = 'busier, other chords, intro and ending'
         out.append((label, s))
     return out, said
 

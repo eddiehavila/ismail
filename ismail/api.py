@@ -517,7 +517,8 @@ def guide(project: str = None) -> str:
 @op()
 @heavy()
 def sketch(project: str, brief: str, base: str = None, n: int = None, styles: list = None, key: str = None,
-           bpm: float = None, bars: int = None, progression: str | list = None, seed: int = 0) -> str:
+           bpm: float = None, bars: int = None, progression: str | list = None, seed: int = 0,
+           background: bool = True) -> str:
     """First sound for a new song, in one call: short sketches on the showcase voices, each a project in
     <project>/sketches/<letter>-<label>/, rendered to mp3 (wav without ffmpeg). brief: the person's words. The brief
     is read: a tempo ('90 BPM'), a key ('A minor'), a genre (trip-hop, house, jazz, rock, ambient, a church prelude or
@@ -527,7 +528,11 @@ def sketch(project: str, brief: str, base: str = None, n: int = None, styles: li
     chamber, band). base='<letter>': the next round, that sketch changed by the brief's words ("slower, no guitar,
     add a pad"); n: how many (default 3, or 2 with base). styles: force the fixed styles. key, bpm, bars,
     progression ('i VI III VII' or chord names) override. Play each to the person, ask which is closest or what
-    each is missing, then sketch_keep(project, '<letter>')."""
+    each is missing, then sketch_keep(project, '<letter>').
+    The first sketch comes back as soon as it is rendered and the others render in the background (background=
+    False waits for all): play the first while they land, and sketch_wait(project) says when they are ready. The
+    reply opens with SAY TO THE PERSON, written for them: read it out as it is. Every sketch is mixed (the tune
+    sits 4-6 LU over the rest) and mastered for its style."""
     import sys
     from . import sketch as SK
     from . import voices as V
@@ -567,9 +572,14 @@ def sketch(project: str, brief: str, base: str = None, n: int = None, styles: li
     letters = [c for c in 'abcdefghijklmnopqrstuvwxyz' if c not in used]
     mp3 = 'also' if _ffmpeg_ok() else 'none'
     L = [f"sketches for: {brief}" + (f" (from sketch {base})" if base else '')]
-    L += [f"SAY TO THE PERSON: {x}" for x in said]
+    L += [f"FOR YOU: {x}" for x in said]
     t0 = time.time()
+    built, plans = [], []
     for i, (label, spec) in enumerate(todo):
+        for role, voice in list(spec['parts'].items()):     # spec S-5: only the showcase plays a first sketch
+            if voice not in sc:
+                spec['parts'].pop(role)
+                spec.setdefault('subs', []).append({'asked': role, 'role': role, 'plays': None})
         try:
             pl = SK.plan_spec(spec, brief, seed, i + len(used), bars, progression, label)
         except SK.SketchError as e:
@@ -609,20 +619,53 @@ def sketch(project: str, brief: str, base: str = None, n: int = None, styles: li
         for role, fxs in prod['track_fx'].items():
             for fx in fxs:
                 fx_add(sp, role, fx)
-        render(sp)
-        _loudness_trim(sp, prod['lufs'])
-        render(sp, out=f"sketch_{letter}", mp3=mp3)
-        lufs, peak = _lufs_peak(os.path.join(sp, 'renders', 'latest.wav'))
-        f = os.path.join(sp, 'renders', f"sketch_{letter}.{'mp3' if mp3 == 'also' else 'wav'}")
-        print(f"[sketch] {letter} ready ({i + 1}/{len(todo)}, {time.time() - t0:.0f} s): {f}", file=sys.stderr,
-              flush=True)
+        for f_ in ('sketch_ready.json',):
+            try:
+                os.remove(os.path.join(sp, f_))
+            except OSError:
+                pass
+        built.append({'sp': sp, 'letter': letter, 'lufs': prod['lufs'], 'mp3': mp3, 'why': prod['why']})
+        plans.append((letter, pl, spec))
+    # spec S-2: the first is played as soon as it lands; the others render behind it
+    rest = built[1:] if background and len(built) > 1 else []
+    for job in (built[:1] if rest else built):
+        got = _sketch_render(job)
+        print(f"[sketch] {job['letter']} ready ({time.time() - t0:.0f} s): {got['file']}", file=sys.stderr, flush=True)
+    if rest:
+        _sketch_spawn(rest, sd)
+    first = plans[0][1]
+    say = [f"Here {'are' if len(plans) > 1 else 'is'} {len(plans)} short sketch{'es' if len(plans) > 1 else ''}"
+           + (f"; the first is ready now and the other{'s land' if len(rest) > 1 else ' lands'} in a minute or two"
+              if rest else '') + '.']
+    for letter, pl, spec in plans:
+        sec = pl['bars'] * 4 * 60 / pl['bpm']
+        diff = SK.contrast(first, pl) if pl is not first else []
+        say.append(f"{letter.upper()}: {SK.plain_parts({r: p['voice'] for r, p in pl['parts'].items()})}, in "
+                   f"{pl['key']} at {pl['bpm']:g} BPM, about {sec:.0f} seconds"
+                   + (f"; unlike A: {', '.join(diff)}" if diff else '') + '.')
+    seen = []
+    for _, _, spec in plans:
+        for x in SK.say_plain(spec):
+            if x not in seen:
+                seen.append(x)
+    say += [x[0].upper() + x[1:] + '.' for x in seen]
+    L[1:1] = ['SAY TO THE PERSON (read it out as it is):'] + ['  ' + x for x in say]
+    for (letter, pl, spec), job in zip(plans, built):
         sec = pl['bars'] * 4 * 60 / pl['bpm']
         form = f"; form {' > '.join(pl['form'])} (4 bars each)" if pl['form'] else ''
         L += [f"{letter}) {pl['what']}",
               f"   {pl['key']}, {pl['bpm']:g} BPM, {pl['bars']} bars (~{sec:.0f} s){form}; chords "
               f"{' '.join(pl['progression'])}" + (f", closing {pl['cadence']}" if pl.get('cadence') else '') +
-              (f"; feel {pl['feel']}" if pl['feel'] else '') + ('; soft' if pl.get('soft') else ''),
-              f"   {lufs:.1f} LUFS, peak {peak:.1f} dBFS; {prod['why']}; listen: {f}"]
+              (f"; feel {pl['feel']}" if pl['feel'] else '') + ('; soft' if pl.get('soft') else '')]
+        if job in rest:
+            L.append(f"   rendering in the background: sketch_wait(project) says when it is ready")
+        else:
+            r = job['done']
+            L.append(f"   {r['lufs']:.1f} LUFS, peak {r['peak']:.1f} dBFS; {r['balance']}; {job['why']}; listen: "
+                     f"{r['file']}")
+    if rest:
+        L.append(f"PLAY {plans[0][0].upper()} NOW (open its file); while it plays, sketch_wait(project) waits for "
+                 f"the others.")
     L.append("NEXT: play them to the person one at a time (open each file), ask which is closest or what each is "
              "missing. Their correction is the next round: sketch(project, '<their words>', base='<letter>'). "
              f"sketch_keep(project, '<letter>') makes the pick the song (it is the song's example); until then "
@@ -705,6 +748,116 @@ def sketch_keep(project: str, sketch: str, replace: bool = False) -> str:
 
 def _ffmpeg_ok():
     return bool(os.environ.get('ISMAIL_FFMPEG') or shutil.which('ffmpeg'))
+
+
+def _tune_balance(project, target=5.0):
+    """ledger:M150: the tune sat +1 LU over a contrabass in one sketch and 7-13 LU over the others, because the
+    faders are fixed. From a stems render: move the melody's fader so it sits `target` LU (4-6) over the other
+    parts together. -> a line saying where it sits."""
+    try:
+        import pyloudnorm as pyln
+        import soundfile as sf
+    except ImportError:
+        return 'balance not measured (no pyloudnorm)'
+    sd = os.path.join(os.path.abspath(project), 'renders', 'stems')
+    tune = os.path.join(sd, 'melody.wav')
+    others = [os.path.join(sd, f) for f in os.listdir(sd) if f.endswith('.wav') and f != 'melody.wav'
+              and not f.startswith('bus_')] if os.path.isdir(sd) else []
+    if not os.path.exists(tune) or not others:
+        return 'balance: no tune and parts to weigh'
+    y, sr = sf.read(tune)
+    rest = None
+    for f in others:
+        z, _ = sf.read(f)
+        rest = z if rest is None else rest[:len(z)] + z[:len(rest)]
+    m = pyln.Meter(sr)
+    lt, lr = m.integrated_loudness(y), m.integrated_loudness(rest)
+    if not (np.isfinite(lt) and np.isfinite(lr)):
+        return 'balance: a part is silent'
+    gap = lt - lr
+    if target - 1.0 <= gap <= target + 1.0:
+        return f"the tune sits {gap:+.1f} LU over the parts"
+    move = float(np.clip(target - gap, -8.0, 8.0))
+    P = _load(project)
+    v = P.track('melody').get('volume_db', 0.0) + move
+    track_set(project, 'melody', volume_db=round(v, 1))
+    return f"the tune sat {gap:+.1f} LU over the parts; moved it {move:+.1f} dB to about {gap + move:+.1f}"
+
+
+def _sketch_render(job):
+    """One sketch, mixed and mastered: a stems render to weigh the tune, the balance, the loudness trim, the
+    final render. Writes sketch_ready.json in the sketch's folder (sketch_wait reads it)."""
+    sp, letter, mp3 = job['sp'], job['letter'], job['mp3']
+    ready = os.path.join(sp, 'sketch_ready.json')
+    try:
+        render(sp, stems=True)
+        bal = _tune_balance(sp)
+        if 'moved it' in bal:
+            render(sp)
+        _loudness_trim(sp, job['lufs'])
+        render(sp, out=f"sketch_{letter}", mp3=mp3)
+        lufs, peak = _lufs_peak(os.path.join(sp, 'renders', 'latest.wav'))
+        f = os.path.join(sp, 'renders', f"sketch_{letter}.{'mp3' if mp3 == 'also' else 'wav'}")
+        got = {'letter': letter, 'file': f, 'lufs': lufs, 'peak': peak, 'balance': bal, 'at': time.time()}
+    except Exception as e:                        # said by sketch_wait, never lost
+        got = {'letter': letter, 'error': f"{type(e).__name__}: {e}", 'at': time.time()}
+    with open(ready, 'w', encoding='utf8') as fh:
+        json.dump(got, fh)
+    job['done'] = got
+    if 'error' in got:
+        raise OpError(f"sketch {letter} did not render: {got['error']}")
+    return got
+
+
+def _sketch_finish(jobs):
+    """The background child: render the sketches after the first, one by one (each waits its turn on the machine)."""
+    for job in jobs:
+        try:
+            _sketch_render(job)
+        except OpError:
+            pass
+
+
+def _sketch_spawn(jobs, sd):
+    """Start the background child that renders `jobs`; its output goes to <sketches>/render.log."""
+    import subprocess
+    import sys
+    os.makedirs(sd, exist_ok=True)
+    log = open(os.path.join(sd, 'render.log'), 'a', encoding='utf8')
+    flags = (subprocess.CREATE_NEW_PROCESS_GROUP | 0x00000008) if os.name == 'nt' else 0   # detached on Windows
+    code = 'import json, sys; from ismail import api; api._sketch_finish(json.loads(sys.argv[1]))'
+    subprocess.Popen([sys.executable, '-c', code, json.dumps(jobs)], cwd=os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__))), stdout=log, stderr=subprocess.STDOUT, creationflags=flags,
+        start_new_session=os.name != 'nt')
+
+
+@op()
+def sketch_wait(project: str, wait: float = 180) -> str:
+    """Wait for the sketches still rendering in the background (sketch returns the first as soon as it lands),
+    up to `wait` seconds. -> each sketch: its file to play, or still rendering, or what went wrong."""
+    sd = os.path.join(os.path.abspath(project), 'sketches')
+    if not os.path.isdir(sd):
+        raise OpError(f"no sketches in {project}: sketch(project, '<their words>') makes them")
+    end = time.time() + max(0.0, float(wait))
+    while True:
+        rows = []
+        for d in sorted(os.listdir(sd)):
+            if not os.path.exists(os.path.join(sd, d, 'sketch.json')):
+                continue
+            r = os.path.join(sd, d, 'sketch_ready.json')
+            rows.append((d, json.load(open(r, encoding='utf8')) if os.path.exists(r) else None))
+        if all(x for _, x in rows) or time.time() >= end:
+            break
+        time.sleep(1.0)
+    L = []
+    for d, r in rows:
+        if r is None:
+            L.append(f"{d}: still rendering (the machine may be busy; sketch_wait again, or read {sd}/render.log)")
+        elif r.get('error'):
+            L.append(f"{d}: did not render: {r['error']}")
+        else:
+            L.append(f"{d}: ready, {r['lufs']:.1f} LUFS; {r['balance']}; play: {r['file']}")
+    return '\n'.join(L) or 'no sketches yet'
 
 
 def _loudness_trim(project, target):
