@@ -480,3 +480,24 @@ def test_a_caption_can_be_taken_back_off_the_page(phone):
     assert 'none matched' in P.phone_unsay(match='nothing like it')
     with pytest.raises(Exception, match='say which'):
         P.phone_unsay()
+
+
+def test_a_pause_tap_stops_the_set_with_no_agent_awake(phone, monkeypatch):
+    """The Live DJ's HANDOFF 50 (Nate 10-06 15:08): he pressed pause and the set played 70 s more."""
+    ph, base, _ = phone
+    stopped = []
+    monkeypatch.setattr(ph, 'stop_set', lambda project: stopped.append(project) or 'live engine stopped')
+    ph.engine = dict(ph.engine or {}, project='D:/songs/x', bpm=120)
+    send = lambda what: urllib.request.urlopen(urllib.request.Request(                 # noqa: E731
+        base + '/api/tap', data=json.dumps({'what': what}).encode(), headers={'Content-Type': 'application/json'}),
+        timeout=5).read()
+    send('pause')
+    t = time.time()
+    while not any(c['type'] == 'caption' and c['text'].startswith('Paused') for c in ph.cmds) and time.time() - t < 5:
+        time.sleep(0.05)
+    assert stopped == ['D:/songs/x']
+    rows = [json.loads(x) for x in open(S.HOME / 'inbox.jsonl', encoding='utf8')]
+    assert rows[-1]['kind'] == 'control' and rows[-1]['what'] == 'paused' and rows[-1]['by'] == 'phone server'
+    send('pause')                                                       # a second press within 15 s does nothing more
+    time.sleep(0.3)
+    assert stopped == ['D:/songs/x']

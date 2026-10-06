@@ -80,6 +80,13 @@ in the bud, and a long press opens the phone's assistant). So, while a set plays
   mic" records with the phone's own microphone, so the earbuds may stay in music quality throughout. If the phone
   will not open the mic (the screen off, or blocked), a low tone and a line say so.
 
+## Pause means stop, now
+
+A pause from the person (the Pause key, or "pause the set" said in a note) is acted on by the phone server itself:
+it fades the set out over 4 s and stops the engine, then says so on the page and posts a `control` line
+(`what: 'paused'`) to the inbox. No agent has to be awake for it (10-06: the DJ was mid-task and the set played on
+for 70 s after Nate pressed pause). Starting again is yours, when they say or tap Resume.
+
 ## Nothing personal on the page
 
 The page may be on someone's screen recording or a shared video: never put where the person lives, their name, or

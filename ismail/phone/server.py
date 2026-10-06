@@ -65,6 +65,7 @@ SOUND_EVENTS = {
 }
 # the VR stage's earcon names (ismail/stage/page/voice.js) mean the same events here, so one set of names serves both
 SOUND_ALIASES = {'incoming': 'message', 'rec_start': 'note_start', 'rec_stop': 'note_end', 'sent': 'note_sent'}
+PAUSE_FADE_S = 4.0      # a pause tap fades the set out over this long and stops it (no agent needs to be awake)
 MOVE_SETTLE_BARS = 8   # a scheduled vibe becomes the standing one this many bars after the room passed its bar
 SOUND_EXT = ('.wav', '.ogg', '.mp3', '.m4a', '.webm', '.flac')
 SOUND_MAX_S, SOUND_MAX_BYTES = 5.0, 1 << 20
@@ -235,6 +236,7 @@ class Phone:
         (HOME / 'voice').mkdir(exist_ok=True)
         self.cond = threading.Condition()
         self.route = inbox
+        self.paused_at = 0.0
         self.seq = self._last_seq()
         self.cmd_id = 0
         self.cmds = []
@@ -391,7 +393,46 @@ class Phone:
             if rec.get('kind') in ('tap', 'mood'):
                 self.taps.append(self._tap_item(rec))
         self._hooks(rec)
+        if rec.get('kind') == 'tap' and rec.get('what') == 'pause':
+            self.pause_set(rec)
         return rec
+
+    def pause_set(self, rec):
+        """A pause tap (the key, or "pause the set" said) stops the set here and now (Nate 10-06 15:08: "Did you not
+        see my pause button press? I would definitely stop"; the DJ was mid-task for 70 s). The server fades the
+        engine out over PAUSE_FADE_S and stops it, then says so on the page and in the inbox; starting again is the
+        DJ's, on their word."""
+        e = self.engine
+        if not e or not e.get('project') or time.time() - self.paused_at < 15:
+            return
+        self.paused_at = time.time()
+        project = e['project']
+
+        def go():
+            try:
+                msg = self.stop_set(project)
+            except Exception as ex:                       # say it failed; the DJ still sees the tap
+                msg = f"could not stop it: {type(ex).__name__}: {ex}"
+            ok = not msg.startswith('could not')
+            self.post({'kind': 'control', 'what': 'paused' if ok else 'pause_failed', 'by': 'phone server',
+                       'ref': rec.get('n'), 'result': str(msg)[:300]})
+            text = ('Paused: the set faded out. Say or tap Resume when you want it back.' if ok else
+                    'Pause did not reach the set: ' + str(msg)[:120])
+            cap = {'text': text, 'ts': now_iso(), 'who': 'phone'}
+            self.view['captions'] = (self.view['captions'] + [cap])[-20:]
+            self.cmd('caption', text=text, who='phone', buzz=True)
+        threading.Thread(target=go, daemon=True).start()
+
+    def stop_set(self, project):
+        """live_stop on the playing engine, in a child process (the op table is not loaded here)."""
+        code = ("import sys; from ismail.live import ops; "
+                f"print(ops.live_stop(sys.argv[1], fade_sec={PAUSE_FADE_S}))")
+        r = subprocess.run([sys.executable, '-c', code, str(project)], capture_output=True, text=True, timeout=60,
+                           cwd=str(Path(__file__).resolve().parents[2]))
+        out = (r.stdout or '').strip().splitlines()
+        if r.returncode:
+            raise RuntimeError(((r.stderr or '').strip().splitlines() or ['failed'])[-1])
+        return out[-1] if out else 'stopped'
 
     def _hooks(self, rec):
         try:

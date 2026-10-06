@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### A pause tap stops the set by itself (the Live DJ's HANDOFF 50, Nate 10-06 15:08)
+
+- The phone server fades the playing engine out over 4 s and stops it when the person taps Pause or says "pause the
+  set", then captions it and posts `{'kind': 'control', 'what': 'paused'}`. Before, the set played on until an agent
+  read the tap (70 s on 10-06).
+
 ### phone_unsay: take captions back off the phone page (Nate 10-06 15:03)
 
 - `phone_unsay(match=, since=, n=)` removes captions from the page, its history and its pinned line, and closes the
