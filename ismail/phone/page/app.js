@@ -183,6 +183,29 @@ $('quality').textContent = kbps + ' kbps'; $('buzzset').textContent = buzzOn ? '
 
 // ---- talk: hold to talk, or tap once to talk hands-free and tap again to send
 const talk = { rec: null, stream: null, chunks: [], down: 0, toggle: false, t: null, sid: null };
+// Nate 10-06 14:39: with the mic open, Bluetooth earbuds (his Dime 3) switch to call mode (HFP: mono, narrowband) and
+// the music sounds bad. So by default the mic opens for a note and closes after it, and the earbuds go back to music
+// quality. 'Mic: kept open' is the old way (an earbud press starts a note even with the screen off, in call quality).
+// 'Record: phone mic' records with the phone's own microphone, so the earbuds may never enter call mode.
+let micKeep = store.get('mic_keep', false), micSrc = store.get('mic_src', 'earbuds');
+async function openMic() {
+  const base = { echoCancellation: true, noiseSuppression: true };
+  if (micSrc === 'phone') {
+    try {
+      const ds = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'audioinput' && d.label);
+      const own = ds.find((d) => !/bluetooth|headset|hands.?free|buds|dime|sco|wireless/i.test(d.label) &&
+        !['default', 'communications'].includes(d.deviceId));
+      if (own) return navigator.mediaDevices.getUserMedia({ audio: { ...base, deviceId: { exact: own.deviceId } } });
+      toast('no phone microphone listed: recording with the default one');
+    } catch (e) {}
+  }
+  return navigator.mediaDevices.getUserMedia({ audio: base });
+}
+function closeMic() {                     // every track stopped: the earbuds can go back to music quality
+  if (talk.rec || !talk.stream) return;
+  talk.stream.getTracks().forEach((t) => t.stop());
+  talk.stream = null;
+}
 // ---- earbud button and the tones you hear in your pocket
 let keysOn = store.get('keys', true), noteTimer = 0;
 function wav(parts) {                       // [[freq, ms], ...] -> a data: URI of a short 16-bit tone sequence
@@ -208,10 +231,11 @@ const MADE = {};
   a.addEventListener('canplaythrough', () => { MADE[n] = a.src; }, { once: true }); });
 function cue(name) { try { const a = new Audio(MADE[name] || CUES[name]); a.volume = 0.8; a.play().catch(() => {}); } catch (e) {} }
 async function armMic() {
+  if (!micKeep) return false;               // the mic opens when a note starts
   if (talk.stream && talk.stream.active) return true;
   try {
-    talk.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
-    $('talkhint').textContent = 'earbud ready: press to talk, press again to send';
+    talk.stream = await openMic();
+    $('talkhint').textContent = 'earbud ready: press to talk, press again to send (the mic stays open: call quality)';
     return true;
   } catch (e) { $('talkhint').textContent = 'the microphone is blocked: the earbud cannot take notes'; return false; }
 }
@@ -219,16 +243,31 @@ async function keyNote() {
   if (audio.paused && want) audio.play().catch(() => {});
   if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
   if (talk.rec) { micStop(true); return; }
-  if (!talk.stream || !talk.stream.active) { cue('error'); buzz([300]); toast('open the page once to let the earbud take notes'); return; }
-  await micStart();
+  if (micKeep && (!talk.stream || !talk.stream.active)) { cue('error'); buzz([300]); toast('open the page once to let the earbud take notes'); return; }
+  await micStart();                         // otherwise it opens the mic now (a second or two for the earbuds to switch)
 }
-$('keysset').onclick = () => { keysOn = !keysOn; store.set('keys', keysOn); $('keysset').textContent = keysOn ? 'Earbud: talk' : 'Earbud: play'; if (keysOn && want) armMic(); };
+$('keysset').onclick = () => { keysOn = !keysOn; store.set('keys', keysOn); $('keysset').textContent = keysOn ? 'Earbud: talk' : 'Earbud: play'; if (keysOn && want) armMic(); else closeMic(); };
 $('keysset').textContent = keysOn ? 'Earbud: talk' : 'Earbud: play';
+$('mickeep').onclick = () => {
+  micKeep = !micKeep; store.set('mic_keep', micKeep); $('mickeep').textContent = micKeep ? 'Mic: kept open' : 'Mic: per note';
+  if (micKeep) { if (keysOn && want) armMic(); } else { closeMic(); $('talkhint').textContent = 'tap once for hands-free, tap again to send'; }
+};
+$('micsrc').onclick = () => {
+  micSrc = micSrc === 'phone' ? 'earbuds' : 'phone'; store.set('mic_src', micSrc);
+  $('micsrc').textContent = micSrc === 'phone' ? 'Record: phone mic' : 'Record: earbuds';
+  closeMic(); if (micKeep && keysOn && want) armMic();
+};
+$('mickeep').textContent = micKeep ? 'Mic: kept open' : 'Mic: per note';
+$('micsrc').textContent = micSrc === 'phone' ? 'Record: phone mic' : 'Record: earbuds';
 async function micStart() {
   if (talk.rec) return;
   try {
-    talk.stream = talk.stream || await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
-  } catch (e) { toast('the microphone is blocked: allow it for this page'); keyState('talk', 'blocked', 'Mic blocked'); return; }
+    if (!talk.stream || !talk.stream.active) talk.stream = await openMic();
+  } catch (e) {
+    cue('error'); buzz([300]);
+    toast(document.hidden ? 'the phone would not open the mic with the screen off: turn it on, or set Mic: kept open' : 'the microphone is blocked: allow it for this page');
+    keyState('talk', 'blocked', 'Mic blocked'); return;
+  }
   const mime = ['audio/webm;codecs=opus', 'audio/ogg;codecs=opus', 'audio/mp4'].find((m) => window.MediaRecorder && MediaRecorder.isTypeSupported(m)) || '';
   talk.chunks = []; talk.t = heardNow(); talk.sid = sid; talk.started = Date.now(); talk.end = 'press';
   ev('note_start');
@@ -270,6 +309,7 @@ function micStop(sendIt) {
     const blob = new Blob(talk.chunks, { type: r.mimeType || 'audio/webm' });
     if (sendIt && blob.size > 1500) upload(blob, talk.sid, talk.t, dur, endBy);
     else if (sendIt) { toast('too short: hold a little longer'); keyState('talk', 'mic', 'Hold to talk'); }
+    if (!micKeep) closeMic();
   };
   r.stop();
 }
