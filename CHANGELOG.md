@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Hum a part into a voice note (ledger:M163, the Live DJ's handoff 52)
+
+- The phone server keeps the last 150 s of the streamed master in memory, and every voice note saves the music under
+  it (`<id>_ref.wav`, 3 s before to 2 s after, with beat stamps), so the bleed into the mic can line a sung part up
+  with the beat heard, with no recording on.
+- A hum is told from the note itself, with no button (Nate): pitched, holding its notes, few words. It reaches the
+  inbox as kind `hum`. `phone_hum(voice_id)` answers for any note. The notes, grid and swing come from the Live DJ's
+  measuring once it holds on real hums. 213 tools.
+
 ### The update card lists every change waiting
 
 - The left-wrist update card lists the changes waiting (up to five, the most important first, then "+N more") and

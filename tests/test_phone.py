@@ -501,3 +501,65 @@ def test_a_pause_tap_stops_the_set_with_no_agent_awake(phone, monkeypatch):
     send('pause')                                                       # a second press within 15 s does nothing more
     time.sleep(0.3)
     assert stopped == ['D:/songs/x']
+
+
+def test_a_hum_tells_itself_apart_from_talk():
+    from ismail.phone import hum
+    sr = hum.SR
+    t = np.arange(int(sr * 0.5)) / sr
+    held = np.concatenate([0.3 * np.sin(2 * np.pi * f * t) for f in (220.0, 246.9, 261.6, 220.0)])
+    c = hum.check(held.astype(np.float32), 'Mmm.')
+    assert c['is_hum'] and c['voiced'] > 0.8 and c['note'].startswith(('A', 'B', 'C'))
+    tt = np.arange(int(sr * 2.0)) / sr                                  # a pitch that never holds, like speech
+    glide = 0.3 * np.sin(2 * np.pi * np.cumsum(180 + 80 * np.sin(2 * np.pi * 3 * tt)) / sr)
+    c = hum.check(glide.astype(np.float32), 'okay play the piano a bit louder now please')
+    assert not c['is_hum'] and 'words a second' in c['why']
+    assert hum.words('Mmm la la, play it') == ['play', 'it']
+
+
+def test_every_voice_note_keeps_the_music_under_it(phone):
+    ph, base, _ = phone
+    import soundfile as sf
+    ph.sids['s1'] = {'pcm0': 0.0, 'kbps': 64, 't': 0.0, 'at': time.time()}
+    with ph.cond:
+        for i in range(int(12 * S.SR / S.BLOCK)):                      # 12 s of streamed master, 2 beats a second
+            p = i * S.BLOCK / S.SR
+            ph.master.append((p, (np.full((S.BLOCK, 2), i % 100, dtype='<i2')).tobytes()))
+            ph.timeline.append((p, time.time(), p * 2, 120.0, 4, 0.0))
+        ph.fed = int(12 * S.SR / S.BLOCK) * S.BLOCK
+    req = urllib.request.Request(base + '/api/voice?sid=s1&t=5.0&dur=3.0&end=press', data=b'\x1a' * 2000,
+                                 headers={'Content-Type': 'audio/webm;codecs=opus'})
+    r = json.loads(urllib.request.urlopen(req, timeout=5).read())
+    meta = json.loads((S.HOME / 'voice' / f"{r['id']}_meta.json").read_text(encoding='utf8'))
+    x, sr = sf.read(meta['ref'], dtype='int16')
+    assert sr == S.SR and abs(len(x) / sr - 8.0) < 0.05 and meta['ref_lead_s'] == 3.0   # 3 s before, 3 s note, 2 after
+    bj = json.loads(open(meta['ref_beats'], encoding='utf8').read())
+    assert bj['bpm'] == 120.0 and bj['note_starts_at_s'] == 3.0 and abs(bj['beats'][0][1] - 4.0) < 0.1
+    req = urllib.request.Request(base + '/api/voice?sid=&t=', data=b'\x1a' * 2000, headers={'Content-Type': 'audio/webm'})
+    r = json.loads(urllib.request.urlopen(req, timeout=5).read())
+    meta = json.loads((S.HOME / 'voice' / f"{r['id']}_meta.json").read_text(encoding='utf8'))
+    assert 'ref' not in meta and 'not playing the stream' in meta['ref_why']
+
+
+@pytest.mark.skipif(not S.ffmpeg(), reason='ffmpeg is not installed')
+def test_a_hummed_note_reaches_the_inbox_as_a_hum(phone, monkeypatch):
+    ph, base, _ = phone
+    import io
+    import soundfile as sf
+    monkeypatch.setattr(S, 'stt', lambda audio, name: 'Mmm.')
+    t = np.arange(int(16000 * 0.5)) / 16000
+    y = np.concatenate([0.3 * np.sin(2 * np.pi * f * t) for f in (196.0, 220.0, 246.9, 196.0)]).astype(np.float32)
+    buf = io.BytesIO()
+    sf.write(buf, y, 16000, format='WAV')
+    req = urllib.request.Request(base + '/api/voice?sid=&t=&dur=2.0', data=buf.getvalue(),
+                                 headers={'Content-Type': 'audio/wav'})
+    vid = json.loads(urllib.request.urlopen(req, timeout=5).read())['id']
+    for _ in range(100):
+        lines = json.loads(P.phone_listen('dj', since=0, wait=0))['lines']
+        if any(x['kind'] == 'hum' for x in lines):
+            break
+        time.sleep(0.1)
+    h = [x for x in lines if x['kind'] == 'hum']
+    assert h and h[0]['id'] == vid and h[0]['note'].startswith(('G', 'A'))
+    out = P.phone_hum()
+    assert f'voice note {vid}' in out and 'a HUM' in out and 'No music was saved' in out

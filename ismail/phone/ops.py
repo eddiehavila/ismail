@@ -312,6 +312,15 @@ def phone_unsay(match: str = None, since: str = None, n: int = None) -> str:
 
 
 @op()
+def phone_hum(voice_id: str = None) -> str:
+    """Is a voice note a hum or a sung line, and where is the music he heard under it: any note (the latest when no
+    voice_id). A hum is told from the note itself (pitched, holding its notes, few words) and also arrives in the
+    inbox as kind 'hum'. Every note keeps the master the page played under it (<id>_ref.wav, from 3 s before to 2 s
+    after, with beat stamps): the music bleeding into the mic lines the note up with the beat he heard."""
+    return _call('hum', voice_id=voice_id)
+
+
+@op()
 def phone_buzz(pattern: list = None) -> str:
     """Vibrate the phone (if the page is open): pattern in ms, e.g. [200, 100, 200]."""
     return _call('buzz', pattern=pattern)

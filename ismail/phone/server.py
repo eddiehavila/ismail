@@ -73,6 +73,8 @@ SPEAK = os.environ.get('ISMAIL_SPEAK') or 'http://127.0.0.1:8765'
 SR = 44100
 BLOCK = 2048                       # frames fed per step (46 ms)
 RING_S = 120.0                     # seconds of encoded stream kept for rewind and late joiners
+MASTER_S = 150.0                   # seconds of the streamed master kept raw, for the music under a voice note
+REF_LEAD_S, REF_TAIL_S = 3.0, 2.0  # how much of it before the note begins and after it ends (ledger:M163)
 LEAD_S = 1.0                       # a live join starts this far back, so the phone's buffer fills at once
 BOOT = secrets.token_hex(4)        # this server run: a page that sees it change knows the server restarted
 
@@ -273,6 +275,8 @@ class Phone:
         self.encoders = {}
         self.fed = 0                               # frames fed since the server started
         self.timeline = collections.deque()        # (pcm_s, wall, beat or None, bpm, bpb, ahead)
+        self.master = collections.deque()          # (pcm_s, int16 stereo block): the last MASTER_S of the stream
+        self.hums = {}                             # voice id -> the hum check (hum.check)
         self.overlay = collections.deque()         # spoken lines waiting to be mixed in (float32 stereo)
         self.sids = {}                             # stream session -> {pcm0, kbps, t, at}
         self.voice_q = collections.deque()
@@ -582,6 +586,9 @@ class Phone:
                                       e['bpb'] if e else None, e['ahead'] if e else 0.0))
                 while self.timeline and self.timeline[0][0] < self.fed / SR - RING_S - 30:
                     self.timeline.popleft()
+                self.master.append((self.fed / SR, block))     # what the page plays, overlay and all (M163)
+                while self.master and self.master[0][0] < self.fed / SR - MASTER_S:
+                    self.master.popleft()
                 self.fed += n
                 encs = list(self.encoders.values())
             for enc in encs:
@@ -663,14 +670,100 @@ class Phone:
     # ---- voice notes
     def add_voice(self, data, mime, sid, t, extra=None):
         vid = datetime.datetime.now().strftime('%Y%m%d_%H%M%S_') + secrets.token_hex(2)
-        ext = 'webm' if 'webm' in (mime or '') else 'ogg' if 'ogg' in (mime or '') else 'm4a' if 'mp4' in (mime or '') else 'bin'
+        ext = 'webm' if 'webm' in (mime or '') else 'ogg' if 'ogg' in (mime or '') else 'm4a' if 'mp4' in (mime or '') else             'wav' if 'wav' in (mime or '') else 'bin'
         f = HOME / 'voice' / f'{vid}.{ext}'
         f.write_bytes(data)
+        heard = self.heard(sid, t)
+        meta = {'heard': heard, 'dur_s': (extra or {}).get('dur_s')}
+        try:
+            meta.update(self._save_ref(vid, sid, t, meta['dur_s']))
+        except Exception as e:                               # never lose the note over its reference
+            meta['ref_why'] = f'saving it failed ({type(e).__name__}: {e})'
+        (HOME / 'voice' / f'{vid}_meta.json').write_text(json.dumps(meta), encoding='utf8')
         rec = self.post({'kind': 'voice', 'id': vid, 'file': str(f), 'state': 'transcribing', 'sid': sid,
-                         'heard': self.heard(sid, t), **(extra or {})})
+                         'heard': heard, **({'ref': meta['ref']} if meta.get('ref') else {}), **(extra or {})})
         self.voice_state[vid] = 'queued'
         self.voice_q.append((vid, f, rec['heard'], sid))
         return rec
+
+    def _save_ref(self, vid, sid, t, dur):
+        """The master the page played under a voice note, from REF_LEAD_S before it began to REF_TAIL_S after it
+        ended, as <id>_ref.wav beside it, with the beat at points through it (<id>_ref.json). The music bleeding
+        into the mic lines the note up with it (ledger:M163). -> meta keys."""
+        s = self.sids.get(sid)
+        try:
+            t = float(t)
+        except (TypeError, ValueError):
+            t = None
+        if not s or t is None:
+            return {'ref_why': 'the page was not playing the stream when the note began'}
+        a = s['pcm0'] + t - REF_LEAD_S
+        with self.cond:
+            blocks = [(p, b) for p, b in self.master if p + len(b) / 4 / SR > a]
+            tl = [x for x in self.timeline if x[0] >= a - 1]
+            end = self.fed / SR
+        if dur:
+            end = min(end, s['pcm0'] + t + float(dur) + REF_TAIL_S)
+        if not blocks or blocks[0][0] > a + 1.0:
+            return {'ref_why': 'the stream had not been playing long enough before the note'}
+        a = max(a, blocks[0][0])
+        x = np.frombuffer(b''.join(b for _, b in blocks), dtype='<i2').reshape(-1, 2)
+        i0 = int(round((a - blocks[0][0]) * SR))
+        x = x[i0:i0 + int((end - a) * SR)]
+        import soundfile as sf
+        ref = HOME / 'voice' / f'{vid}_ref.wav'
+        sf.write(str(ref), x, SR, subtype='PCM_16')
+        beats, bpm, bpb, last = [], None, None, -9.0
+        for p, _, beat, bp, bb, _ in tl:
+            if beat is not None and a <= p <= end and p - last >= 0.5:
+                beats.append([round(p - a, 3), round(beat, 3)])
+                bpm, bpb, last = bp or bpm, bb or bpb, p
+        bj = HOME / 'voice' / f'{vid}_ref.json'
+        bj.write_text(json.dumps({'sr': SR, 'note_starts_at_s': round(s['pcm0'] + t - a, 3), 'bpm': bpm, 'bpb': bpb,
+                                  'beats': beats}), encoding='utf8')
+        return {'ref': str(ref), 'ref_beats': str(bj), 'ref_lead_s': round(s['pcm0'] + t - a, 2),
+                'ref_s': round(len(x) / SR, 2)}
+
+    def hum_check(self, vid, f=None, text=None):
+        """The hum check on one voice note (hum.check), kept beside it as <id>_hum.json. -> (meta, check)."""
+        from . import hum
+        d = HOME / 'voice'
+        if f is None:
+            f = next((p for p in sorted(d.glob(f'{vid}.*')) if p.suffix != '.json'), None)
+            if f is None:
+                raise ValueError(f"no voice note {vid!r} in {d}")
+        try:
+            meta = json.loads((d / f'{vid}_meta.json').read_text(encoding='utf8'))
+        except (OSError, ValueError):
+            meta = {}
+        try:
+            chk = json.loads((d / f'{vid}_hum.json').read_text(encoding='utf8'))
+        except (OSError, ValueError):
+            if text is None:
+                text = next((r.get('text') for r in self._voice_texts() if r.get('id') == vid), '')
+            if not ffmpeg():
+                raise ValueError('ffmpeg is needed to read a voice note (set ISMAIL_FFMPEG)')
+            chk = hum.check(hum.decode(f, ffmpeg()), text)
+            (d / f'{vid}_hum.json').write_text(json.dumps(chk), encoding='utf8')
+        self.hums[vid] = chk
+        return meta, chk
+
+    def _voice_texts(self):
+        try:
+            with open(HOME / 'inbox.jsonl', 'rb') as fh:
+                fh.seek(max(0, os.path.getsize(fh.name) - 400_000))
+                lines = fh.read().decode('utf8', 'replace').splitlines()[1:]
+        except OSError:
+            return []
+        out = []
+        for l in lines:
+            try:
+                r = json.loads(l)
+            except ValueError:
+                continue
+            if r.get('kind') == 'voice_text':
+                out.append(r)
+        return out
 
     def _transcriber(self):
         while True:
@@ -693,7 +786,16 @@ class Phone:
             self.voice_state.pop(vid, None)
             self.post({'kind': 'voice_text', 'id': vid, 'text': text})
             self.cmd('heard', ref=vid, text=text)
-            self.voice_command(text, vid, heard, sid)
+            if self.voice_command(text, vid, heard, sid) is None and ffmpeg():
+                try:                                         # a hum tells itself apart: no button (ledger:M163)
+                    meta, chk = self.hum_check(vid, f, text)
+                    if chk.get('is_hum'):
+                        self.post({'kind': 'hum', 'id': vid, 'file': str(f), 'heard': heard, 'ref': meta.get('ref'),
+                                   'ref_beats': meta.get('ref_beats'), 'ref_lead_s': meta.get('ref_lead_s'),
+                                   **{k: chk[k] for k in ('hz', 'note', 'voiced', 'steady', 'dur_s')},
+                                   '_age': chk.get('dur_s') or 0})
+                except Exception as e:
+                    print(f'[phone] hum check {vid}: {type(e).__name__}: {e}', flush=True)
 
     def voice_command(self, text, vid=None, heard=None, sid=None):
         """A note of at most six words that is a command (VOICE_CMDS) acts as one. -> the act or None."""
@@ -1118,6 +1220,19 @@ class Agent:
         self.ph.cmd('restarting', back_in_s=float(back_in_s), why=str(why)[:80])
         n = sum(x.listeners for x in self.ph.encoders.values())
         return f"told the page ({n} on the stream)"
+
+    def op_hum(self, voice_id=None, who=None):
+        """Is a voice note a hum, and where is the music he heard under it (ledger:M163). Any note, the latest when
+        voice_id is not given."""
+        from . import hum
+        if not voice_id:
+            notes = sorted(p.stem for p in (HOME / 'voice').glob('*') if p.suffix != '.json'
+                           and not p.stem.endswith('_ref'))
+            if not notes:
+                raise ValueError('no voice notes yet')
+            voice_id = notes[-1]
+        meta, chk = self.ph.hum_check(voice_id)
+        return hum.describe(voice_id, meta, chk)
 
     def op_buzz(self, pattern=None, who=None):
         self.ph.cmd('buzz', pattern=pattern or [200, 100, 200])
