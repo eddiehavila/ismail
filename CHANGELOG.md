@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### A priority says when it matches no job; `--for 3d` (ledger:M143, Nate's approval 10-06)
+
+- `who` defaults to the working folder's name, so nearly every job from the repo is `ismail` and a priority given to
+  a session matched nothing unless that session set `ISMAIL_SESSION`. Setting or reading a priority, and the board,
+  now warn when no job of that name ran or waited in 48 h, and list the names in use. SKILL.md tells every session to
+  set `ISMAIL_SESSION`.
+- Durations take days (`priority voice --for 3d`), and a grant beyond today shows its day.
+
 ### The phone's Listen and Talk keys show their state with an icon (Nate, 10-06 09:59)
 
 - Listen: play, stop while playing, a breathing arrow while it reconnects or buffers, Resume when the phone wants a
