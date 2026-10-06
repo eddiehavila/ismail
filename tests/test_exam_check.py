@@ -141,3 +141,27 @@ def test_a_band_limited_class_and_lopsided_sides_are_heard(tmp_path):
     key2 = {c['label']: ('real' if c['label'].endswith('A') else 'mine') for c in full}   # r41: real on A, every pair
     ok, lines = EC.run(clips=full, key=key2, answers_path=str(tmp_path / 'a.jsonl'))
     assert not ok and "every trial starts with 'real'" in text(lines), text(lines)
+
+
+def test_the_blind_crop_check_hides_the_key_and_says_when_the_picture_gives_it_away(tmp_path):
+    """ledger:M158 (Voice, vox:r44-r45: 15 of 16 picked from the picture): a gate before a real-vs-made round."""
+    from ismail import api_exam as X
+    pairs = [[noise(tmp_path / f'r{i}.wav', None, seed=i), noise(tmp_path / f'm{i}.wav', 6000, seed=10 + i)]
+             for i in range(3)]
+    out = str(tmp_path / 'eye')
+    msg = X.exam_eye_crops(pairs=pairs, out=out, n_windows=3)
+    assert msg.startswith('9 crop pairs') and 'Do not open key.json' in msg
+    qs = json.load(open(os.path.join(out, 'questions.json'), encoding='utf8'))
+    assert len(qs) == 9 and all('real' not in q for q in qs) and os.path.exists(os.path.join(out, 'q09.png'))
+    key = {k['q']: k['real'] for k in json.load(open(os.path.join(out, 'key.json'), encoding='utf8'))}
+    sure = X.exam_eye_score(out, key)                                  # an eye that sees it every time
+    assert sure.startswith('NOT READY: blind crop check: picked the real side in 9 of 9') and 'zoom two ways' in sure
+    guess = {q: ('1' if q % 2 else '2') for q in key}                   # an eye that cannot tell
+    hits = sum(guess[q] == key[q] for q in key)
+    out2 = X.exam_eye_score(out, guess)
+    assert (out2.startswith('READY') if hits <= 7 else out2.startswith('NOT READY')), out2
+    assert json.load(open(os.path.join(out, 'answers.json'), encoding='utf8'))
+    import pytest
+    from ismail.api import OpError
+    with pytest.raises(OpError, match='no answers'):
+        X.exam_eye_score(out, {99: '1'})
