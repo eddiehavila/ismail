@@ -401,3 +401,77 @@ def test_while_a_set_is_on_air_gpu_jobs_and_blender_renders_wait(board):
         machine._held.depth = 1
     assert machine.check('gpu') == ''                                              # the set ended
     assert machine.main(['on-air']) == 0
+
+
+def test_a_script_under_machine_run_renders_in_the_runs_slot_with_its_threads(board):
+    """ledger:M81 (hit three times on 10-05/06): `machine run --cpu -- python script.py` held a slot and the script's
+    render asked for a second one from a child process, refused or deadlocked. The run hands its slot down."""
+    env = dict(os.environ, ISMAIL_MACHINE_DIR=str(board))
+    env.pop(machine.SLOT_ENV, None)
+    code = ("import os; from ismail import machine\n"
+            "with machine.slot('cpu', 'render inside the script') as j:\n"
+            "    print(len(os.listdir(os.path.join(os.environ['ISMAIL_MACHINE_DIR'], 'jobs'))), j['what'],"
+            " os.environ['OMP_NUM_THREADS'], machine._held.threads, machine._handed_down('gpu') is None)")
+    out = subprocess.run([sys.executable, '-m', 'ismail.machine', 'run', '--cpu', '--force', '--threads', '3',
+                          '--what', 'harness', '--', sys.executable, '-c', code],
+                         capture_output=True, text=True, env=env, timeout=120)
+    assert out.returncode == 0, out.stderr
+    assert out.stdout.split() == ['1', 'harness', '3', '3', 'True']   # one board entry, the run's; its threads; a GPU
+    hist = [json.loads(x) for x in open(board / 'history.jsonl', encoding='utf8')]  # step takes its own GPU slot
+    assert [h['what'] for h in hist] == ['harness']
+
+
+def test_a_handed_down_slot_is_ignored_unless_an_ancestor_holds_it(board, monkeypatch):
+    with machine.slot('cpu', 'mine') as job:
+        machine._held.depth = 0
+        monkeypatch.setenv(machine.SLOT_ENV, job['id'])
+        assert machine._handed_down('cpu') is None              # this process holds it, not an ancestor
+        monkeypatch.setenv(machine.SLOT_ENV, '../../x')
+        assert machine._handed_down('cpu') is None
+        assert machine.child_env(job)[machine.SLOT_ENV] == job['id']
+        assert machine.child_env(job)['OPENBLAS_NUM_THREADS'] == str(machine.THREADS)
+        machine._held.depth = 1
+
+
+def test_while_a_set_is_on_air_cpu_jobs_share_half_the_threads(board, monkeypatch):
+    """ledger:M132 (the DJ's 359-underrun dropout, 10-06): a slot counts jobs, not cores; one slot's render, eq_match
+    and perceptual model took the CPU to 88-100 % beside the set."""
+    monkeypatch.setattr(machine.psutil, 'cpu_count', lambda *a, **k: 8)
+    assert machine.on_air_threads() == 4
+    assert machine.check('cpu', threads=None) == ''                          # no set: no budget
+    with machine.slot('live', 'live engine set', threads=None):
+        machine._held.depth = 0
+        assert machine.check('cpu', threads=4) == ''
+        why = machine.check('cpu', threads=None)
+        assert 'share 4 threads' in why and 'all 8 (no thread cap)' in why and 'ask for 4 or fewer' in why
+        with machine.slot('cpu', 'render a', threads=3):
+            machine._held.depth = 0
+            why = machine.check('cpu', threads=2)
+            assert '3 in use' in why and "render a" in why and 'ask for 1 or fewer' in why
+            assert '3 threads' in machine.board()
+            machine.set_on_air_policy('off', by='the user', why='test')
+            assert 'share' not in machine.check('cpu', threads=2)
+            machine.set_on_air_policy('set_first', by='the user')
+            machine._held.depth = 1
+        machine._held.depth = 1
+
+
+def test_torch_takes_the_slots_threads_and_gets_its_own_back(board, monkeypatch):
+    class Torch:
+        n = 8
+
+        def get_num_threads(self):
+            return self.n
+
+        def set_num_threads(self, n):
+            self.n = n
+    t = Torch()
+    monkeypatch.setitem(sys.modules, 'torch', t)
+    with machine.slot('cpu', 'cmp_run', threads=3):
+        assert t.n == 3
+        t.n = 8                                                  # a model loaded inside the slot reset it
+        machine.cap_torch()
+        assert t.n == 3
+    assert t.n == 8
+    machine.cap_torch()                                          # outside a slot: nothing
+    assert t.n == 8

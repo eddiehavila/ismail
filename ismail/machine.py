@@ -25,6 +25,11 @@ refused. Waiters line up: the session the user gave priority to first (`python -
 3h --by "the user"`, it expires by itself), then by arrival; a job that does not wait yields to every waiter ahead
 of it. Priority orders the line only: the heat limit, the busy CPU and the memory reserve hold for everyone.
 
+Slots and threads: a slot counts jobs, not cores, so it also caps its threads (`threads=`, `run --threads`; BLAS,
+OpenMP and torch). `machine run` hands its slot to its command ($ISMAIL_SLOT): a script it runs can render or measure
+and those ops run in the run's slot instead of waiting forever for a second one (ledger:M81). While a set is on air the
+CPU jobs beside it share on_air_threads() threads (ledger:M132).
+
 The board lives in <songs>/_machine/ (one per machine, shared by every checkout and worktree), or $ISMAIL_MACHINE_DIR.
 """
 import argparse
@@ -70,6 +75,9 @@ JOB_NOTE_S = 15.0                  # a running job writes its memory to its boar
 ON_AIR_POLICIES = ('set_first', 'off', 'render_first')
 ON_AIR_DEFAULT = 'set_first'
 ON_AIR_HELD = re.compile(r'blender|eevee|cycles', re.I)   # CPU jobs that are renders on the GPU in all but name
+SLOT_ENV = 'ISMAIL_SLOT'           # the slot `machine run` hands its command: a slot asked for under it runs in it
+THREAD_ENV = ('OMP_NUM_THREADS', 'OPENBLAS_NUM_THREADS', 'MKL_NUM_THREADS', 'NUMEXPR_NUM_THREADS',
+              'VECLIB_MAXIMUM_THREADS')   # a command in a slot starts with the slot's thread cap (torch reads OMP's)
 
 
 class MachineBusy(RuntimeError):
@@ -424,12 +432,13 @@ def _describe(job):
         eta = f", expected done in {left / 60:.0f} min" if left > 0 else f", {-left / 60:.0f} min past its estimate"
     what = str(job['what']).strip().splitlines() or ['']
     what = what[0] + (' ...' if len(what) > 1 else '')          # a `python -c` job shows its first line
+    thr = f", {job['threads']} threads" if job['kind'] != 'live' and job.get('threads') else ''
     mem = ''
     if job.get('mem_now_gb') is not None:
         mem = f", using {job['mem_now_gb']:.1f} GB" + (f" of {job['mem_gb']:g} declared" if job.get('mem_gb') else '')
     if job.get('over'):
         mem += f", OVER: peaked at {job['over']:.1f} GB"
-    return f"{job['kind']} '{what}' ({job['who']}, pid {job['pid']}, {_ago(job['started'])}{eta}{mem})"
+    return f"{job['kind']} '{what}' ({job['who']}, pid {job['pid']}, {_ago(job['started'])}{thr}{eta}{mem})"
 
 
 def duration_s(text):
@@ -486,14 +495,43 @@ def _on_air_why(kind, what, cmd, js):
             f"(`run --wait`); only the user lifts it (`python -m ismail.machine on-air --policy off --by ...`)")
 
 
+def on_air_threads():
+    """While a set is on air, the CPU jobs beside it share this many threads: half the machine's. ledger:M132: one
+    slot ran a render, eq_match and the perceptual model (torch on every core), the CPU went to 88-100 % and the set
+    dropped 359 buffers."""
+    return max(2, (psutil.cpu_count() or 4) // 2)
+
+
+def _on_air_threads_why(kind, threads, js):
+    """While a set is on air under 'set_first', a CPU job waits when its threads and those of the CPU jobs already
+    beside the set would pass on_air_threads(). A job with no thread cap counts as every core."""
+    if kind != 'cpu' or not any(j['kind'] == 'live' for j in js) or on_air_policy()['policy'] != 'set_first':
+        return ''
+    n, budget = psutil.cpu_count() or 8, on_air_threads()
+    cpu = [j for j in js if j['kind'] == 'cpu']
+    used = sum(j.get('threads', THREADS) or n for j in cpu)     # a board file from before this rule: the default
+    want = threads or n
+    if used + want <= budget:
+        return ''
+    room = budget - used
+    return (f"a live set is on air and the CPU jobs beside it share {budget} threads ({used} in use"
+            + (': ' + '; '.join(_describe(j) for j in cpu) if cpu else '') + "); this job asks for "
+            + (f"{want}" if threads else f"all {n} (no thread cap)") + ": "
+            + (f"ask for {room} or fewer (`run --threads {room}`, `slot(..., threads={room})`) or wait in line"
+               if room > 0 else "wait in line (`run --wait`)")
+            + " (ledger:M132: a slot counts jobs, not cores)")
+
+
 def check(kind, mem_gb=0.0, _jobs=None, who=None, since=None, me=None, disk_gb=0.0, disk_path=None, disk_hint='',
-          what=None, cmd=None):
+          what=None, cmd=None, threads=THREADS):
     """-> '' when a `kind` job ('gpu' or 'cpu') of mem_gb may start now, else why not and what to do. who/since:
     the asking job's place in the line (a job that is not waiting stands at the back of it, now). disk_gb: what it
     writes, on disk_path's drive (and the songs folder's and the working directory's). what/cmd: the job, so a
-    Blender render registered as cpu still waits while a set is on air."""
+    Blender render registered as cpu still waits while a set is on air. threads: its thread cap (None: every core),
+    held to the on-air budget while a set plays."""
     js = jobs() if _jobs is None else _jobs
-    why = [w for w in (_disk_why(disk_gb, disk_path, disk_hint), _memory_why(js), _on_air_why(kind, what, cmd, js)) if w]
+    why = [w for w in (_disk_why(disk_gb, disk_path, disk_hint), _memory_why(js), _on_air_why(kind, what, cmd, js),
+                       _on_air_threads_why(kind, threads, js)) if w]
     hot = gpu_trouble(gpu())
     if hot:
         why.append(f"the GPU is {hot}: the machine is hot (CPU and GPU share one cooler), no new heavy job until it cools")
@@ -523,6 +561,77 @@ def check(kind, mem_gb=0.0, _jobs=None, who=None, since=None, me=None, disk_gb=0
 
 
 _held = threading.local()
+
+
+def _limit_threads(n):
+    """Cap this process's numeric threads at n: the BLAS and OpenMP pools, and torch when it is loaded. -> what
+    undoes it."""
+    undo = []
+    if not n:
+        return undo
+    try:
+        from threadpoolctl import threadpool_limits
+        undo.append(threadpool_limits(n).unregister)
+    except ImportError:
+        pass
+    torch = sys.modules.get('torch')
+    if torch is not None:
+        prev = torch.get_num_threads()
+        torch.set_num_threads(n)
+        undo.append(lambda: torch.set_num_threads(prev))
+    return undo
+
+
+def _undo(undo):
+    for f in reversed(undo):
+        try:
+            f()
+        except Exception:
+            pass
+
+
+def cap_torch():
+    """Where ismail loads torch inside a slot (the perceptual model, demucs): torch takes the slot's threads, not
+    every core, because a slot counts jobs, not cores (ledger:M132). Outside a slot it does nothing."""
+    n = getattr(_held, 'threads', None)
+    torch = sys.modules.get('torch')
+    if n and torch is not None and torch.get_num_threads() != n:
+        torch.set_num_threads(n)
+
+
+def _handed_down(kind):
+    """The slot that `machine run` holds for an ancestor of this process (its id in $ISMAIL_SLOT), when this request
+    may run in it: the same kind, or CPU work under a GPU job. A live engine always takes its own slot. A token whose
+    job has ended, or that belongs to another board or to no ancestor, is ignored."""
+    token = os.environ.get(SLOT_ENV)
+    if not token or kind == 'live' or not re.fullmatch(r'[\w.-]+', token):
+        return None
+    try:
+        job = json.loads(_read(os.path.join(board_dir(), 'jobs', token + '.json')) or 'null')
+    except ValueError:
+        return None
+    if not job or not (job['kind'] == kind or (job['kind'] == 'gpu' and kind == 'cpu')):
+        return None
+    try:
+        ancestors = {p.pid for p in psutil.Process().parents()}
+    except psutil.Error:
+        return None
+    return job if job.get('pid') in ancestors and _alive(job) else None
+
+
+def child_env(job=None, env=None):
+    """The environment for a command a slot holder starts: it carries the slot, so a render the command asks for
+    runs in it instead of deadlocking on a second slot (ledger:M81), and the slot's thread cap for BLAS, OpenMP and
+    torch (ledger:M132). job: the slot's job (default: the one this thread holds). `machine run` uses it; so can a
+    script that holds a slot and starts a worker: subprocess.run(cmd, env=machine.child_env())."""
+    job = job or getattr(_held, 'job', None)
+    e = dict(os.environ if env is None else env)
+    if job and job.get('id'):
+        e[SLOT_ENV] = job['id']
+        if job.get('threads'):
+            for k in THREAD_ENV:
+                e[k] = str(job['threads'])
+    return e
 
 METER_S = 1.0          # the job meter samples CPU, memory and the GPU this often
 
@@ -741,9 +850,11 @@ def _record(job, wait_s, state, meter, outcome):
 def slot(kind, what, est_s=None, mem_gb=0.0, who=None, force=False, threads=THREADS, wait=None, disk_gb=0.0,
          disk_path=None, disk_hint='', cmd=None):
     """Hold a heavy-job slot while the block runs. Re-entrant: a job inside a job of this thread (a fit that
-    renders) runs in the slot it already holds. Raises MachineBusy with what to do when it may not start; with
-    wait (seconds) it stands in line until it may, then raises only if the wait runs out. disk_gb: about what it
-    writes on disk_path's drive; disk_hint: how to write less, said when the disk refuses it."""
+    renders) runs in the slot it already holds, and so does one under `machine run` in a child process (the slot
+    handed down in $ISMAIL_SLOT). Raises MachineBusy with what to do when it may not start; with wait (seconds) it
+    stands in line until it may, then raises only if the wait runs out. threads: the job's cap on numeric threads
+    (BLAS, OpenMP, torch; None: no cap). disk_gb: about what it writes on disk_path's drive; disk_hint: how to write
+    less, said when the disk refuses it."""
     if getattr(_held, 'depth', 0):
         _held.depth += 1
         try:
@@ -753,6 +864,16 @@ def slot(kind, what, est_s=None, mem_gb=0.0, who=None, force=False, threads=THRE
         return
     if kind not in SLOTS and kind != 'live':
         raise ValueError(f"kind is 'gpu', 'cpu' or 'live', not {kind!r}")
+    parent = _handed_down(kind)
+    if parent is not None:     # the run's own meter counts this process: no second board entry, no history line
+        _held.depth, _held.threads, _held.job = 1, parent.get('threads'), parent   # the run's cap is what the board counts
+        undo = _limit_threads(_held.threads)
+        try:
+            yield parent
+        finally:
+            _held.depth, _held.threads, _held.job = 0, None, None
+            _undo(undo)
+        return
     who = who or _who()
     me = psutil.Process()
     since, wid, wpath = time.time(), None, None
@@ -764,7 +885,8 @@ def slot(kind, what, est_s=None, mem_gb=0.0, who=None, force=False, threads=THRE
             with _board_lock():
                 why = '' if force or kind == 'live' else check(kind, mem_gb, who=who, since=since, me=wid,
                                                                disk_gb=disk_gb, disk_path=disk_path,
-                                                               disk_hint=disk_hint, what=what, cmd=cmd)
+                                                               disk_hint=disk_hint, what=what, cmd=cmd,
+                                                               threads=threads)
                 if not why or not deadline or time.time() >= deadline:
                     if why:
                         raise MachineBusy(f"not starting {kind} job '{what}': {why}. Retry when that clears (the "
@@ -797,30 +919,26 @@ def slot(kind, what, est_s=None, mem_gb=0.0, who=None, force=False, threads=THRE
     state['commit_free_gb'] = round(memory()[0], 2)
     with _board_lock():
         job = {'kind': kind, 'what': what, 'who': who, 'pid': me.pid, 'pid_start': me.create_time(),
-               'started': time.time(), 'est_s': est_s, 'mem_gb': mem_gb, 'disk_gb': disk_gb, 'forced': bool(force)}
+               'started': time.time(), 'est_s': est_s, 'mem_gb': mem_gb, 'disk_gb': disk_gb, 'forced': bool(force),
+               'threads': threads}
         # unique per slot: two slots taken in the same millisecond by one process overwrote each other
-        path = os.path.join(board_dir(), 'jobs', f"{me.pid}_{int(job['started'] * 1000)}_{os.urandom(3).hex()}.json")
+        job['id'] = f"{me.pid}_{int(job['started'] * 1000)}_{os.urandom(3).hex()}"
+        path = os.path.join(board_dir(), 'jobs', job['id'] + '.json')
         with open(path, 'w', encoding='utf8') as f:
             json.dump(job, f)
-    _held.depth = 1
-    limits = None
+    _held.depth, _held.threads, _held.job = 1, threads, job
+    undo = []
     meter = _Meter(job, gpu_sampler=g is not None, path=path)
     outcome = 'ok'
     try:
-        if threads:
-            try:
-                from threadpoolctl import threadpool_limits
-                limits = threadpool_limits(threads)
-            except ImportError:
-                pass
+        undo = _limit_threads(threads)
         yield job
     except BaseException as e:
         outcome = type(e).__name__
         raise
     finally:
-        _held.depth = 0
-        if limits is not None:
-            limits.unregister()
+        _held.depth, _held.threads, _held.job = 0, None, None
+        _undo(undo)
         used = meter.stop()
         for f in (path, path[:-5] + '.tmp'):
             try:
@@ -1076,6 +1194,9 @@ def main(argv=None):
     r.add_argument('--force', action='store_true', help='only when the user says so')
     r.add_argument('--wait', nargs='?', const='30m', default=None,
                    help='stand in line for the slot instead of being refused: a duration (default 30m)')
+    r.add_argument('--threads', type=int, default=None,
+                   help=f'numeric threads the command may use (BLAS, OpenMP, torch; default {THREADS} for --cpu, no cap '
+                        f'for --gpu; 0: no cap). While a set is on air the CPU jobs share {on_air_threads()}')
     r.add_argument('command', nargs=argparse.REMAINDER)
     p = sub.add_parser('priority', help='the user gives a session first place in line: priority vox --for 3h --by "the user"')
     p.add_argument('who', nargs='?', help="the session's name as the board shows it")
@@ -1138,6 +1259,7 @@ def main(argv=None):
     if not cmd:
         ap.error('run needs a command after --')
     kind = 'gpu' if a.gpu else 'cpu'
+    threads = (a.threads if a.threads is not None else THREADS if kind == 'cpu' else None) or None
     try:
         est_s = duration_s(a.est) if a.est else None
     except ValueError as e:
@@ -1148,9 +1270,9 @@ def main(argv=None):
         ap.error(str(e))
     try:
         with slot(kind, a.what or ' '.join(cmd)[:80], est_s=est_s, mem_gb=a.mem,
-                  force=a.force, threads=None, wait=wait_s, disk_gb=a.disk, cmd=cmd) as job:
+                  force=a.force, threads=threads, wait=wait_s, disk_gb=a.disk, cmd=cmd) as job:
             before = _children_cpu_now()
-            p = subprocess.Popen(cmd)
+            p = subprocess.Popen(cmd, env=child_env(job))    # its renders run in this slot, with its thread cap
             try:
                 psutil.Process(p.pid).nice(psutil.BELOW_NORMAL_PRIORITY_CLASS if sys.platform == 'win32' else 10)
             except (psutil.Error, AttributeError):
