@@ -19,6 +19,71 @@
 - `/health` counts refusals by reason; server.log has one line per refusal; nothing refused reaches the live log.
 - Not closed yet (part B, pairing): a program on the tailnet or this PC that sends no Origin can still post ordinary
   events, queue page commands and upload audio. Spec: research/multiplayer/security-floor.md (multiplayer branch).
+### The skill says when to offer the phone page, and how it is hosted
+
+- `references/phone.md`: when to offer it (a set plays and the person steps away: a walk, bed, another room), the
+  one line to say, and the hosting (Tailscale today, with what the person installs; the home network later, which
+  needs https for the microphone). SKILL.md's which-tool table and `live.md` point there. Nate asked that the skill
+  know the page exists, not only the code.
+- The earbud cue tones (a note starts, ends, arrived, blocked) are made with ismail on its measured grand piano
+  (`songs/_phone_cues/make_cues.py`), set to -22 LUFS so they sit under the music. The page keeps its synthesized
+  tones as a fallback until the files load.
+
+### The phone page's keys get icons (Nate: "they could have their own little SVG icons too")
+
+- Love this, change it up, calmer, more energy, quieter, louder, pause and resume set each have an icon drawn to
+  the page's contract (24-unit grid, 2px strokes, square ends), with the word small beneath it. A tap lights the key
+  and reads SENT for a moment, so it can be read at a glance with the phone half out of the pocket.
+
+### The pose read-back says when a limb fell short
+
+- `stage_actor_pose` replies `short`: the limb ends that could not reach their target in that pose, in metres
+  (`{"hand_l": 0.066}`: the left hand stopped 6.6 cm short of where it was sent, at full reach). A hand that cannot
+  reach the bar from a start pose is a number for the agent, not something found in the headset.
+
+### A brief for a take helper agent
+
+- `references/stage-takes.md`: when the person wants a fast take loop and the scene's agent is busy, a helper agent
+  runs it from a brief (scene, who, goal, setup, takes, the stage tools it may use, trial moves only, when to stop,
+  what to hand back). The person asked for it so the loop never waits on a busy agent.
+
+### A set on air comes first, for now (ledger:M127, hq:D-11)
+
+- While a live engine is on the board, the governor holds GPU jobs and Blender renders (also those registered as
+  `--cpu`: blender, eevee, cycles) until the set ends: two real dropouts in a set tonight came from renders that
+  started beside it. Audio renders and other CPU jobs still run. The board shows ON AIR and the policy.
+- It is a policy, not a hard rule: `python -m ismail.machine on-air --policy set_first|off --by '<who>'`. Nate's
+  words: "only for now during sets"; revisit after the laptop's repaste or a faster engine. `render_first` (the
+  render runs when it is a burden and the DJ pauses the set, announcing it) is named as the future direction and
+  refused until it is built.
+
+### The phone page from the earbuds (Nate: "control everything through voice ... without taking the phone out")
+
+- While a set plays, the earbud's press takes a voice note and the next press sends it, with tones you hear in your
+  pocket (start, end, arrived, blocked). Short notes that are only a command act as one: "stop listening" stops the
+  stream, "love this", "change it up", "calmer" and the rest arrive as taps with `via: 'voice'`. The microphone is
+  held from Listen so a press works with the screen off. A note stops itself after 60 s.
+- When the server does not answer, the page backs off to one try every 30 s instead of every 4 s.
+
+### The phone page, designed (Nate: "check the style" with the taste skill)
+
+- A deliberate look instead of the dark default: a field radio for one hand at night. The bar you hear is a tape
+  counter, recording is an ON AIR lamp, the keys are labelled hardware keys (Archivo condensed, JetBrains Mono for the
+  counter and the log, one accent derived from the name), and nothing is a symbol glyph Android could draw as emoji.
+- The talk key shows your microphone's level while it records, so you can see it hears you. The DJ log has a time
+  column. The mood control is a four-step selector, and the DJ's own buttons sit in their own section.
+
+### A mirrored take plays back mirrored; the gallery stays put
+
+- A take made while the Follow mirrors keeps `mirror` in its meta (at the start, on every change while it records, and
+  when the last Follow is kept), and plays back mirrored, as does the playback right after the Follow.
+  `stage_actor_play(mirror=)` overrides. The user, 2026-10-05: a take recorded with Follow's mirror played back the other
+  way.
+- The gallery's back and next change the picture on one panel where it is. Each answer used to fade the panel out
+  while a new one opened 30 cm aside ("closes the whole gallery and opens it again"). Panels gain `stay` and
+  `rewrite(id, {title, text, image})` for this.
+- A start pose of 'rest' on a take played in place (or before the stand-in has loaded) stands at the take's anchor
+  instead of failing.
 
 ### Loading without the long stalls (the "parallelograms" on the Quest)
 
@@ -76,6 +141,37 @@
 - `stage_actor_pose(scene, person, t)` reads the joints back in Blender metres (pelvis, spine, head, elbows, hands,
   knees, feet): now while following, at `t` of a playing take, otherwise the start pose (frame 0 of the next
   Follow), so contact can be checked by number.
+
+### exam_check: every exam's pre-flight (D-7: self-checks live in tools)
+
+- `exam_check(page or clips, key, secrets, submit_url, answers_path)` before any exam reaches the person: every
+  clip exists and decodes; loudness within 1 LU; no blind leak (the key's classes or secrets in file names, URLs,
+  metadata tags or the page source and what it loads, a key file the page loads, formats, lengths, leading silence
+  or order that separate the classes); a marked test answer posted to Submit lands where the agent reads answers.
+  READY or NOT READY, each problem named with what to do.
+- `phone_exam` runs it and refuses a NOT READY exam (`key=`, `secrets=` for the leak checks; `check=False` only when
+  the person asks to see it anyway). `references/blind-tests.md` section 0 says when to run it.
+
+### The phone page: a live set in your pocket
+
+- `phone_start` serves a page over the tailnet that plays the live engine's master as an mp3 stream, which keeps
+  going with the phone's screen off. The lock screen and earbuds work too: next = change it up, previous = love
+  this. It has 30 s rewind and jump to live, reconnects by itself, keeps taps made offline, and has 64 or 128 kbps.
+- Talking back: hold to talk, or tap once to talk hands-free. Notes are transcribed on this machine, waiting while
+  the CPU is over the governor's limit. Taps on the page: love, change it up, calmer or more energy, quieter or
+  louder, pause or resume the set, start a set. A mood hint: calm, steady, lift, peak. Every line is stamped with
+  the bar the person actually heard and how far behind the room they are, and lands in an inbox the agent reads
+  (`phone_listen`), in the song's `notes/phone_inbox.jsonl`, and in hooks.
+- Agents drive the page: `phone_now` (now playing, next up, why recording is on or off), `phone_say` (a caption, a
+  pinned "since you left", or a line spoken into the stream when answering), `phone_ask`, `phone_panel_show`,
+  `phone_exam` (blind exams with Submit, answers written to the exam's file), `phone_offer` (downloads),
+  `phone_buttons` (their own buttons as data), `phone_buzz`, `phone_status`. Reference: `references/phone.md`.
+### voices_list names each voice's function (from the e002 pilots)
+
+- `voices_list` shows `fn=perform` or `fn=voice` on every code voice; it used to say `'fn': 'voice'` for all of
+  them, and electric, emily, kit70, rusty, rhodes and crackle only have `perform`, so an agent's first `track_add`
+  failed. A track that names `fn: 'voice'` on a performer voice now plays it with `perform`, as leaving `fn` out
+  already did.
 
 ### Setup a novice can sit through (M119, the dress rehearsal)
 

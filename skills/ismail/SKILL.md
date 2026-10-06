@@ -136,11 +136,12 @@ nudges you, follow it.
 | a number that can be measured (grid, swing, kit, key, levels) | the analysis ops, never a guess |
 | an instrument must sound real | an example first (`references/instruments.md`), then `mimic_measure` or a fit; `track_model` names its source |
 | the numbers plateau and you need a direction | an eye exam: lenses that each change one named thing (`references/blind-tests.md`) |
-| you think a sound is done | a blind exam, real vs yours, hidden: one note first, then phrases, then the mix |
+| you think a sound is done | a blind exam, real vs yours, hidden: one note first, then phrases, then the mix; `exam_check` before it reaches the person |
 | the person names a quality ("boxy", "too clean") | `lexicon_note`, verbatim, then map it to what you change |
 | a recording, video or score comes in | a `ref/SOURCES.md` row before you use it; `credits` when the piece goes public |
 | a version of another piece | `project_new(derived_from=)`, and the objective in their words |
 | a job over a minute | `machine_status` first; `python -m ismail.machine run` for anything outside ismail |
+| a live set plays and the person steps away (a walk, bed, another room) | offer the phone page: `phone_start`, then give them its address (`references/phone.md`) |
 | a live set | a runway queued ahead; a guard on `live_status` (`SILENT ON AIR`, `RUNWAY ENDED`, `THIN`) |
 | a song sounds different live | `live_parity`, then the song's `HANDOFF.md` |
 | something you built would help others | the inclusion review (`references/development.md`), then a fork and a pull request |
@@ -156,8 +157,10 @@ nudges you, follow it.
 - `references/blind-tests.md`: ear tests for the user: the eye exam (lenses that each change one named thing) to find a direction, and the blind exam (real vs mine, hidden) to know when a sound or a performance is done; how to make them fair, how to read the answers, and the song-level checks single notes miss (note clashes, measured microtiming). Read when the numbers plateau or before calling an instrument convincing.
 - `references/recreate.md`: matching a reference recording: grid and alignment, separation, consensus transcription, comparisons, what the scores mean, and the traps that make a draft score better while sounding worse. Read whenever a reference track is involved.
 - `references/live.md`: playing live with the live engine: the Set Sheet and arc, queueing a whole arc in one batch, sweeps with ramps, listening and recording while it plays, decks (load a song, prepare it cued, transition), running a long set as a DJ loop (read the audience, small edits, a runway before every question, energy builds and drops, metric modulation for style changes), phrase voices for performers, runway before slow jobs, reading the audience (contrast over time, dynamics from effects, derived melodies), your latency, the pre-flight, the DJ kit (`ismail.live.djkit`), a set's folder layout, playing for a screen recording, what is not live yet. Read before any `live_*` call.
+- `references/phone.md`: the live set in the person's pocket: `phone_start` (a tailnet page that keeps playing with the screen off), what they send (taps, mood, voice notes, each stamped with the bar they heard) and where it lands, and what you can put on the page (captions, questions, blind exams, downloads, your own buttons). Read before any `phone_*` call.
 - `references/stage.md`: building a scene with a person inside it (a browser or VR stage beside Blender): running the stage (`stage_*` tools), which surface for which decision, eye exams for pictures and what they taught, bodies and contact, contact with a person in a headset, shared-editing rules that never lose their work, agents first. Read before building any scene, look or editor a person works inside.
 - `references/music-video.md`: music videos with `ismail.video`: the per-song `video/` folder, the CLI, the shot kit (units, floors, posing, mirrors, GPU budget), the cut list and note-driven glitches, contact-sheet review and the creative rules. Read before planning any video.
+- `references/stage-takes.md`: handing a fast take loop (follow, perform, record, keep) to a helper agent: who owns what, the brief to fill in, the loop, what comes back. Read when the person wants takes and the scene's agent is busy.
 - `references/maintainer.md`, `references/stage-dev.md`: the dev roles' routines and lessons, for a session the
   person asked to be the maintainer or the stage dev.
 - `references/setup.md`: setting ismail up on a person's machine yourself: what to check, what to install, the
@@ -204,6 +207,9 @@ nudges you, follow it.
   the disk. Heavy jobs wait while a drive is under 15 GB free or commit under 6 GB; `machine_disk` shows where the
   space went. To free space, move finished intermediates (caches, old renders, uncut takes) into the project's
   `_reclaim/` folder and tell the user: nobody deletes, the user clears `_reclaim`.
+  While a live set is on air, GPU jobs and Blender renders wait until it ends (a temporary rule, "only for now
+  during sets": `machine on-air` shows it; only the user lifts it). Register Blender honestly: a `--cpu` Blender
+  render waits too.
   `run --wait 30m` (or `slot(..., wait=)`) stands in line for a slot instead of being refused. Every finished job
   leaves a line in the board's history (what, which song, how long it waited, its exit, CPU seconds, peak memory, the
   GPU's load and the machine's state at its start): `python -m ismail.machine history --song <slug> --since 7d` sums
