@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### The phone page measures its gaps (Nate 10-06 14:56: "a profiler")
+
+- Every stall the browser reports and every freeze (the stream not advancing for over 1.5 s) is logged as a `stall`
+  page event with its length, whether a voice note was recording, the playback rate, the network and which mic was
+  open; audio route changes log as `route`, and `note_start` says which mic and how long it took to open. They show
+  in `phone_timeline` and `phone_listen(page=True)`.
+
 ### The phone page's background: layers, looks on the bar, scenes (ledger:M160 phase 1, Nate 10-06)
 
 - `phone_vibe(layers=[...])`: up to three effects at once, each with speed, density, size, angle, opacity, colours
