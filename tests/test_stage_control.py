@@ -149,7 +149,10 @@ def test_a_start_pose_is_kept_with_the_body(stage):
     out = OPS['stage_actor_start'](scene='room', person='person_bar_lean', pose={'take': '20261005_175000_sam', 'frame': 12})
     assert 'take 20261005_175000_sam frame 12, relative' in out
     assert json.loads(OPS['stage_actor_profile'](scene='room', person='person_bar_lean'))['start'] == {
-        'pose': {'take': '20261005_175000_sam', 'frame': 12}, 'mode': 'relative'}
+        'pose': {'take': '20261005_175000_sam', 'frame': 12}, 'mode': 'relative', 'idle': True}
+    assert 'the page shows it at its next load' in out                 # no page open: it applies at the next load
+    out = OPS['stage_actor_start'](scene='room', person='person_bar_lean', pose='rest', idle=False)
+    assert 'rests in it' not in out and json.loads((d / 'bf_sam.json').read_text(encoding='utf-8'))['start']['idle'] is False
     fr = {'head': [0, 0, 1], 'tail': [0, 0, 1.1], 'x': [1, 0, 0]}
     out = OPS['stage_actor_start'](scene='room', person='person_bar_lean', pose={'bones': {'pelvis': {'rest': fr, 'pose': fr}}}, mode='snap')
     assert 'a Blender pose of 1 bones, snap' in out
@@ -172,5 +175,16 @@ def test_the_pose_read_back_reaches_the_page(stage):
         assert (page.seen[-1]['type'], page.seen[-1]['person'], page.seen[-1]['t']) == ('actor_pose', 'person_bar_lean', 2.5)
         with pytest.raises(OpError, match='stage_actor_pose'):
             OPS['stage_cmd'](scene='room', type='actor_pose')
+    finally:
+        page.stop = True
+
+
+def test_a_start_pose_is_shown_now_on_an_open_page(stage):
+    _body(stage)
+    page = FakePage(stage['port'], 'room')
+    try:
+        out = OPS['stage_actor_start'](scene='room', person='person_bar_lean', pose='rest')
+        assert 'rests in it' in out and 'the page shows it now' in out
+        assert (page.seen[-1]['type'], page.seen[-1]['person']) == ('actor_rest', 'person_bar_lean')
     finally:
         page.stop = True

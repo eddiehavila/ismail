@@ -331,6 +331,7 @@ export function initActors(ed, live) {
     const [rig0, meta, txt] = await Promise.all([load(who, base), c.frames ? { joints: JOINTS, ...(c.meta || {}) } : fetch(tbase + 'meta.json', { cache: 'no-store' }).then((r) => r.json()),
       c.frames ? null : fetch(tbase + 'frames.jsonl', { cache: 'no-store' }).then((r) => { if (!r.ok) throw new Error('no take ' + c.take); return r.text(); })]);
     stop({ person });
+    unrest(person);
     let frames = (c.frames || txt.split('\n').filter(Boolean).map((l) => JSON.parse(l))).filter((f) => f.head);
     if (!frames.length) throw new Error('take has no frames');
     // a trimmed take plays only its kept part (actions.js review: Start here / End here; saved in meta.trim)
@@ -398,6 +399,7 @@ export function initActors(ed, live) {
     const w = it ? it.obj.getWorldPosition(new THREE.Vector3()) : new THREE.Vector3(f0.head[0], floor, f0.head[2]);
     const align = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, -1), rig.fwd);
     const ground = groundOf(it);
+    unrest(person);
     if (it) it.obj.visible = false;
     scene.add(rig.root);
     const toW = new THREE.Vector3(w.x, ground, w.z);
@@ -431,8 +433,49 @@ export function initActors(ed, live) {
     scene.remove(st.rig.root);
     if (st.it) st.it.obj.visible = true;
     live.emit('actor_stop', { person: c.person, why: c.why || 'stopped', live: !!st.live });
+    rest(c.person).catch(() => {});                       // back to their resting pose, if they have one
     return { stopped: true };
   }
+
+  // ---- resting: a person with a start pose stands in it whenever nothing plays on them, at load and after every stop,
+  // instead of the statue baked into the scene (the user, 2026-10-06: the six dancers had stood with their arms out
+  // since they were imported; "a pose to leave everything in"). Their own body, posed once; the statue hidden.
+  // stage_actor_start(idle=False) keeps the statue for that person.
+  const resting = new Map();                                // person -> { rig, spec }
+  function unrest(person) {
+    const r = resting.get(person);
+    if (!r) return;
+    resting.delete(person);
+    scene.remove(r.rig.root);
+  }
+  async function rest(person) {
+    if (playing.has(person) || !world().actors[person]) return null;
+    const rig0 = await rigOf(person);
+    await readProfile(rig0);
+    const spec = rig0.profile && rig0.profile.start;
+    const it = ed.byName.get(person);
+    if (!spec || spec.idle === false || !it) { unrest(person); if (it) it.obj.visible = true; return null; }
+    if (playing.has(person)) return null;                 // a play began while the profile loaded
+    const r = resting.get(person) || { rig: await cloneRig(rig0) };
+    const w = it.obj.getWorldPosition(new THREE.Vector3()), floor = groundOf(it);
+    const align = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, -1), r.rig.fwd);
+    const tmp = { person, rig: r.rig, s: 1, floor, to: new THREE.Vector3(w.x, floor, w.z), alignInv: align.invert(),
+      feet: { l: {}, r: {} }, J: Object.fromEntries(JOINTS.map((n, i) => [n, i])) };
+    await startPose(tmp, spec);
+    if (playing.has(person)) return null;
+    r.spec = spec;
+    resting.set(person, r);
+    scene.add(r.rig.root);
+    it.obj.visible = false;
+    live.emit('actor_rest', { person, start: spec });
+    return { person, resting: true, start: spec };
+  }
+  async function restAll() {
+    for (const person of Object.keys(world().actors || {})) await rest(person).catch((e) => console.warn('[actors] rest', person, e));
+  }
+  // at load and on a scene switch (the bodies of the new scene), and on an agent's word after a start pose changed
+  ed.addEventListener('revealed', () => { for (const r of resting.values()) scene.remove(r.rig.root); resting.clear(); restAll(); });
+  live.handlers.actor_rest = (c) => (c.person ? rest(c.person) : restAll().then(() => ({ resting: [...resting.keys()] })));
   const cur = new THREE.Vector3(), jump = new THREE.Vector3(), WALK_AWAY_M = 6;
   const shiftArr = (x, d) => (x ? [x[0] - d.x, x[1], x[2] - d.z, ...x.slice(3)] : x);
   function shifted(f, d) {                      // every position of a frame moved by -d (horizontal)
@@ -702,7 +745,8 @@ export function initActors(ed, live) {
     await readProfile(rig);
     const spec = c.start || rig.profile.start || { pose: 'rest' };
     const w = it ? it.obj.getWorldPosition(new THREE.Vector3()) : new THREE.Vector3();
-    const tmp = { person, rig, s: 1, floor: groundOf(it), to: new THREE.Vector3(w.x, groundOf(it), w.z), J: Object.fromEntries(JOINTS.map((n, i) => [n, i])) };
+    const tmp = { person, rig, s: 1, floor: groundOf(it), to: new THREE.Vector3(w.x, groundOf(it), w.z), J: Object.fromEntries(JOINTS.map((n, i) => [n, i])),
+      alignInv: new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, -1), rig.fwd).invert(), feet: { l: {}, r: {} } };
     await startPose(tmp, spec);
     const joints = readJoints(rig);
     for (const [n, b] of Object.entries(rig.bones)) { b.quaternion.copy(rig.local[n]); b.position.copy(rig.localP[n]); }

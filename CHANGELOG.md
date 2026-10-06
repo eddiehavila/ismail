@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### People rest in their start pose
+
+- A person with a start pose (`stage_actor_start`) stands in it whenever nothing plays on them, at load and after
+  every stop: their own body, posed once, with the statue baked into the scene hidden. `idle=False` keeps the statue.
+  Setting or clearing a start pose re-poses the resting person on an open page at once (page command `actor_rest`).
+  The six dancers had stood with their arms out since they were imported ("a pose to leave everything in").
+- The pose read-back of a take-frame start pose (with nothing playing) no longer fails.
+
 ### The phone's Listen and Talk keys show their state with an icon (Nate, 10-06 09:59)
 
 - Listen: play, stop while playing, a breathing arrow while it reconnects or buffers, Resume when the phone wants a
