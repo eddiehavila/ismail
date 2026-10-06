@@ -65,6 +65,7 @@ SOUND_EVENTS = {
 }
 # the VR stage's earcon names (ismail/stage/page/voice.js) mean the same events here, so one set of names serves both
 SOUND_ALIASES = {'incoming': 'message', 'rec_start': 'note_start', 'rec_stop': 'note_end', 'sent': 'note_sent'}
+MOVE_SETTLE_BARS = 8   # a scheduled vibe becomes the standing one this many bars after the room passed its bar
 SOUND_EXT = ('.wav', '.ogg', '.mp3', '.m4a', '.webm', '.flac')
 SOUND_MAX_S, SOUND_MAX_BYTES = 5.0, 1 << 20
 SPEAK = os.environ.get('ISMAIL_SPEAK') or 'http://127.0.0.1:8765'
@@ -238,12 +239,13 @@ class Phone:
         self.cmd_id = 0
         self.cmds = []
         self.view = {'now': None, 'next': None, 'rec_why': None, 'mood': None, 'captions': [], 'pinned': None,
-                     'buttons': [], 'panels': [], 'offers': [], 'sounds': {}}
+                     'buttons': [], 'panels': [], 'offers': [], 'sounds': {}, 'vibe_moves': [], 'scenes': {}}
         saved = {}
         try:
             saved = json.loads((HOME / 'state.json').read_text(encoding='utf8'))
             self.view.update({k: saved[k] for k in ('now', 'next', 'rec_why', 'mood', 'buttons', 'pinned', 'panels',
-                                                    'shape', 'sounds') if k in saved and saved[k] is not None})
+                                                    'shape', 'sounds', 'vibe_moves', 'scenes')
+                              if k in saved and saved[k] is not None})
         except (OSError, ValueError):
             pass
         if not self.route and saved.get('route') and Path(saved['route']).parent.is_dir():
@@ -346,6 +348,18 @@ class Phone:
             out.append(Path(self.engine['project']) / 'notes' / 'phone_inbox.jsonl')
         return out
 
+    def vibe_now(self):
+        """The vibe in force: moves whose bar the room passed MOVE_SETTLE_BARS ago become the vibe (the page applied
+        each on the bar it heard; this keeps a page that opens later, or one off the stream, in step)."""
+        moves, r = self.view.get('vibe_moves') or [], self.room()
+        if moves and r.get('bar'):
+            due = [m for m in moves if m['at_bar'] <= r['bar'] - MOVE_SETTLE_BARS]
+            if due:
+                self.view['vibe'] = due[-1]['vibe']
+                self.view['vibe_moves'] = [m for m in moves if m not in due]
+                self.save()
+        return self.view['vibe']
+
     def room(self, age_s=0.0):
         """The bar playing in the room age_s seconds ago, from the engine's clock (heard is what the phone's stream
         played; this is there even when the page is off the stream, on the room speakers or a JBL)."""
@@ -422,7 +436,7 @@ class Phone:
     def save(self):
         try:
             st = {k: self.view.get(k) for k in ('now', 'next', 'rec_why', 'mood', 'buttons', 'pinned', 'marks',
-                                                'panels', 'vibe', 'shape', 'sounds')}
+                                                'panels', 'vibe', 'shape', 'sounds', 'vibe_moves', 'scenes')}
             st['piece'] = list(self.piece)
             st['route'] = str(self.route) if self.route else None
             st['files'] = {k: str(v) for k, v in self.files.items()}
@@ -689,7 +703,8 @@ class Phone:
         today = time.strftime('%Y-%m-%d')
         tally = collections.Counter(x['what'] for x in self.taps if (x['ts'] or '').startswith(today))
         moods = [x for x in self.taps if x['what'] == 'mood']
-        return {'engine': {'playing': bool(e), 'bpm': e['bpm'] if e else None, 'now': now_t, 'next': next_t,
+        return {'engine': {'playing': bool(e), 'bpm': e['bpm'] if e else None, 'bpb': (e.get('bpb') or 4) if e else None,
+                           'now': now_t, 'next': next_t,
                            'now_mark': self.mark(now_t), 'next_mark': self.mark(next_t)},
                 'taps': list(self.taps)[-8:][::-1], 'tally': dict(tally),
                 'asked_mood': moods[-1] if moods else None,
@@ -698,7 +713,8 @@ class Phone:
                 'offers': self.view['offers'][-4:], 'listening': agents,
                 'voice': [{'id': k, 'state': v} for k, v in self.voice_state.items()],
                 'heard': self.heard(sid, t) if sid else {}, 'cmd': self.cmd_id,
-                'vibe': self.view['vibe'], 'sounds': self.view.get('sounds') or {}, 'into_s': self.into_s(), 'clock': time.strftime('%H:%M:%S'),
+                'vibe': self.vibe_now(), 'vibe_moves': self.view.get('vibe_moves') or [], 'room': self.room(),
+                'sounds': self.view.get('sounds') or {}, 'into_s': self.into_s(), 'clock': time.strftime('%H:%M:%S'),
                 'shape': self.view.get('shape') or {},
                 'boot': BOOT, 'build': BUILD}
 
@@ -909,30 +925,76 @@ class Agent:
         return f"buttons on the phone: {[b['label'] for b in bs] or 'none'}; a tap arrives as kind 'button'"
 
     def op_vibe(self, preset=None, ground=None, ink=None, accent=None, heading=None, image=None, blur=None, dim=None,
-                effect=None, intensity=None, transition_ms=None, reset=False, menu=False, who=None):
+                effect=None, intensity=None, transition_ms=None, reset=False, menu=False, layers=None,
+                hue_drift=None, at=None, ramp_beats=None, save=None, scene=None, cancel_moves=False, who=None):
         ph = self.ph
+        moves = ph.view.setdefault('vibe_moves', [])
+        scenes = ph.view.setdefault('scenes', {})
         if menu:
-            return vibe.menu() + '\n' + vibe.describe(ph.view['vibe'])
+            out = vibe.menu() + '\n' + vibe.describe(self.ph.vibe_now())
+            if scenes:
+                out += '\nscenes: ' + ', '.join(scenes)
+            if moves:
+                out += '\nscheduled: ' + '; '.join(f"bar {m['at_bar']}: {vibe.describe(m['vibe'])}" for m in moves)
+            return out
+        if cancel_moves:
+            n = len(moves)
+            ph.view['vibe_moves'] = moves = []
         if preset is not None and preset not in vibe.PRESETS:
             raise ValueError(f"preset {preset!r}: one of {sorted(vibe.PRESETS)} (or set the parts yourself)")
-        cur = {} if reset else {k: v for k, v in ph.view['vibe'].items() if k in vibe.DEFAULT}
+        if scene is not None and scene not in scenes:
+            raise ValueError(f"scene {scene!r}: " + (f"saved ones: {', '.join(scenes)}" if scenes else
+                                                     "none saved yet (phone_vibe(save='name') keeps the current look)"))
+        at_bar = None
+        if at not in (None, '', 'now'):
+            m = re.fullmatch(r'(?:bar:?\s*)?(\d+)', str(at).strip().lower())
+            if not m:
+                raise ValueError(f"at {at!r}: 'bar:N' (the bar the phone hears it on), or leave it out for now")
+            at_bar = int(m.group(1))
+        # a move builds on the last scheduled look, so a list of moves reads like a score
+        base = moves[-1]['vibe'] if moves and at_bar is not None else ph.vibe_now()
+        cur = {} if reset else {k: v for k, v in base.items() if k in vibe.DEFAULT}
+        if scene is not None:
+            cur = {k: v for k, v in scenes[scene].items() if k in vibe.DEFAULT}
         if preset:
             cur.update({k: v for k, v in vibe.DEFAULT.items() if k not in ('image', 'blur', 'dim')})
             cur.update(vibe.PRESETS[preset])
+        if (effect is not None or intensity is not None) and layers is None:
+            cur['layers'] = None                       # the one-effect shortcut replaces the layers
         for k, v in (('ground', ground), ('ink', ink), ('accent', accent), ('heading', heading), ('blur', blur),
-                     ('dim', dim), ('effect', effect), ('intensity', intensity), ('transition_ms', transition_ms)):
+                     ('dim', dim), ('effect', effect), ('intensity', intensity), ('transition_ms', transition_ms),
+                     ('layers', layers), ('hue_drift', hue_drift)):
             if v is not None:
                 cur[k] = v
+        if preset and layers is None and effect is None:
+            cur['layers'] = None
         name = ph.view['vibe'].get('image_name')
         if image is not None:
             cur['image'] = '/files/' + ph.offer_file(image) if image else None
             name = Path(image).name if image else None
         v = vibe.resolve(cur)
         v['image_name'] = name if v.get('image') else None
+        if save:
+            scenes[str(save)] = v
+        ramp = None if ramp_beats is None else round(max(0.0, min(64.0, float(ramp_beats))), 2)
+        if at_bar is not None:
+            moves.append({'at_bar': at_bar, 'vibe': v, 'ramp_beats': ramp})
+            moves.sort(key=lambda m: m['at_bar'])
+            ph.save()
+            ph.cmd('vibe_moves', moves=moves)
+            return (f"at bar {at_bar} (as the phone hears it)" + (f", over {ramp:g} beats" if ramp else '') + ": "
+                    + vibe.describe(v) + (f" (saved as scene {save!r})" if save else '')
+                    + f"; {len(moves)} scheduled")
+        if ramp:
+            v['ramp_beats'] = ramp
         ph.view['vibe'] = v
         ph.save()
         ph.cmd('vibe', vibe=v)
-        return vibe.describe(v) + " (on the page now, fading over " + str(v['transition_ms']) + " ms)"
+        if cancel_moves:
+            ph.cmd('vibe_moves', moves=[])
+        return (vibe.describe(v) + (f" (saved as scene {save!r})" if save else '') + " (on the page now, "
+                + (f"over {ramp:g} beats" if ramp else f"fading over {v['transition_ms']} ms") + ")"
+                + (f"; {n} scheduled moves cancelled" if cancel_moves and n else ''))
 
     def op_sounds(self, event=None, path=None, gain_db=0.0, menu=False, who=None):
         ph = self.ph
