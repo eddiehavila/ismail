@@ -299,3 +299,42 @@ def test_an_open_panel_and_its_files_survive_a_restart(phone, tmp_path):
     assert [x['id'] for x in saved['panels']] == ['visibility']
     tok = saved['panels'][0]['image'].split('/')[-1]
     assert saved['files'][tok].endswith('cover.png')
+
+
+def test_an_agent_sets_the_pages_vibe_and_it_stays_readable(phone, tmp_path):
+    """Nate 10-06 08:18: 'change the colors ... how the headers look ... song covers in the background, blurred
+    ... JavaScript effects ... I feel like you're there'. A vibe is data, checked by the server."""
+    ph, base, _ = phone
+    assert 'presets: default, rain' in P.phone_vibe(menu=True)
+    out = P.phone_vibe(preset='rain')
+    assert 'effect rain' in out and 'heading fraunces' in out
+    v = get(base, '/api/state?since=0&wait=0')['vibe']
+    assert v['css']['--ground'] == '#0b0f14' and 'Fraunces' in v['font_css'] and v['css']['--head'].startswith("'Fraunces'")
+    cover = tmp_path / 'cover.jpg'
+    cover.write_bytes(b'\xff\xd8' + b'0' * 200)
+    P.phone_vibe(image=str(cover), blur=20, accent='#ff8844', effect='pulse')
+    v = get(base, '/api/state?since=0&wait=0')['vibe']
+    assert v['image'].startswith('/files/') and v['blur'] == 20 and v['effect'] == 'pulse' and v['heading'] == 'fraunces'
+    with urllib.request.urlopen(base + v['image'], timeout=5) as r:
+        assert r.read()[:2] == b'\xff\xd8'
+    for bad, why in ((dict(ground='#f0f0f0'), 'light'), (dict(ink='#333333'), '7:1'), (dict(accent='#202020'), '3:1'),
+                     (dict(heading='comic sans'), 'one of'), (dict(effect='fire'), 'one of'), (dict(preset='x'), 'one of')):
+        with pytest.raises(Exception, match=why):
+            P.phone_vibe(**bad)
+    assert get(base, '/api/state?since=0&wait=0')['vibe']['effect'] == 'pulse'        # a refusal changes nothing
+    assert 'no art' in P.phone_vibe(image='', reset=True)
+    assert any(c['type'] == 'vibe' for c in ph.cmds)
+    saved = json.loads((S.HOME / 'state.json').read_text(encoding='utf8'))
+    assert saved['vibe']['effect'] == 'none'
+
+
+def test_time_into_the_piece_rides_with_every_line(phone):
+    """Nate 10-06 08:24: bars are one way; a casual listener talks in time ('2:31 into it')."""
+    ph, base, _ = phone
+    P.phone_now(now='chapter 7: plume house')
+    ph.piece = ('chapter 7: plume house', time.time() - 151)
+    post(base, '/api/tap', {'what': 'love'})
+    s = get(base, '/api/state?since=0&wait=0')
+    assert 150 <= s['into_s'] <= 155 and len(s['clock']) == 8
+    assert 150 <= s['taps'][0]['into_s'] <= 155
+    assert '2:3' in P.phone_timeline(minutes=5)

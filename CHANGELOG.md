@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### The phone page takes the music's vibe, and reads in time as well as bars (Nate, 10-06)
+
+- `phone_vibe`: an agent sets the page to fit the song (Nate: "change the colors ... how the headers look ... song
+  covers in the background, blurred ... JavaScript effects ... I feel like you're there"). Presets (rain, calm,
+  warm, night, peak), colours, a heading face from nine, an art layer with blur and dim, one ambient effect (rain,
+  particles, pulse on the set's beat, grain, aurora) that stops while the page is hidden or for reduced motion.
+  The server holds every vibe to a dark ground, ink 7:1 and accent 3:1, and refuses others saying what to change.
+- Bars or time (Nate: "an option for the person to understand music in time"): lines from the page carry
+  `into_s`, the page has a Bars/Time switch ("2:31 in" with the clock), and `phone_timeline` shows both.
+
 ### The phone session is a take: the page reports what happens on it, on one clock (Nate, 10-06)
 
 - Nate: "can you see when I download stuff? where I'm scrolling ... like a VR take ... but for the mobile interface
