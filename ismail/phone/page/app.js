@@ -705,6 +705,14 @@ function render() {
 }
 function onCmd(c) {
   if (c.type === 'sounds') SOUNDS = c.sounds || {};
+  else if (c.type === 'unsay') {
+    const gone = new Set(c.texts || []);
+    state.captions = (state.captions || []).filter((x) => !gone.has(x.text));
+    if (state.pinned && gone.has(state.pinned.text)) state.pinned = null;
+    if ([...gone].some((g) => $('toast').textContent.includes(g))) { $('toast').classList.remove('show'); $('toast').textContent = ''; }
+    navigator.serviceWorker && navigator.serviceWorker.ready.then((r) => r.getNotifications()).then((ns) => ns.forEach((x) => { if (gone.has(x.body)) x.close(); })).catch(() => {});
+    render();
+  }
   else if (c.type === 'vibe_moves') { movesLocal = c.moves || []; applyVibe(vibeNow()); }
   else if (c.type === 'vibe') { state.vibe = c.vibe; applyVibe(vibeNow()); }
   else if (c.type === 'caption') { sound('message'); toast(c.text); if (c.buzz) buzz([150, 80, 150]); notifyBg(c.who || 'ismail live', c.text); }

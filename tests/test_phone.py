@@ -463,3 +463,20 @@ def test_the_dj_layers_effects_schedules_looks_on_bars_and_keeps_scenes(phone, m
     with pytest.raises(Exception, match="scene 'gone'"):
         P.phone_vibe(scene='gone')
     assert 'scenes: storm' in P.phone_vibe(menu=True)
+
+
+def test_a_caption_can_be_taken_back_off_the_page(phone):
+    """Nate 10-06 15:03: a caption named where he lives while he recorded the screen."""
+    ph, base, _ = phone
+    P.phone_say('a story set in Sometown, Somecountry')
+    P.phone_say('the piano is playing')
+    P.phone_say('pinned summary from Sometown', pin=True)
+    out = P.phone_unsay(match='sometown|elsewhere')
+    assert out.startswith('took 3 line(s) off the page'), out
+    s = get(base, '/api/state?since=0&wait=0')
+    assert [c['text'] for c in s['captions']] == ['the piano is playing'] and s['pinned'] is None
+    assert any(c['type'] == 'unsay' for c in ph.cmds)
+    assert P.phone_unsay(n=1).startswith('took 1 line(s)')
+    assert 'none matched' in P.phone_unsay(match='nothing like it')
+    with pytest.raises(Exception, match='say which'):
+        P.phone_unsay()
