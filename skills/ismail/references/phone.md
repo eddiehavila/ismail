@@ -1,0 +1,104 @@
+# The phone page: a live set in the person's pocket
+
+The person listens to a live set on their phone, away from the computer, with the screen off. They talk back the
+way they do in VR, tap feedback without unlocking, and answer what you put on the page: questions, blind exams,
+downloads, buttons. It runs over the tailnet; nothing is public.
+
+## When to offer it
+
+Offer it when a live set plays and the person is about to step away from the computer: a walk, bed, the kitchen, a
+drive as a passenger. Offer it too when they say they want to listen elsewhere, or when the set should keep taking
+their feedback while they are away. One line is enough: "Want it on your phone? You can talk to me from the earbuds
+and tap feedback without unlocking." Don't offer it when they are at the computer and the room speakers serve them.
+
+## Hosting
+
+The phone reaches the page over a private network, never the open internet.
+- **Tailscale (today).** Tailscale must be on the computer and the phone, signed in to the same tailnet: that is the
+  person's to install and sign in to, so say what they will see. `phone_start` gives the https address
+  (`https://<computer>.<tailnet>.ts.net:8870/`) when `tailscale serve` proxies the port, or the one line that sets it
+  up (ask the person first; it stays, tailnet only). It works from anywhere the phone has internet: home wifi, mobile
+  data, a cafe.
+- **The home network (later).** A plain LAN address (`http://192.168.x.x:8870/`) would play the set, but phones only
+  allow the microphone on https pages, so talking back would not work without a certificate. It is not built yet:
+  say so if someone asks, and use Tailscale.
+- **Other ways** (a cloud relay, a public link) are not built, and a set is never published without the person's yes.
+
+## Start it
+
+1. `phone_start()`. It relays the newest live engine's master as an mp3 stream and never starts a set or plays sound
+   on this machine. The reply gives the address.
+2. If the reply says the tailnet doesn't reach it yet, ask the person once, then run the line it gives
+   (`tailscale serve --bg --https=8870 http://127.0.0.1:8870`). It stays, and it is tailnet only.
+3. Tell them: "Open <address>, press Listen, put the phone away. Hold the big button to talk, or tap it once to talk
+   hands-free and tap again to send." The first time they hold it, the phone asks for the microphone.
+4. Read what they send (below) for as long as the set runs. If nobody reads, the page tells them nobody is
+   listening.
+
+## What they send, and where it lands
+
+Every line is JSON in `~/.ismail/phone/inbox.jsonl`. It is also written to the routed inbox: the playing engine's
+`<project>/notes/phone_inbox.jsonl`, or the file named with `phone_route`. Each line carries `heard`, the bar they
+actually heard (`{bar, beat, of: 'bar 213 beat 3'}`), and `behind_s`. The phone runs a few seconds behind the room,
+so act on `heard`, not on the engine's now.
+
+| kind | what it means | what to do |
+|---|---|---|
+| `tap` `love` | they love what they heard | cut a highlight at `heard` (live.md: highlights on praise) |
+| `tap` `change` | change it up now | the next change-up, now |
+| `tap` `energy_up` / `energy_down` | more energy / calmer | steer the next phrase |
+| `tap` `louder` / `quieter` | the set's level | move the master a few dB |
+| `tap` `pause` / `resume` | pause or resume the set | gracefully: never a hard stop |
+| `tap` `start_set` | they want a set and none plays | start one (ask nothing more) |
+| `tap` `rewind` | they went 30 s back to hear something again | often a sign they liked it |
+| `mood` | a standing hint: calm, steady, lift, peak | read it when you pick the next chapter |
+| `voice`, then `voice_text` (same `id`) | a voice note, then its words | answer it |
+| `answer` / `exam` / `button` | replies to your panel, question, exam or buttons | act on them |
+
+Read it with `phone_listen(who='<your name>', since=...)` (a long-poll, which also shows them who is listening), or
+watch the routed file with your harness's file watcher, so a line wakes you even between turns. Hooks in
+`~/.ismail/phone/hooks.json` (`{"voice": ["cmd"], "tap": [...], "any": [...]}`) run on every line, with
+`PHONE_EVENT`, `PHONE_TEXT`, `PHONE_LINE` and `PHONE_INBOX` in their environment, for an agent that isn't running.
+
+Voice notes are transcribed by the speech server on this machine. While the CPU is over the governor's limit they
+wait in a queue: taps still arrive at once, and the page tells them their note is waiting.
+
+## Earbuds and the voice, phone in the pocket
+
+Earbuds send one media key: play/pause (on Skullcandy's Dime 3, double and triple presses only change the volume
+in the bud, and a long press opens the phone's assistant). So, while a set plays and "Earbud: talk" is on:
+- a press starts a voice note (a rising tone; the music ducks) and the next press sends it (a falling tone, then a
+  short chirp when it has arrived); a note stops itself after 60 s;
+- a short note that is only a command acts as one: "stop listening" stops the stream (a press starts it again),
+  "love this", "change it up", "more energy", "calmer", "louder", "quieter", "pause the set", "resume the set" arrive
+  as taps with `via: 'voice'` and the note's `id`. The words also arrive as `voice_text`: act once, not twice.
+- the microphone is opened when they press Listen on the page and held while it plays, so a press can record with
+  the screen off. If the phone blocks that, a low tone says so.
+
+Only `phone_listen` counts as listening on the page; watching the inbox file does not show them anyone is there.
+
+## What you can put on the page
+
+- `phone_now(now=, next=, recording_why=)`: the title, next up, and why recording is on or off. The page always
+  shows whether it is, read from the engine.
+- `phone_say(text)`: a caption and a toast. Use `pin=True` for the "since you left" summary when they come back
+  (three lines: what changed and why). `speak=True` says it into the stream with the music ducked under it, so
+  they hear it in their pocket. Speak only to answer something they said, never unprompted. `buzz=True`
+  vibrates.
+- `phone_ask(text)`: yes or no. `phone_panel_show(title, text, image, buttons)`: anything else (the
+  stage_panel_show shape). Either one with `wait=N` blocks for the answer.
+- `phone_exam(title, clips, question, chips, choices, answers_path)`: a blind exam. Label the clips blind (A, B). The
+  live stream pauses while a clip plays. Submit writes to `answers_path`, so no "done" is needed.
+- `phone_offer(path, auto=True)`: a download (a render, a take, a PDF).
+- `phone_buttons([...])`: your own buttons, as data, for this moment of the set ("darker", "drop it now"). Clear
+  them when the moment passes.
+- `phone_buzz()`, `phone_status()` (who listens, the bar they hear, how far behind the room), `phone_stop()`.
+
+## Their phone
+
+- **Pocket mode:** the screen can be off and the set plays on. The lock screen and earbuds control it: next = change
+  it up, previous = love this, play/pause = their own playback.
+- **Network:** 64 kbps is the default (about 30 MB an hour); they can switch to 128 on the page. It reconnects by
+  itself when the network drops, and taps made offline are sent when it's back.
+- **Rewind and Live:** "30s" replays the last 30 seconds; "Live" jumps back to now.
+- **Install:** "Add to home screen" makes it an app icon with the same address.

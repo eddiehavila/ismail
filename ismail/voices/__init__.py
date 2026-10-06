@@ -162,6 +162,14 @@ def info(name, root=None):
     return origin, path, meta, doc
 
 
+def entry_fns(name, root=None):
+    """The functions a track can call on a voice, the one to name first: 'perform' (a voice that plays whole parts:
+    kits, guitars, sampled sets) or 'voice' (one note at a time), then any other voice_* variants."""
+    mod = load(name, root)
+    fns = [f for f in ('perform', 'voice') if callable(getattr(mod, f, None))]
+    return fns + sorted(f for f in dir(mod) if f.startswith('voice_') and callable(getattr(mod, f)))
+
+
 def available(root=None):
     """[(name, origin, summary)] with song and env voices shadowing built-ins of the same name."""
     seen, out = set(), []

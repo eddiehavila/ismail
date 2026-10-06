@@ -111,11 +111,17 @@ live.handlers.panel_close = (c) => panels.close(c.panel_id, 'closed by Claude');
 // a take during a performance takes its voice from the performance (its clips, linked in the take's meta);
 // otherwise the mic records the whole take
 // the pins a take was made with go in its meta, so it plays back seated wherever it plays (actors.js play)
+// ... and the Follow's mirror, so it plays back the way it was made
+const takeMeta = (id, body) => fetch(`take/meta?scene=${encodeURIComponent(ed.sceneName)}&take=${encodeURIComponent(id)}`, {
+  method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).catch(() => {});
 const pinMeta = (person, id) => {
-  const pins = person && id && actors.pinsMeta(person);
-  if (pins) fetch(`take/meta?scene=${encodeURIComponent(ed.sceneName)}&take=${encodeURIComponent(id)}`, { method: 'POST',
-    headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pins }) }).catch(() => {});
+  if (!person || !id) return;
+  const pins = actors.pinsMeta(person);
+  takeMeta(id, { ...(pins ? { pins } : {}), mirror: actors.mirrorOf(person) });
 };
+live.onEmit((type, d) => {                         // the mirror turned on or off while a take records on that person
+  if (type === 'actor_mirror' && d && hands.rec.on && hands.rec.id && hands.rec.name === d.person) takeMeta(hands.rec.id, { mirror: !!d.mirror });
+});
 const keepLast = (n) => hands.keepLast(n).then((r) => { pinMeta(r.person, r.id); return r; });
 const startTake = (name) => {
   const r = hands.startTake(name);

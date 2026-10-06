@@ -104,17 +104,20 @@ export function initGallery(ed, hands, voice, panels, live) {
   async function open(i = shots.length - 1) {
     if (galleryOpen || !shots.length) return;
     galleryOpen = true;
+    const id = 'gallery_' + Date.now();
+    const shown = () => ({ title: `${titleOf(shots[i])}  (${i + 1} of ${shots.length})`, image: shots[i] });
     try {
-      while (true) {
-        i = (i + shots.length) % shots.length;
-        const a = await panels.show({ panel_id: 'gallery_' + Date.now(), title: `${titleOf(shots[i])}  (${i + 1} of ${shots.length})`, image: shots[i],
-          buttons: ['◀ back', 'next ▶', 'close'], wait: true });
-        const ans = a && (a.answer || a);
+      i = (i + shots.length) % shots.length;
+      let a = await panels.show({ panel_id: id, ...shown(), buttons: ['◀ back', 'next ▶', 'close'], stay: true, wait: true });
+      while (true) {                                // one panel, where it is: back and next change its picture
+        const ans = a && a.answer;
         if (ans === '◀ back') i -= 1;
         else if (ans === 'next ▶') i += 1;
         else break;
+        i = (i + shots.length) % shots.length;
+        a = await panels.rewrite(id, shown());
       }
-    } finally { galleryOpen = false; }
+    } finally { panels.close(id, 'gallery closed'); galleryOpen = false; }
   }
   panels.registerPokeable(thumb, () => open(), () => {});
 

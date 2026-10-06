@@ -44,7 +44,11 @@ export function initTrees(ed, live, clock) {
       for (const node of [...g.scene.children]) {
         if (it) node.position.set(0, 0, 0);                    // the item stands at the trunk
         node.traverse((o) => { o.userData.grown = true; if (o.isMesh) o.castShadow = true; });
-        await ed.stage(node, { parent: it ? it.obj : ed.scene, minS: 0.8, pop: false });   // paced, like the room
+        // placed (its item names its grower) and its growth shader patched before it is staged: reveal.js compiles
+        // what it will draw, not a plain material swapped later. stage() hides the meshes in the same task: never drawn
+        (it ? it.obj : ed.scene).add(node);
+        if (clock) clock.patchGrowth(node);
+        await ed.stage(node, { parent: null, minS: 0.8, pop: false });   // paced, like the room
         added.push(node);
       }
       done.push(meta.name || `tree_${k}`);

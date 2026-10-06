@@ -340,17 +340,19 @@ def stage_take_view_clear(scene: str) -> str:
 
 @op(mutates=True)
 def stage_actor_play(scene: str, person: str, take: str, actor: str = None, loop: bool = True, rate: float = 1,
-               trim: list = None, in_place: bool = False, assets: str = None, takes: str = None, voice: bool = None) -> str:
+               trim: list = None, in_place: bool = False, assets: str = None, takes: str = None, voice: bool = None,
+               mirror: bool = None) -> str:
     """Play a take on a person: their skinned body replaces the statue and is driven by the take's head and hands,
     scaled to their height (page command: actor_play). actor defaults from the person (a fixed table in actors.js);
     trim [t0, t1] in the take's seconds defaults to the take's saved trim (the page treats an explicit null as "no
     trim", which a None default here cannot express); in_place plays it where it was recorded instead of where the
     person stands; assets / takes read the body / take from another scene. voice: a take made in a performance plays
     its recorded voice only on the person it was recorded for (None, the default); True plays it on this body too,
-    False keeps it silent. One clip sounds once however many bodies play the take. Errors: no actor for that person,
+    False keeps it silent. One clip sounds once however many bodies play the take. mirror: a take plays mirrored as it
+    was recorded (meta.mirror, from the Follow's mirror; None, the default); True or False overrides. Errors: no actor for that person,
     no take, no frames. Page replies {person, actor, frames, scale}. Emits: actor_stop (a take already on them),
     actor_play."""
-    return page_cmd(scene, 'actor_play', {'person': person, 'take': take, 'actor': actor, 'loop': loop, 'rate': rate, 'trim': trim, 'in_place': in_place, 'assets': assets, 'takes': takes, 'voice': voice}, timeout=30)
+    return page_cmd(scene, 'actor_play', {'person': person, 'take': take, 'actor': actor, 'loop': loop, 'rate': rate, 'trim': trim, 'in_place': in_place, 'assets': assets, 'takes': takes, 'voice': voice, 'mirror': mirror}, timeout=30)
 
 
 @op(mutates=True)
@@ -634,8 +636,10 @@ def stage_actor_pose(scene: str, person: str, t: float = None) -> str:
     """Where a person's joints are, in Blender metres (page command: actor_pose): pelvis, spine_03, head, lowerarm_l/r,
     hand_l/r, calf_l/r, foot_l/r. While the user follows them: now. While a take plays on them: at t seconds of the
     take (default: the frame playing). Otherwise: their start pose (stage_actor_start; 'rest' when none), i.e. frame 0
-    of the next Follow. Check contact numerically: the pelvis over the seat top, the hands on the bar top. Page
-    replies {person, joints, start, take, t}."""
+    of the next Follow. Check contact numerically: the pelvis over the seat top, the hands on the bar top. `short`
+    names the limb ends that could not reach their target in that pose and by how many metres (a hand driven past
+    arm's length stops at full reach): {"hand_l": 0.04} means the left hand is 4 cm short of where it was sent. Page
+    replies {person, joints, short, start, take, t}."""
     return page_cmd(scene, 'actor_pose', {'person': person, 't': t}, timeout=30)
 
 
