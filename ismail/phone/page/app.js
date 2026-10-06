@@ -33,12 +33,14 @@ function connect(back) {
 // otherwise asks for one tap.
 function remember() { store.set('listening', want ? Date.now() : 0); }
 function asleep() {
+  ev('resume_asked');
   want = false; sid = null;
   $('play').textContent = 'Resume'; $('play').classList.remove('on');
   toast('the set is still playing: tap Resume to hear it'); buzz([80, 60, 80]);
 }
 function backoff() { retry = Math.min(retry + 1, 6); return 1000 * 2 ** (retry - 1); }
 function setPlaying(on) {
+  if (on !== want) ev(on ? 'listen' : 'stop');
   want = on;
   if (on) connect(); else { audio.pause(); audio.removeAttribute('src'); audio.load(); sid = null; }
   $('play').textContent = on ? 'Stop' : 'Listen'; $('play').classList.toggle('on', on);
@@ -69,12 +71,49 @@ function mediaSession() {
   const h = (a, f) => { try { ms.setActionHandler(a, f); } catch (err) {} };
   // earbuds: the Dime 3 sends only play/pause (double and triple presses change the volume in the bud), so while
   // the set plays a press is a voice note, and "stop listening" said in a note stops the stream
-  h('play', () => { if (want && keysOn) return keyNote(); setPlaying(true); cue('start'); });
-  h('pause', () => { if (want && keysOn) return keyNote(); setPlaying(false); });
-  h('nexttrack', () => tap('change'));
+  h('play', () => { ev('earbud', { key: 'play' }); if (want && keysOn) return keyNote(); setPlaying(true); cue('start'); });
+  h('pause', () => { ev('earbud', { key: 'pause' }); if (want && keysOn) return keyNote(); setPlaying(false); });
+  h('nexttrack', () => { ev('earbud', { key: 'next' }); tap('change'); });
   h('previoustrack', () => tap('love'));
   h('seekbackward', () => $('back').onclick());
 }
+
+// ---- the phone's take: what happens on the page, timed, so an agent can lay it over the voice notes
+// (Nate 10-06: "kind of like the same thing [as a VR take], but for the mobile interface")
+const evq = [];
+function ev(what, f) { evq.push(Object.assign({ what, at: Date.now(), t: heardNow() }, f || {})); if (evq.length > 40) flushEv(); }
+function flushEv(beacon) {
+  if (!evq.length) return;
+  const events = evq.splice(0).map((e) => { const { at, ...rest } = e; return Object.assign(rest, { age_ms: Date.now() - at }); });
+  const body = JSON.stringify({ sid, events });
+  if (beacon && navigator.sendBeacon) { navigator.sendBeacon('api/events', new Blob([body], { type: 'application/json' })); return; }
+  fetch('api/events', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, keepalive: true })
+    .catch(() => { evq.unshift(...events.map((e) => Object.assign(e, { at: Date.now() - e.age_ms }))); });
+}
+setInterval(() => flushEv(), 3000);
+window.addEventListener('pagehide', () => { ev('close'); flushEv(true); });
+document.addEventListener('visibilitychange', () => { ev(document.visibilityState === 'visible' ? 'visible' : 'hidden'); if (document.visibilityState !== 'visible') flushEv(true); });
+window.addEventListener('offline', () => ev('offline'));
+window.addEventListener('online', () => ev('online'));
+(function opened() {
+  const c = navigator.connection || {};
+  const standaloneNow = matchMedia('(display-mode: standalone)').matches || navigator.standalone;
+  ev('open', { mobile: /Mobi|Android/i.test(navigator.userAgent), app: !!standaloneNow, w: screen.width, h: screen.height,
+    lang: navigator.language, net: c.effectiveType || '', platform: (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || '' });
+})();
+// where they are on the page: the section in view once scrolling settles (a timer, not scroll events: those come
+// with drawn frames, and a backgrounded page draws none)
+let secShown = null, lastY = -1, stillY = -1;
+setInterval(() => {
+  const y = Math.round(window.scrollY);
+  if (y !== lastY) { lastY = y; return; }                 // still moving
+  if (y === stillY) return;                               // settled where it was
+  stillY = y;
+  const mid = window.innerHeight * 0.4;
+  const s = [...document.querySelectorAll('[data-sec]')].find((el) => { const r = el.getBoundingClientRect(); return r.top <= mid && r.bottom >= mid; });
+  const name = s ? s.dataset.sec : null;
+  if (name && name !== secShown) { if (secShown !== null) ev('scroll', { to: name, y }); secShown = name; }
+}, 1500);
 
 // ---- sending (queued while offline)
 async function send(path, body, quiet) {
@@ -170,7 +209,8 @@ async function micStart() {
     talk.stream = talk.stream || await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
   } catch (e) { toast('the microphone is blocked: allow it for this page'); return; }
   const mime = ['audio/webm;codecs=opus', 'audio/ogg;codecs=opus', 'audio/mp4'].find((m) => window.MediaRecorder && MediaRecorder.isTypeSupported(m)) || '';
-  talk.chunks = []; talk.t = heardNow(); talk.sid = sid;
+  talk.chunks = []; talk.t = heardNow(); talk.sid = sid; talk.started = Date.now(); talk.end = 'press';
+  ev('note_start');
   talk.rec = new MediaRecorder(talk.stream, mime ? { mimeType: mime } : undefined);
   talk.rec.ondataavailable = (e) => { if (e.data.size) talk.chunks.push(e.data); };
   talk.rec.start(250);
@@ -192,7 +232,7 @@ async function micStart() {
     }
     const left = NOTE_MAX_MS - (Date.now() - startedAt);
     if (!warned && left < 20000) { warned = true; buzz([200, 100, 200]); cue('error'); toast('20 s left on this note'); }
-    if (Date.now() - talk.loudAt > NOTE_QUIET_MS || left <= 0) micStop(true);
+    if (Date.now() - talk.loudAt > NOTE_QUIET_MS || left <= 0) { talk.end = left <= 0 ? 'max' : 'quiet'; micStop(true); }
   }, 500);
 }
 const NOTE_QUIET_MS = 30000, NOTE_MAX_MS = 10 * 60000;
@@ -203,9 +243,11 @@ function micStop(sendIt) {
   $('talkhint').textContent = 'tap once for hands-free, tap again to send';
   meterStop();
   clearTimeout(noteTimer); clearInterval(talk.quietT); cue('end');
+  const dur = (Date.now() - (talk.started || Date.now())) / 1000, endBy = talk.end;
+  ev('note_end', { dur: Math.round(dur * 10) / 10, by: endBy, sent: !!sendIt });
   r.onstop = () => {
     const blob = new Blob(talk.chunks, { type: r.mimeType || 'audio/webm' });
-    if (sendIt && blob.size > 1500) upload(blob, talk.sid, talk.t);
+    if (sendIt && blob.size > 1500) upload(blob, talk.sid, talk.t, dur, endBy);
     else if (sendIt) toast('too short: hold a little longer');
   };
   r.stop();
@@ -236,8 +278,8 @@ function meterStop() {
   [...$('meter').children].forEach((b) => b.classList.remove('lit'));
 }
 const pending = [];
-async function upload(blob, s, t) {
-  const u = `api/voice?sid=${encodeURIComponent(s || '')}&t=${t == null ? '' : t}`;
+async function upload(blob, s, t, dur, endBy) {
+  const u = `api/voice?sid=${encodeURIComponent(s || '')}&t=${t == null ? '' : t}` + (dur ? `&dur=${dur.toFixed(1)}&end=${endBy || 'press'}` : '');
   try {
     const r = await fetch(u, { method: 'POST', headers: { 'Content-Type': blob.type }, body: blob });
     const j = await r.json();
@@ -245,7 +287,7 @@ async function upload(blob, s, t) {
     addFeed({ me: true, id: j.id, ts: new Date().toTimeString().slice(0, 5), text: 'voice note' + (j.heard && j.heard.of ? ' at ' + j.heard.of : '') + ', transcribing' });
     toast('sent'); buzz([30, 60, 30]); setTimeout(() => cue('sent'), 350);
   } catch (e) {
-    pending.push([blob, s, t]); toast('offline: the note waits and sends when you are back'); cue('error');
+    pending.push([blob, s, t, dur, endBy]); toast('offline: the note waits and sends when you are back'); cue('error');
   }
 }
 setInterval(() => { if (navigator.onLine && pending.length) { const p = pending.splice(0); p.forEach((x) => upload(...x)); } if (outbox.length) flush(); }, 8000);
@@ -293,6 +335,7 @@ function stopClip() {
   if (clip.resume) { clip.resume = false; setPlaying(true); }
 }
 function playClip(url, box) {
+  ev('clip', { url: String(url).split('?')[0].slice(-60) });
   const again = clip.el && clip.el.dataset.url === url;
   if (clip.el) { clip.el.pause(); clip.el = null; document.querySelectorAll('.clip').forEach((c) => c.classList.remove('playing')); }
   if (again) return stopClip();
@@ -307,7 +350,7 @@ function renderPanel() {
   const p = ps[ps.length - 1];
   if (!p) { if (shown) { $('sheet').classList.remove('show'); stopClip(); shown = null; } return; }
   if (shown === p.id) return;
-  shown = p.id; buzz([80, 60, 80]);
+  shown = p.id; buzz([80, 60, 80]); ev('panel_open', { id: p.id, title: p.title || '' });
   const box = $('panel');
   let h = `<h2>${esc(p.title)}</h2>` + (p.text ? `<p>${esc(p.text)}</p>` : '') + (p.image ? `<img src="${esc(p.image)}">` : '');
   if (p.kind === 'exam') {
@@ -341,6 +384,7 @@ function renderOffers() {
   const os = state.offers || [];
   $('offerbox').hidden = !os.length;
   $('offers').innerHTML = os.slice().reverse().map((o) => `<div class="offer"><span>${esc(o.label)}</span><a href="${esc(o.url)}?dl=1" download="${esc(o.name)}">Download</a></div>`).join('');
+  $('offers').querySelectorAll('a[download]').forEach((a) => { a.onclick = () => ev('download', { file: a.getAttribute('download') }); });
 }
 function render() {
   const e = state.engine || {}, h = state.heard || {}, r = state.rec || {};
@@ -405,7 +449,7 @@ async function poll() {
     }
   }
 }
-$('sheet').addEventListener('click', (e) => { if (e.target.id === 'sheet') { $('sheet').classList.remove('show'); } });
+$('sheet').addEventListener('click', (e) => { if (e.target.id === 'sheet') { $('sheet').classList.remove('show'); ev('panel_close', { id: shown }); } });
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { if (shown) $('sheet').classList.add('show'); } });
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 // Install: Chrome offers it once the page qualifies (PNG icons, a service worker); the button appears only then

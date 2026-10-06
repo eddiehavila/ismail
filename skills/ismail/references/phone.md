@@ -78,6 +78,17 @@ in the bud, and a long press opens the phone's assistant). So, while a set plays
 
 Only `phone_listen` counts as listening on the page; watching the inbox file does not show them anyone is there.
 
+## The phone session is a take
+
+Like a VR take, the page reports what they do on it, timed: opened (which device, installed or in the browser),
+Listen and Stop, hidden and back, the section they scrolled to, downloads, clips played, panels opened and closed,
+voice notes with their length and what ended them (their press, 30 s of quiet, the 10 minute limit), earbud
+presses. Every line from the page, taps and notes included, carries `room` (the engine's bar then, there even
+when the page is off the stream) and `now` (the piece). `phone_timeline(minutes=15)` lays it all on one clock with
+what they said, so you can tell what they meant by "this" or "that bit". `phone_listen` leaves the page's own
+actions out unless you pass `page=True`, so a scroll never wakes you. All of it stays on this computer
+(`~/.ismail/phone/inbox.jsonl`).
+
 ## What you can put on the page
 
 - `phone_now(now=, next=, recording_why=)`: the title, next up, and why recording is on or off. The page always
