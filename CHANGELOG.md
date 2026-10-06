@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Takes on the music clock
+
+- The page keeps the song's time as the person hears it (the audio context's clock, less the output latency):
+  `stage_music_time`, `music` in the page state, and `music_start` / `music_stop` events. `stage_music(start=)` begins
+  a song partway in.
+- `stage_actor_play(at_music=<song seconds>)` plays a take on that clock: its first frame sits at that song second and
+  every frame reads the song's time, so a beat-warped loop stays on the beat however late it started and wherever the
+  song loops. The film's dancers were warped onto the beat, but a take started on a command landed 0.3 to 6 s late.
+  Side server: the take followed the song within one take frame (median 16 ms, worst 41 ms at 30 Hz frames).
+
 ### The phone's Listen and Talk keys show their state with an icon (Nate, 10-06 09:59)
 
 - Listen: play, stop while playing, a breathing arrow while it reconnects or buffers, Resume when the phone wants a
