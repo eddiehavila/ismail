@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### phone_sounds: the page plays sounds an agent made, one per event (Nate, 10-06)
+
+- `phone_sounds(event, path, gain_db)` attaches a short sound (wav, ogg or mp3, at most 5 s and 1 MB) to an event:
+  message, note_start, note_end, note_sent, error, tap, love, change, mood, offer, panel, chapter. The page plays it
+  on that event only; events without one are silent, and the four note tones fall back to the built-in ones. The
+  sounds persist across restarts. phone.md: make them with ismail, then attach them. 208 tools.
+
 ### The phone page opens the mic only for a note, so earbuds keep music quality (Nate, 10-06)
 
 - With the mic open the whole time the page played, Bluetooth earbuds (Nate's Dime 3) stayed in call mode and the
