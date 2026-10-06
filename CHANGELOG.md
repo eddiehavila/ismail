@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### render stands in line when the machine is busy (ledger:M152, hq:D-30)
+
+- A plain `render` refused on WAIT and told a newcomer's agent "force=True only if the user says so" (first-run dress
+  rehearsal 2). It now waits in line up to `wait='10m'` (the default), says how long it waited, and `wait='0'`
+  refuses at once as before.
+
 ### phone_route survives a restart (ledger:M157, hq:D-30)
 
 - The route is kept in the phone's state.json and loaded again when the server starts (when its folder still

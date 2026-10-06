@@ -100,7 +100,7 @@ def test_a_busy_machine_turns_a_render_into_an_op_error_that_says_why(board, tmp
         with machine.slot('live', 'live set', threads=None):
             machine._held.depth = 0
             with pytest.raises(api.OpError) as e:
-                api.render(root)
+                api.render(root, wait='0')
             machine._held.depth = 1
         machine._held.depth = 1
     assert 'cpu slots are full' in str(e.value) and 'tears' in str(e.value)
@@ -305,9 +305,10 @@ def test_a_drive_under_the_floor_holds_every_heavy_job_and_says_where_the_space_
     root = str(tmp_path / 's')
     api.project_new(root, bpm=120, length_bars=1)
     api.track_add(root, 'k', instrument='preset:kick')
+    t = time.time()
     with pytest.raises(api.OpError) as e:
-        api.render(root)
-    assert 'cache=False skips the track cache' in str(e.value)
+        api.render(root)                                     # waits in line by default, but not for the disk
+    assert 'cache=False skips the track cache' in str(e.value) and time.time() - t < 10
     with machine.slot('live', 'live set', threads=None):     # a set on air is never held by the disk
         pass
 
@@ -493,3 +494,30 @@ def test_a_priority_says_when_its_name_matches_no_job_and_takes_days(board):
     assert machine.priority_match() == '' and 'WARNING' not in machine.board()
     assert machine.main(['priority', 'voice', '--for', '3d', '--by', 'the user']) == 0
     assert machine.priority()['until'] - time.time() > 2.9 * 86400
+
+
+def test_a_render_waits_in_line_by_default(board, tmp_path, monkeypatch):
+    """ledger:M152 (dress rehearsal 2): a plain render refused on WAIT and told a newcomer's agent 'force=True only
+    if the user says so'. It stands in line instead, and says how long it waited."""
+    import threading
+    monkeypatch.setattr(machine, 'WAIT_POLL_S', 0.1)
+    root = str(tmp_path / 's')
+    api.project_new(root, bpm=120, length_bars=1)
+    api.track_add(root, 'k', instrument='preset:kick')
+    api.notes_write(root, 'k', 1, '0 C2 1')
+    held, free = threading.Event(), threading.Event()
+
+    def hog():
+        with machine.slot('cpu', 'render one', who='tears'):
+            held.set()
+            free.wait(10)
+    t = threading.Thread(target=hog)
+    t.start()
+    held.wait(5)
+    monkeypatch.setattr(machine, 'check', lambda *a, **k: '' if free.is_set() else 'the cpu slots are full')
+    threading.Timer(6.0, free.set).start()
+    out = api.render(root)
+    t.join(5)
+    assert 'rendered' in out and 'in line for the machine' in out
+    with pytest.raises(api.OpError, match="wait: "):
+        api.render(root, wait='soon')
