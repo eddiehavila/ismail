@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### The phone page opens the mic only for a note, so earbuds keep music quality (Nate, 10-06)
+
+- With the mic open the whole time the page played, Bluetooth earbuds (Nate's Dime 3) stayed in call mode and the
+  set sounded bad. The mic now opens when a note starts and every track stops when it ends. "Mic: kept open" brings
+  back the old way (earbud notes with the screen off, in call quality); "Record: phone mic" records with the
+  phone's own microphone.
+
 ### The live engine renders lazily and says STARVING before the underruns (ledger:M156, hq:D-30)
 
 - A clip queued more than 32 bars ahead renders nothing until it comes within 32 bars (PRELOAD_WITHIN_BARS). On

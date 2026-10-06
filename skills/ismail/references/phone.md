@@ -73,8 +73,12 @@ in the bud, and a long press opens the phone's assistant). So, while a set plays
 - a short note that is only a command acts as one: "stop listening" stops the stream (a press starts it again),
   "love this", "change it up", "more energy", "calmer", "louder", "quieter", "pause the set", "resume the set" arrive
   as taps with `via: 'voice'` and the note's `id`. The words also arrive as `voice_text`: act once, not twice.
-- the microphone is opened when they press Listen on the page and held while it plays, so a press can record with
-  the screen off. If the phone blocks that, a low tone says so.
+- the microphone opens when a note starts and closes when it ends ("Mic: per note", the default): while a mic is
+  open, Bluetooth earbuds switch to call mode (mono, narrowband) and the music sounds bad, so a mic held open the
+  whole set ruins it (Nate's Dime 3, 10-06). The switch takes a second or two at each end of a note. "Mic: kept
+  open" holds it while the set plays, so a press can record with the screen off, in call quality; "Record: phone
+  mic" records with the phone's own microphone, so the earbuds may stay in music quality throughout. If the phone
+  will not open the mic (the screen off, or blocked), a low tone and a line say so.
 
 Only `phone_listen` counts as listening on the page; watching the inbox file does not show them anyone is there.
 
