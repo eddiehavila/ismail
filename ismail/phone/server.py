@@ -1042,6 +1042,36 @@ class Agent:
         return (f"{event}: {p.name}" + (f" ({dur:.2f} s)" if dur else '') + (f" at {g:+g} dB" if g else '') +
                 " (the page plays it from now on; it never plays on its own, only on its event)")
 
+    def op_unsay(self, match=None, since=None, n=None, who=None):
+        """Take captions back off the page (Nate 10-06 15:03: a caption named where he lives while he recorded the
+        screen): every caption whose text contains `match` (any of several, '|' between them, case ignored), every
+        one since `since` ('HH:MM' today or an ISO time), or the last `n`. The pinned line too, when it matches."""
+        ph = self.ph
+        caps = ph.view['captions']
+        if not (match or since or n):
+            raise ValueError("say which: match='text' (or 'a|b'), since='HH:MM', or n=3 (the last three)")
+        words = [w.strip().lower() for w in str(match).split('|') if w.strip()] if match else []
+        if since:
+            t = str(since).strip()
+            if re.fullmatch(r'\d{1,2}:\d{2}', t):
+                t = datetime.date.today().isoformat() + 'T' + t.zfill(5)
+        gone = []
+        for i, c in enumerate(caps):
+            hit = (words and any(w in c['text'].lower() for w in words)) or (since and c['ts'] >= t) or \
+                  (n and i >= len(caps) - int(n))
+            if hit:
+                gone.append(c)
+        ph.view['captions'] = [c for c in caps if c not in gone]
+        pin = ph.view.get('pinned')
+        if pin and ((words and any(w in pin['text'].lower() for w in words)) or pin in gone):
+            ph.view['pinned'] = None
+            gone.append(pin)
+        ph.save()
+        ph.cmd('unsay', texts=[c['text'] for c in gone])
+        return (f"took {len(gone)} line(s) off the page" + (": " + '; '.join(c['text'][:50] for c in gone[:5]) if gone
+                                                            else " (none matched)")
+                + ". A screenshot or recording already made keeps them; the page's notification is closed too")
+
     def op_restarting(self, back_in_s=5, why='updating'):
         """Tell the open page the server is about to restart: it says so, then reconnects the stream at once."""
         self.ph.cmd('restarting', back_in_s=float(back_in_s), why=str(why)[:80])

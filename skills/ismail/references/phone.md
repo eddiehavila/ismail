@@ -80,6 +80,13 @@ in the bud, and a long press opens the phone's assistant). So, while a set plays
   mic" records with the phone's own microphone, so the earbuds may stay in music quality throughout. If the phone
   will not open the mic (the screen off, or blocked), a low tone and a line say so.
 
+## Nothing personal on the page
+
+The page may be on someone's screen recording or a shared video: never put where the person lives, their name, or
+other personal details in a caption, a panel or a title (10-06: a story named Nate's town while he recorded).
+`phone_unsay(match='text')` (or `since='HH:MM'`, or `n=`) takes lines back off the page, its history, its pinned
+line and its notification; it cannot reach a recording already made.
+
 ## The page's sounds: make them, attach them
 
 Every sound the page makes is crafted (Nate, 10-06: "the same thing applies to everything as like a design

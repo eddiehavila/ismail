@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### phone_unsay: take captions back off the phone page (Nate 10-06 15:03)
+
+- `phone_unsay(match=, since=, n=)` removes captions from the page, its history and its pinned line, and closes the
+  matching notification. phone.md: nothing personal on the page (it may be on a screen recording). 209 tools.
+
 ### The phone page measures its gaps (Nate 10-06 14:56: "a profiler")
 
 - Every stall the browser reports and every freeze (the stream not advancing for over 1.5 s) is logged as a `stall`

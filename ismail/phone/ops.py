@@ -304,6 +304,14 @@ def phone_sounds(event: str = None, path: str = None, gain_db: float = 0.0, menu
 
 
 @op()
+def phone_unsay(match: str = None, since: str = None, n: int = None) -> str:
+    """Take captions back off the phone page, its history and its pinned line: match='text' (several with '|',
+    case ignored), since='HH:MM' (today), or n=3 (the last three). Never put where the person lives, their name or
+    other personal details on the page: they may be recording the screen."""
+    return _call('unsay', match=match, since=since, n=n)
+
+
+@op()
 def phone_buzz(pattern: list = None) -> str:
     """Vibrate the phone (if the page is open): pattern in ms, e.g. [200, 100, 200]."""
     return _call('buzz', pattern=pattern)
