@@ -43,12 +43,14 @@ export function initUpdates(ed, live, hands, voice) {
   bar.querySelector('.later').addEventListener('click', () => bar.classList.remove('show'));
 
   // ---- what is waiting: updates.json, one entry per change landed ({t_ms, title, level}), written by update_note.py.
-  // The card counts entries newer than the code this page runs and shows the most important one; the colour is the
-  // highest level: green normal, amber important, orange critical (never red: red means recording).
+  // The card counts entries newer than the code this page runs and lists them, the most important first (up to
+  // SHOW, then "+N more"; the user, q44: panels "listing what changed in each update"); the colour is the highest
+  // level: green normal, amber important, orange critical (never red: red means recording).
   const LEVELS = { normal: 0, important: 1, critical: 2 };
   const COLOURS = [['rgba(20,83,45,0.92)', 'rgba(34,197,94,0.9)', '#14532d'], ['rgba(161,98,7,0.94)', 'rgba(250,204,21,0.9)', '#a16207'],
     ['rgba(194,65,12,0.94)', 'rgba(251,146,60,0.9)', '#c2410c']];
-  const waiting = { n: 1, level: 0, top: '' };
+  const waiting = { n: 1, level: 0, top: '', titles: [] };
+  const SHOW = 5, ROW = 38, HEAD = 76, FOOT = 50;
   async function readWaiting() {
     let list = [];
     try { const r = await fetch('updates.json', { cache: 'no-store' }); if (r.ok) list = (await r.json()).updates || []; } catch (_) { /* no log: one plain update */ }
@@ -59,24 +61,31 @@ export function initUpdates(ed, live, hands, voice) {
     waiting.n = Math.max(1, fresh.length);
     waiting.level = fresh.length ? rank(fresh[0]) : 0;
     waiting.top = fresh.length ? fresh[0].title : '';
+    waiting.titles = fresh.map((u) => u.title);
   }
 
   // ---- VR: a card over the left wrist
-  const cv = document.createElement('canvas'); cv.width = 512; cv.height = 176;
+  const cv = document.createElement('canvas'); cv.width = 512; cv.height = HEAD + SHOW * ROW + ROW + FOOT;
   const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace;
   const card = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true, toneMapped: false }));
   card.renderOrder = 999; card.layers.set(GIZMO); card.visible = false; card.scale.set(0.16, 0.055, 1);
   scene.add(card);
   function drawCard(progress) {
     const g = cv.getContext('2d'), [bg, fill] = COLOURS[waiting.level];
-    g.clearRect(0, 0, 512, 176);
-    g.fillStyle = bg; g.beginPath(); g.roundRect(2, 2, 508, 172, 22); g.fill();
-    if (progress > 0) { g.fillStyle = fill; g.beginPath(); g.roundRect(2, 2, 508 * progress, 172, 22); g.fill(); }
+    const shown = waiting.titles.slice(0, SHOW), more = waiting.titles.length - shown.length;
+    const h = HEAD + shown.length * ROW + (more > 0 ? ROW : 0) + FOOT;   // the card is as tall as its list
+    card.scale.set(0.16, 0.16 * h / 512, 1);
+    card.material.map.repeat.set(1, h / cv.height); card.material.map.offset.set(0, 1 - h / cv.height);
+    g.clearRect(0, 0, 512, cv.height);
+    g.fillStyle = bg; g.beginPath(); g.roundRect(2, 2, 508, h - 4, 22); g.fill();
+    if (progress > 0) { g.fillStyle = fill; g.beginPath(); g.roundRect(2, 2, 508 * progress, h - 4, 22); g.fill(); }
     g.fillStyle = '#fff'; g.textAlign = 'center'; g.textBaseline = 'middle';
     g.font = 'bold 40px system-ui, sans-serif'; g.fillText(waiting.n > 1 ? waiting.n + ' updates ready' : 'Update ready', 256, 40);
-    g.font = '28px system-ui, sans-serif'; if (waiting.top) g.fillText(waiting.top, 256, 92, 480);
-    g.fillStyle = 'rgba(255,255,255,0.75)'; g.font = '24px system-ui, sans-serif';
-    g.fillText('left thumbs up to reload (leaves VR)', 256, 142);
+    g.textAlign = 'left'; g.font = '26px system-ui, sans-serif';
+    shown.forEach((t, i) => g.fillText('• ' + t, 22, HEAD + ROW * i + ROW / 2, 468));
+    if (more > 0) { g.fillStyle = 'rgba(255,255,255,0.75)'; g.fillText(`+${more} more`, 22, HEAD + ROW * shown.length + ROW / 2, 468); }
+    g.textAlign = 'center'; g.fillStyle = 'rgba(255,255,255,0.75)'; g.font = '24px system-ui, sans-serif';
+    g.fillText('left thumbs up to reload (leaves VR)', 256, h - FOOT / 2 - 2);
     tex.needsUpdate = true;
   }
 
@@ -142,7 +151,7 @@ export function initUpdates(ed, live, hands, voice) {
     bar.style.background = COLOURS[waiting.level][2];
     bar.classList.add('show');
     drawCard(0);
-    live.emit('updates_waiting', { count: waiting.n, level: Object.keys(LEVELS)[waiting.level], top: waiting.top });
+    live.emit('updates_waiting', { count: waiting.n, level: Object.keys(LEVELS)[waiting.level], top: waiting.top, titles: waiting.titles });
     if (renderer.xr.isPresenting && waiting.level > was) voice.EAR.incoming();   // a chime when it first shows or gets more important
   });
 

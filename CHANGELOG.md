@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### The update card lists every change waiting
+
+- The left-wrist update card lists the changes waiting (up to five, the most important first, then "+N more") and
+  grows to fit, instead of naming only one (the user, q44: panels "listing what changed in each update").
+  `updates_waiting` carries the titles. The titles come from `stage_note`, one per change landed.
 ### Takes on the beat: sync, loop and warp as stage ops
 
 - `stage_take_sync` measures how takes keep time with a song (pulse, own BPM, the rate onto the beat, the first
