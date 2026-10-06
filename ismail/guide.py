@@ -122,11 +122,12 @@ Their first try decides whether they come back. Run it this way, then the normal
    Their first answer decides your words:
    guide(first_answer=<their words, verbatim>) says musician or plain words, and you keep to it from then on.
 3. Sound within about five minutes: sketch(project, brief=<their words>) reads their tempo, key, genre,
-   instruments and form, writes three readings on the measured voices below and renders them. Tell them first
-   what the reply says has no voice yet ("asked for Rhodes: grand_piano plays its part").
-   While they wait, say what is happening and about how long: the first sketch takes about two minutes, all
-   three about five (dress rehearsal 2); silence for minutes reads as broken. Open each for them, one at a time,
-   and ask which is closest or what each is missing; their correction is the next round:
+   instruments and form, writes three readings on the measured voices below and renders them. While it works, say
+   what is happening and about how long (the first sketch about two minutes; silence for minutes reads as broken).
+   It returns as soon as the first is ready: read its SAY TO THE PERSON block out as it is (what each sketch is,
+   what was swapped, what it can't make yet) and play A at once; sketch_wait(project) says when the others land.
+   Open each for them, one at a time, and ask which is closest or what each is missing; their correction is the
+   next round:
    sketch(project, <their words>, base='<letter>'). An instrument they named that has no voice is a later step:
    offer to find an example of it and build it (the loop's step 0), never pretend the stand-in is it.
 4. sketch_keep(project, '<letter>') makes the pick the song and ends the first session.
