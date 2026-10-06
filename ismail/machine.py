@@ -311,6 +311,37 @@ def set_priority(who, for_s, by, why=''):
     return p
 
 
+def _until(t):
+    """When a grant ends, readable: the time today, or the day and time beyond today (a 3-day grant)."""
+    lt = time.localtime(t)
+    return time.strftime('%H:%M' if time.strftime('%Y%m%d', lt) == time.strftime('%Y%m%d') else '%a %d %b %H:%M', lt)
+
+
+def names_seen(hours=48):
+    """The board names (who) of jobs running, waiting, or finished in the last `hours`, with a count each."""
+    seen = {}
+    for j in list(jobs()) + waiters() + history(since=time.time() - hours * 3600):
+        seen[j.get('who')] = seen.get(j.get('who'), 0) + 1
+    seen.pop(None, None)
+    return seen
+
+
+def priority_match(who=None):
+    """'' when a grant's name matches jobs seen in the last 48 h, else a warning naming the names in use (ledger:M143:
+    `who` defaults to the working folder's name, so nearly every job from D:\ismail is 'ismail' and a grant to a
+    session matched nothing unless that session sets ISMAIL_SESSION)."""
+    pr = priority()
+    who = who or (pr and pr['who'])
+    if not who:
+        return ''
+    seen = names_seen()
+    if who in seen:
+        return ''
+    names = ', '.join(f"{n} ({c})" for n, c in sorted(seen.items(), key=lambda x: -x[1])[:8]) or 'none'
+    return (f"no job named '{who}' ran or waited in the last 48 h, so this priority matches nothing yet. Names in use: "
+            f"{names}. A session shows by its own name when it sets ISMAIL_SESSION=<its name> before it runs jobs.")
+
+
 def clear_priority():
     with _board_lock():
         try:
@@ -445,11 +476,11 @@ def duration_s(text):
     """'10m', '600s', '1.5h' -> seconds. A bare number is minutes; above 240 it is refused, because a number of
     seconds passed as minutes put a 10-minute render on the board as 585 min and a peer thought a job had hung."""
     t = str(text).strip().lower()
-    unit = {'s': 1, 'm': 60, 'h': 3600}.get(t[-1:]) if t[-1:].isalpha() else None
+    unit = {'s': 1, 'm': 60, 'h': 3600, 'd': 86400}.get(t[-1:]) if t[-1:].isalpha() else None
     try:
         v = float(t[:-1] if unit else t)
     except ValueError:
-        raise ValueError(f"--est {text!r}: give a duration like 10m, 600s or 1.5h")
+        raise ValueError(f"duration {text!r}: give one like 10m, 600s, 1.5h or 3d")
     if unit is None and v > 240:
         raise ValueError(f"--est {text}: a bare number is minutes ({v / 60:.1f} h). If you meant seconds, "
                          f"write --est {t}s; if you meant minutes, write --est {t}m")
@@ -983,8 +1014,11 @@ def board():
     L += [f"  {_describe(j)}" for j in js] or ["  none"]
     pr = priority()
     if pr:
-        L.append(f"priority: {pr['who']} goes first in line until {time.strftime('%H:%M', time.localtime(pr['until']))}"
+        L.append(f"priority: {pr['who']} goes first in line until {_until(pr['until'])}"
                  f" (given by {pr['by']}" + (f": {pr['why']}" if pr.get('why') else '') + ")")
+        miss = priority_match()
+        if miss:
+            L.append('  WARNING: ' + miss)
     if any(j['kind'] == 'live' for j in js):
         pol = on_air_policy()
         L.append(f"ON AIR: a live set plays; policy {pol['policy']} (by {pol['by']}): "
@@ -1200,7 +1234,7 @@ def main(argv=None):
     r.add_argument('command', nargs=argparse.REMAINDER)
     p = sub.add_parser('priority', help='the user gives a session first place in line: priority vox --for 3h --by "the user"')
     p.add_argument('who', nargs='?', help="the session's name as the board shows it")
-    p.add_argument('--for', dest='for_', default='2h', help='how long: 30m, 3h (default 2h)')
+    p.add_argument('--for', dest='for_', default='2h', help='how long: 30m, 3h, 3d (default 2h)')
     p.add_argument('--by', default=None, help='who gave it (the user)')
     p.add_argument('--why', default='', help='what it is for, for the board')
     p.add_argument('--clear', action='store_true')
@@ -1224,15 +1258,18 @@ def main(argv=None):
             return 0
         if not a.who:
             pr = priority()
-            print(f"priority: {pr['who']} until {time.strftime('%H:%M', time.localtime(pr['until']))} (by {pr['by']})"
-                  if pr else "no priority in force")
+            print(f"priority: {pr['who']} until {_until(pr['until'])} (by {pr['by']})" if pr else "no priority in force")
+            if pr and priority_match():
+                print('WARNING: ' + priority_match())
             return 0
         try:
             pr = set_priority(a.who, duration_s(a.for_), a.by, a.why)
         except ValueError as e:
             ap.error(str(e))
-        print(f"priority: {pr['who']} goes first in line until {time.strftime('%H:%M', time.localtime(pr['until']))} "
+        print(f"priority: {pr['who']} goes first in line until {_until(pr['until'])} "
               f"(given by {pr['by']}); the heat limit and the busy CPU still hold")
+        if priority_match():
+            print('WARNING: ' + priority_match())
         return 0
     if a.cmd == 'history':
         try:

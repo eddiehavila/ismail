@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### A priority says when it matches no job; `--for 3d` (ledger:M143, Nate's approval 10-06)
+
+- `who` defaults to the working folder's name, so nearly every job from the repo is `ismail` and a priority given to
+  a session matched nothing unless that session set `ISMAIL_SESSION`. Setting or reading a priority, and the board,
+  now warn when no job of that name ran or waited in 48 h, and list the names in use. SKILL.md tells every session to
+  set `ISMAIL_SESSION`.
+- Durations take days (`priority voice --for 3d`), and a grant beyond today shows its day.
+
 ### Takes on the music clock
 
 - The page keeps the song's time as the person hears it (the audio context's clock, less the output latency):
