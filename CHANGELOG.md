@@ -11,6 +11,23 @@
   moved onto the beats. Ported from the film session's sync_measure.py, loop_cut.py and beat_warp.py with the
   parameters tuned with the user (ledger:M145); on Nate's takes the port gives the same numbers, windows and
   frames as the scripts. New takes drop the performance link (no borrowed voice), the trim and the label.
+### Exams know the devices; exam_check hears a band-limited take and lopsided sides (ledger:M146, Nate's approval 10-06)
+
+- vox:r39 was wasted: the takes went through Bluetooth earbuds' microphone (16 kHz audio, nothing above 7 kHz), the
+  synth filled that band 45-50 dB above them, and exam_check said READY. It now fails classes whose 1/3-octave levels
+  above 6 kHz differ by more than 10 dB and twice the spread within a class, warns on any clip with nothing above
+  8 kHz, and warns when a class comes first in 80 % or more of 6 or more trials (all of them, as in vox:r41's first build,
+  already fails).
+- `phone_exam` asks what they listened on (earbuds, headphones, phone speaker, speaker; remembered) and sends it with
+  the answers, with the output and microphone the browser can name. blind-tests.md: record the devices every round.
+
+### A priority says when it matches no job; `--for 3d` (ledger:M143, Nate's approval 10-06)
+
+- `who` defaults to the working folder's name, so nearly every job from the repo is `ismail` and a priority given to
+  a session matched nothing unless that session set `ISMAIL_SESSION`. Setting or reading a priority, and the board,
+  now warn when no job of that name ran or waited in 48 h, and list the names in use. SKILL.md tells every session to
+  set `ISMAIL_SESSION`.
+- Durations take days (`priority voice --for 3d`), and a grant beyond today shows its day.
 
 ### Takes on the music clock
 

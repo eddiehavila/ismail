@@ -76,6 +76,21 @@ def _loudness(y, sr):
     return 20 * np.log10(rms) - 0.691, 'dB RMS'
 
 
+def _air(y, sr):
+    """The clip's top end against its middle: (air dB = 8-12 kHz vs 0.5-2 kHz, the 1/3-octave levels from 6 kHz up,
+    each against 0.5-2 kHz). A take through a Bluetooth headset microphone is cut at about 7 kHz (16 kHz audio): its
+    air is near -120 dB where a studio mic gives -25 to -30 (vox:r39)."""
+    m = y.mean(axis=1) if y.ndim > 1 else y
+    if len(m) < 2048:
+        return None, []
+    f = np.fft.rfftfreq(len(m), 1 / sr)
+    p = np.abs(np.fft.rfft(m * np.hanning(len(m)))) ** 2
+    mid = p[(f >= 500) & (f < 2000)].sum() + 1e-30
+    lvl = lambda a, b: 10 * np.log10(p[(f >= a) & (f < b)].sum() / mid + 1e-15)   # noqa: E731
+    centres = [c for c in (6300, 8000, 10000, 12500, 16000) if c * 2 ** (1 / 6) < sr / 2]
+    return lvl(8000, min(12000, sr / 2)), [lvl(c * 2 ** (-1 / 6), c * 2 ** (1 / 6)) for c in centres]
+
+
 def _lead(y, sr):
     a = np.abs(y).max(axis=1)
     i = np.argmax(a > 10 ** (-50 / 20))
@@ -178,6 +193,10 @@ def run(clips=None, page=None, key=None, secrets=None, answers_path=None, submit
             peak = float(np.abs(y).max()) if len(y) else 0.0
             c.update(dur=len(y) / sr, fmt=fmt, peak_db=20 * np.log10(peak + 1e-12), lead=_lead(y, sr),
                      tags=_tags(p))
+            c['air'], c['hf'] = _air(y, sr)
+            if c['air'] is not None and c['air'] < -60:
+                warns.append(f"{c['label']}: nothing above 8 kHz (air {c['air']:.0f} dB against 0.5-2 kHz): a band-"
+                             f"limited take (a Bluetooth headset microphone records 16 kHz audio) or a heavy low-pass")
             c['loud'], c['unit'] = _loudness(y, sr) if peak > 0 else (-120.0, 'dB RMS')
             if peak < 10 ** (-60 / 20):
                 fails.append(f"{c['label']}: silent (peak {c['peak_db']:.0f} dBFS)")
@@ -270,6 +289,25 @@ def run(clips=None, page=None, key=None, secrets=None, answers_path=None, submit
             if len(means) >= 2 and max(means.values()) - min(means.values()) > 0.04:
                 warns.append("leading silence differs by class: " + ', '.join(f"{k} {v * 1000:.0f} ms" for k, v in
                                                                               means.items()))
+            # the top end by class: a class recorded or made differently there is heard as that class (vox:r39:
+            # the real takes went through an earbud mic, cut at 7 kHz; the synth filled the band 45-50 dB above them)
+            hfs = {k: np.array([c['hf'] for c in v if c.get('hf')]) for k, v in by.items()}
+            hfs = {k: v for k, v in hfs.items() if len(v) and v.ndim == 2}
+            if len(hfs) >= 2:
+                means = {k: v.mean(axis=0) for k, v in hfs.items()}
+                n = min(len(v) for v in means.values())     # classes at other sample rates: the shared bands
+                means = {k: v[:n] for k, v in means.items()}
+                spread = max(float(np.max(v.max(axis=0) - v.min(axis=0))) if len(v) > 1 else 0.0 for v in hfs.values())
+                ks = sorted(means)
+                gap = max(float(np.max(np.abs(means[a] - means[b]))) for i, a in enumerate(ks) for b in ks[i + 1:])
+                if gap > max(10.0, 2 * spread):
+                    fails.append("the classes differ above 6 kHz by up to " + f"{gap:.0f} dB (" + ', '.join(
+                        f"{k} {float(np.mean(v)):+.0f} dB" for k, v in means.items()) + " against 0.5-2 kHz; the "
+                        f"clips within a class spread {spread:.0f} dB): a tell, and often a recording fault (a band-"
+                        f"limited mic on one side). Record every class the same way, or match the top end")
+                elif gap > max(6.0, spread):
+                    warns.append(f"the classes differ above 6 kHz by up to {gap:.0f} dB (within a class {spread:.0f}"
+                                 f" dB): listen for it before you show the exam")
             louds = {k: float(np.mean([c['loud'] for c in v])) for k, v in by.items() if v}
             if len(louds) >= 2 and max(louds.values()) - min(louds.values()) > 0.5:
                 warns.append("one class is louder on average: " + ', '.join(f"{k} {v:.1f}" for k, v in louds.items()))
@@ -277,6 +315,11 @@ def run(clips=None, page=None, key=None, secrets=None, answers_path=None, submit
             pairs = [seq[i:i + len(classes)] for i in range(0, len(seq) - len(classes) + 1, len(classes))]
             if len(pairs) >= 2 and len({p[0] for p in pairs}) == 1:
                 fails.append(f"the order follows the key: every trial starts with {pairs[0][0]!r} (shuffle per trial)")
+            elif len(pairs) >= 6:                      # each class first in about its share of the trials (vox:r41)
+                for k in classes:
+                    first = sum(1 for p in pairs if p[0] == k)
+                    if first / len(pairs) >= 0.8:
+                        warns.append(f"{k!r} comes first in {first} of {len(pairs)} trials: balance the sides")
             elif len(seq) >= 4 and seq == sorted(seq):
                 fails.append("the clips are in key order (all of one class, then the next): shuffle them")
             if not any(f.startswith(('formats', 'durations', 'the order', 'the clips are')) for f in fails):

@@ -215,6 +215,9 @@ nudges you, follow it.
   half the machine's threads (a temporary rule, "only for now during sets": `machine on-air` shows it; only the
   user lifts it). Register Blender honestly: a `--cpu` Blender
   render waits too.
+  Set `ISMAIL_SESSION=<your name>` in your shell before you run jobs, so the board names you and a priority the user
+  gives you finds your jobs (without it every job from the repo shows as `ismail`); the board warns when a priority
+  matches no job.
   `run --wait 30m` (or `slot(..., wait=)`) stands in line for a slot instead of being refused. Every finished job
   leaves a line in the board's history (what, which song, how long it waited, its exit, CPU seconds, peak memory, the
   GPU's load and the machine's state at its start): `python -m ismail.machine history --song <slug> --since 7d` sums
