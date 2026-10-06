@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Takes on the beat: sync, loop and warp as stage ops
+
+- `stage_take_sync` measures how takes keep time with a song (pulse, own BPM, the rate onto the beat, the first
+  low point, the seam) and with each other (lag in beats, movement match); `loops=True` lists the best whole-bar
+  windows of a long take. `stage_take_loop` cuts a window (given, or the best at a bpm) into a silent loop whose
+  last 0.4 s cross-fade into the frames before it. `stage_take_warp` makes a loop of exactly N bars with its hits
+  moved onto the beats. Ported from the film session's sync_measure.py, loop_cut.py and beat_warp.py with the
+  parameters tuned with the user (ledger:M145); on Nate's takes the port gives the same numbers, windows and
+  frames as the scripts. New takes drop the performance link (no borrowed voice), the trim and the label.
 ### Takes play smoothly between their samples
 
 - Take playback poses the frame between the two recorded samples around each render frame (positions lerp,

@@ -224,6 +224,11 @@ A person in a headset cannot see your terminal. Contact is part of the interface
 - **Find takes by what was said.** The person names takes and talks about them while recording; every take keeps
   those words. `stage_takes(query="glass")` finds them with the second each word was said; `stage_take_note` names
   a take or adds your own note.
+- **Put dances on the beat by number.** `stage_take_sync(scene, takes, bpm)` reads each take's pulse, its own BPM,
+  the rate that puts it on the beat, its seam, and the lag between takes; `loops=True` lists the best whole-bar
+  windows of a long take (clear pulse on the beat, small seam, little travel). `stage_take_loop(take, name, bpm=)`
+  cuts the best one into a seamless silent loop (or `start=`, `end=`), and `stage_take_warp(take, name, bpm, bars)`
+  moves its hits onto the beats. Play it with `stage_actor_play(take=, loop=True, at_music=)` so it stays on the song.
 - **Hand the take loop to a helper when you are busy.** `stage-takes.md` has the brief: the helper keeps the fast
   loop with the person, you keep the scene.
 

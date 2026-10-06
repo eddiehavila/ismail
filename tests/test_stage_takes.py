@@ -85,3 +85,44 @@ def test_takes_are_named_noted_and_filtered(stage, monkeypatch, tmp_path):
     assert '"old one" (2 words)' in OPS['stage_take_transcribe'](scene='room', take='20261005_170000_old')
     with pytest.raises(OpError, match='no audio'):
         OPS['stage_take_transcribe'](scene='room', take='20261005_175200_b')
+
+
+def _dance(d, seconds=8.0, hz=30.0, bounce_hz=2.0):
+    """A dancer bouncing at bounce_hz (2 Hz: on the beat at 120 BPM), hands swinging with it, a sharp hit each bounce."""
+    import math
+    with open(d / 'frames.jsonl', 'w', encoding='utf-8') as fh:
+        for i in range(int(seconds * hz)):
+            t = i / hz
+            ph = 2 * math.pi * bounce_hz * t
+            y = 1.6 + 0.04 * abs(math.sin(ph / 2)) ** 0.5
+            hand = lambda s: {'g': 'none', 'palm': 'down', 'j': [[s * 0.3, 1.1 + 0.1 * math.sin(ph), -0.2, 0, 0, 0, 1, 0.02]]}
+            fh.write(json.dumps({'t': round(t, 4), 'head': [0, y, 0, 0, 0, 0, 1], 'left': hand(-1), 'right': hand(1),
+                                 'body': {'hips': [0, 1.0, 0, 0, 0, 0, 1]}}) + '\n')
+
+
+def test_takes_keep_time_loop_and_warp_onto_the_beat(stage):
+    d = _take(stage, '20261006_120000_dance', name='person_couple_1_m', performance='p1', trim=[0, 8], label='dance')
+    _dance(d)
+    out = OPS['stage_take_sync'](scene='room', takes=['20261006_120000_dance'], bpm=120)
+    import re
+    assert abs(float(re.search(r'own_bpm ([\d.]+)', out).group(1)) - 120) < 1 and 'pulse_beats 1,' in out, out
+    assert abs(float(re.search(r'rate ([\d.]+)', out).group(1)) - 1) < 0.01
+    loops = OPS['stage_take_sync'](scene='room', takes=['20261006_120000_dance'], bpm=120, loops=True, bars=[2])
+    assert '(2 bars)' in loops and 'pulse 1 beat 0.0% off' in loops, loops
+    with pytest.raises(OpError, match='no take'):
+        OPS['stage_take_loop'](scene='room', take='nope', name='x', start=0, end=1)
+    out = OPS['stage_take_loop'](scene='room', take='20261006_120000_dance', name='loop_a', bpm=120, bars=[2])
+    tid = out.split(':')[0]
+    m = json.loads((stage['scenes'] / 'room' / 'takes' / tid / 'meta.json').read_text(encoding='utf-8'))
+    assert 'best window: 2 bars' in out and abs(m['seconds'] - 4.0) < 0.1
+    assert not {'performance', 'trim', 'label'} & set(m) and m['from_take'] == '20261006_120000_dance'   # no borrowed voice
+    with pytest.raises(OpError, match='name'):
+        OPS['stage_take_loop'](scene='room', take='20261006_120000_dance', name='a b', start=0, end=2)
+    out = OPS['stage_take_warp'](scene='room', take=tid, name='warp_a', bpm=126, bars=2)
+    wid = out.split(':')[0]
+    w = json.loads((stage['scenes'] / 'room' / 'takes' / wid / 'meta.json').read_text(encoding='utf-8'))
+    assert w['seconds'] == round(8 * 60 / 126, 4) and w['frames'] == round(w['seconds'] * 30) and w['beat_warp']['bpm'] == 126
+    assert all(abs(g - round(g)) < 0.01 for g in w['beat_warp']['hits_on_grid_units'][1:-1])   # hits on beats
+    with pytest.raises(OpError, match='more than 2x'):
+        OPS['stage_take_warp'](scene='room', take=tid, name='warp_b', bpm=120, bars=8)
+    assert wid in OPS['stage_takes'](scene='room')

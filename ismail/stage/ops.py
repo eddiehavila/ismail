@@ -597,6 +597,100 @@ def stage_take_transcribe(scene: str, take: str) -> str:
     return f"{take}: \"{v['text']}\"" + (f" ({len(v['words'])} words)" if v.get('words') else f" ({v.get('words_missing')})")
 
 
+def _take_dir(scene, take):
+    d = _scene_dir(scene) / 'takes' / take
+    if not (d / 'frames.jsonl').is_file():
+        raise OpError(f'no take {take!r} in {scene}; stage_takes lists them')
+    return d
+
+
+@op()
+def stage_take_sync(scene: str, takes: list, bpm: float, loops: bool = False, bars: list = None, top: int = 4) -> str:
+    """How takes keep time with a song and with each other (no page needed). Per take: its pulse (the period of its
+    main repeating motion from the head and wrists, and how clear it is, 0 to 1), its own BPM, the playback rate that
+    puts the pulse on 1/2, 1, 2 or 4 beats of bpm and its length in bars at that rate, its first low point (the down of
+    a bounce) in beats, and the seam when it wraps (jump in cm and in typical steps, per channel). Per pair: the lag of
+    the second behind the first in beats, and how well their movement matches (0 to 1). loops=True: for each take,
+    the best whole-bar windows to cut as loops (bars=[2, 3, 4], top=4), scored by a clear pulse on the beat, a small
+    seam, enough movement and little travel on the floor; give one to stage_take_loop(start=, end=)."""
+    from . import takesync
+    if isinstance(takes, str):
+        takes = [takes]
+    if not takes or not bpm or bpm <= 0:
+        raise OpError('takes=[take id, ...] and bpm= the song tempo')
+    dirs = [_take_dir(scene, t) for t in takes]
+    try:
+        if loops:
+            res = {d.name: takesync.best_loops(d, bpm, bars=tuple(bars or (2, 3, 4)), top=top) for d in dirs}
+            out = []
+            for name, rows in res.items():
+                out.append(f'{name}: ' + ('no window with a clear pulse' if not rows else ''))
+                out += [f"  {r['start']}-{r['end']} s ({r['bars']} bars): score {r['score']}, pulse {r['pulse_beats']} beat "
+                        f"{r['pulse_off_pct']}% off, clarity {r['clarity']}, seam {r['seam_x_step']}x a step, "
+                        f"{r['energy_m_s']} m/s, drift {r['drift_m']} m" for r in rows]
+            return '\n'.join(out)
+        res = takesync.measure(dirs, bpm)
+    except ValueError as e:
+        raise OpError(str(e))
+    out = [f'at {bpm} BPM:']
+    for r in res['takes']:
+        sm = r.pop('seam')
+        out.append(f"{r.pop('take')}: " + ', '.join(f'{k} {v}' for k, v in r.items()))
+        out.append('   seam: ' + '; '.join(f"{k} {v['jump_cm']} cm ({v['x_step']}x a step), speed jump {v['speed_jump_cm_s']} cm/s"
+                                       for k, v in sm.items()))
+    out += [f"pair {p['a']} / {p['b']}: lag {p['lag_beats']} beats, movement match {p['match']}" for p in res['pairs']]
+    return '\n'.join(out)
+
+
+@op(mutates=True)
+def stage_take_loop(scene: str, take: str, name: str, start: float = None, end: float = None, bpm: float = None,
+                    bars: list = None, blend: float = 0.4) -> str:
+    """Cut a window of a take into a new silent take that loops without a jump: the last blend seconds (0.4, tuned
+    with the user) cross-fade into the frames just before start, so the wrap is continuous in position and speed.
+    start/end in the take's seconds; or bpm= (and bars=[2, 3, 4]) to take the best whole-bar window that
+    stage_take_sync(loops=True) would list first. blend=0: a plain window. The new take is <timestamp>_<name> beside
+    the source, without its performance link (no borrowed voice), its trim or its label; it plays with
+    stage_actor_play(take=, loop=True). Returns its id, the window and the seam after the blend."""
+    from . import takesync
+    src = _take_dir(scene, take)
+    try:
+        picked = None
+        if start is None or end is None:
+            if not bpm:
+                raise OpError('give start= and end= (seconds), or bpm= to pick the best whole-bar window')
+            rows = takesync.best_loops(src, bpm, bars=tuple(bars or (2, 3, 4)), top=1)
+            if not rows:
+                raise OpError(f'no whole-bar window of {take} has a clear pulse at {bpm} BPM; give start= and end=')
+            picked = rows[0]
+            start, end = picked['start'], picked['end']
+        tid, m, sm = takesync.cut(src, name, float(start), float(end), blend=float(blend))
+    except ValueError as e:
+        raise OpError(str(e))
+    why = f" (best window: {picked['bars']} bars, score {picked['score']})" if picked else ''
+    return (f"{tid}: {take} {start}-{end} s{why}, {m['frames']} frames, {m['seconds']} s, blend {m['loop_blend_s']} s; "
+            'seam ' + '; '.join(f"{k} {v['jump_cm']} cm ({v['x_step']}x a step)" for k, v in sm.items()))
+
+
+@op(mutates=True)
+def stage_take_warp(scene: str, take: str, name: str, bpm: float, bars: int = 2, sub: float = 1.0) -> str:
+    """Put a take's hits on the beat: a new silent take of exactly bars bars at bpm (a loop), its time warped
+    piecewise-linearly so each hit (an accent: a hand or the head stopping or turning hard, at least 0.6 beat apart)
+    lands on the nearest beat (sub=0.5: half beat), no segment under 0.75x or over 1.33x speed, resampled at 30 Hz
+    with the frames between samples mixed. Cut the window first (stage_take_loop) so the take is about bars long
+    (refused when more than 2x off). Hits and knots go in its meta.beat_warp. To keep it on the song as it plays:
+    stage_actor_play(take=, loop=True, at_music=<the song second of its first frame>). Returns its id and where the
+    hits landed in grid units."""
+    from . import takesync
+    src = _take_dir(scene, take)
+    try:
+        tid, m, bw = takesync.warp(src, name, float(bpm), bars=int(bars), sub=float(sub))
+    except ValueError as e:
+        raise OpError(str(e))
+    snapped = len(bw['knots_src']) - 2
+    return (f"{tid}: {take} -> {bars} bars at {bpm} BPM ({m['seconds']} s, {m['frames']} frames at 30 Hz); "
+            f"{len(bw['hits_src_s'])} hits, {snapped} snapped; hits at grid units {bw['hits_on_grid_units']}")
+
+
 @op(mutates=True)
 def stage_actor_start(scene: str, person: str, pose: str | dict = 'rest', mode: str = 'relative', clear: bool = False,
                       idle: bool = True) -> str:
