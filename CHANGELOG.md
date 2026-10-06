@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+### Load sets: unload a group of the room, with a placeholder
+
+- `stage_set_define` names a group of the room (node names or globs, and people), `stage_set_load` unloads it or
+  loads it again, and `stage_sets` lists the sets and what they match. Saved in world.json (`sets`, `unloaded`), so
+  an unloaded set stays out across reloads. An unloaded set is hidden before the room is staged (no shader compile,
+  texture upload, draw or shadow), what only it used is freed on the GPU, its people neither play, follow nor rest,
+  and a ghost box per member with one label carrying the set's name stands in its place (two draw calls). Loading
+  brings it back a piece at a time. The page state carries `sets`.
+- A scene switch reads the new scene's world.json before its room is staged, not after (resting people and load sets
+  read it).
+
+### People rest in their start pose
+
+- A person with a start pose (`stage_actor_start`) stands in it whenever nothing plays on them, at load and after
+  every stop: their own body, posed once, with the statue baked into the scene hidden. `idle=False` keeps the statue.
+  Setting or clearing a start pose re-poses the resting person on an open page at once (page command `actor_rest`).
+  The six dancers had stood with their arms out since they were imported ("a pose to leave everything in").
+- The pose read-back of a take-frame start pose (with nothing playing) no longer fails.
 ### The first sketches: mastered, balanced, the first one first, said plainly (ledger:M148, M150, M151 S-1..S-5)
 
 - S-1 (M148): every sketch goes through a master stage for its style (a low cut, glue, mono low end, a limiter at
