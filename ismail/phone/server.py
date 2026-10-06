@@ -51,6 +51,22 @@ SR = 44100
 BLOCK = 2048                       # frames fed per step (46 ms)
 RING_S = 120.0                     # seconds of encoded stream kept for rewind and late joiners
 LEAD_S = 1.0                       # a live join starts this far back, so the phone's buffer fills at once
+BOOT = secrets.token_hex(4)        # this server run: a page that sees it change knows the server restarted
+
+
+def page_build():
+    """The page code this server serves: an open page that sees it change reloads itself when it is idle."""
+    import hashlib
+    h = hashlib.sha1()
+    for n in ('index.html', 'app.js', 'sw.js'):
+        try:
+            h.update((PAGE / n).read_bytes())
+        except OSError:
+            pass
+    return h.hexdigest()[:10]
+
+
+BUILD = page_build()
 IDLE_S = 60.0                      # an encoder with no listener for this long stops
 DUCK = 0.3                         # the music's gain under a spoken line
 KBPS = (64, 128)
@@ -647,7 +663,8 @@ class Phone:
                 'offers': self.view['offers'][-4:], 'listening': agents,
                 'voice': [{'id': k, 'state': v} for k, v in self.voice_state.items()],
                 'heard': self.heard(sid, t) if sid else {}, 'cmd': self.cmd_id,
-                'vibe': self.view['vibe'], 'into_s': self.into_s(), 'clock': time.strftime('%H:%M:%S')}
+                'vibe': self.view['vibe'], 'into_s': self.into_s(), 'clock': time.strftime('%H:%M:%S'),
+                'boot': BOOT, 'build': BUILD}
 
 
 def stt(audio, filename):
@@ -853,6 +870,12 @@ class Agent:
         ph.save()
         ph.cmd('vibe', vibe=v)
         return vibe.describe(v) + " (on the page now, fading over " + str(v['transition_ms']) + " ms)"
+
+    def op_restarting(self, back_in_s=5, why='updating'):
+        """Tell the open page the server is about to restart: it says so, then reconnects the stream at once."""
+        self.ph.cmd('restarting', back_in_s=float(back_in_s), why=str(why)[:80])
+        n = sum(x.listeners for x in self.ph.encoders.values())
+        return f"told the page ({n} on the stream)"
 
     def op_buzz(self, pattern=None, who=None):
         self.ph.cmd('buzz', pattern=pattern or [200, 100, 200])

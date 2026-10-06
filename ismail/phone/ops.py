@@ -1,5 +1,6 @@
 """phone_* ops: agents drive the phone page and read what the person sends from it (server.py says how it works)."""
 import json
+import re
 import os
 import subprocess
 import sys
@@ -116,6 +117,26 @@ def phone_stop() -> str:
     except OSError:
         pass
     return f'stopped the phone server (pid {pid})'
+
+
+@op()
+def phone_restart(why: str = 'updating', when_idle: bool = False) -> str:
+    """Restart the phone server (after a merge: it serves the new page code) without dropping the person: the page
+    is told first ("updating, back in a few seconds"), reconnects the stream as soon as the server answers, and
+    reloads itself into the new page code when it is next on screen and idle. when_idle=True restarts only when
+    nobody is on the stream (otherwise it says so and does nothing)."""
+    if _port() is None:
+        return phone_start()
+    st = _call('status', timeout=10)
+    m = re.match(r'phone server: (\d+) listening', st)
+    listening = int(m.group(1)) if m else 0
+    if when_idle and listening:
+        return f"not restarted: {listening} on the stream; try again later or without when_idle (the page reconnects)"
+    told = _call('restarting', back_in_s=5, why=why)
+    time.sleep(2.0)                                      # the page's long poll picks the notice up first
+    stopped = phone_stop()
+    started = phone_start()
+    return f"{told}; {stopped}; {started.splitlines()[0]}"
 
 
 @op()

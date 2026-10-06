@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### The phone server restarts without dropping the person; a stream that fell behind catches up
+
+- A restart after a merge dropped Nate's stream mid-set (10-06 08:38, "Why'd you stop?"), and a page whose command
+  count was past the new server's missed every command after it. `phone_restart()` tells the page first; the page
+  sees the server's boot change, starts its commands from 0, reconnects the stream at the live edge, and loads new
+  page code (`build`) when it is next on screen and idle.
+- The phone's player pauses on a weak network and carries on from there, so the delay grew (17 s, then 40 s). Past
+  15 s behind it now plays 8 % faster with the pitch kept until it is within 6 s; the Live key shows the delay.
+
 ### The phone page takes the music's vibe, and reads in time as well as bars (Nate, 10-06)
 
 - `phone_vibe`: an agent sets the page to fit the song (Nate: "change the colors ... how the headers look ... song

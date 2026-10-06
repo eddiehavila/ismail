@@ -78,6 +78,17 @@ in the bud, and a long press opens the phone's assistant). So, while a set plays
 
 Only `phone_listen` counts as listening on the page; watching the inbox file does not show them anyone is there.
 
+## Restarting the server
+
+After a change to the phone code, restart with `phone_restart()`, never `phone_stop` then `phone_start` by hand:
+the page is told first ("updating, back in a few seconds"), reconnects the stream as soon as the server answers,
+and loads the new page code the next time it is on screen and idle. A plain stop drops the person's stream mid-set
+(10-06: "Why'd you stop?"). `phone_restart(when_idle=True)` waits for nobody on the stream.
+
+A stream that fell behind the room (the phone's player pauses on a weak network and carries on from there) catches
+up by itself: past 15 s behind it plays 8 % faster, pitch kept, until it is within 6 s; the Live key shows how far
+behind it is.
+
 ## Set the page's vibe to the music
 
 The page is part of the performance, as the stage is in VR: set its look with the music so the person feels you
