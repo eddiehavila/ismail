@@ -318,8 +318,98 @@ function renderTaps() {
   $('mine').hidden = !ts.length;
   $('tally').textContent = Object.keys(tl).length ? 'today: ' + Object.entries(tl).map(([k, n]) => `${TAPWORD[k] || k} ${n}`).join(', ') : '';
   $('taps').innerHTML = ts.map((x) => `<div><time>${esc((x.ts || '').slice(11, 16))}</time><span>${x.what === 'mood' ? 'mood: ' + esc(x.mood) : esc(TAPWORD[x.what] || x.what)}`
-    + `${x.now ? ' <span class="me">during ' + esc(x.now) + '</span>' : x.of ? ' <span class="me">at ' + esc(x.of) + '</span>' : ''}</span></div>`).join('');
+    + `${x.now ? ' <span class="me">' + (clockMode && x.into_s != null ? mmss(x.into_s) + ' into ' : 'during ') + esc(x.now) + '</span>' : x.of ? ' <span class="me">at ' + esc(x.of) + '</span>' : ''}</span></div>`).join('');
 }
+let clockMode = store.get('clock', false), polledAt = Date.now();
+const mmss = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+function showInto() {                      // how far into the piece they are hearing, ticking between polls
+  const h = state.heard || {};
+  if (state.into_s == null) { $('heardcap').textContent = 'Into the piece'; $('bar').innerHTML = '<span>-:--</span>'; return; }
+  const s = Math.max(0, state.into_s + (Date.now() - polledAt) / 1000 - (want && h.behind_s ? h.behind_s : 0));
+  $('heardcap').textContent = 'Into the piece, ' + (state.clock || '').slice(0, 5);
+  $('bar').innerHTML = `${mmss(s)}<span> in</span>`;
+}
+setInterval(() => { if (clockMode) showInto(); }, 1000);
+function clockLabel() { $('clockset').textContent = clockMode ? 'Time' : 'Bars'; }
+clockLabel();
+$('clockset').onclick = () => { clockMode = !clockMode; store.set('clock', clockMode); clockLabel(); ev('setting', { clock: clockMode ? 'time' : 'bars' }); render(); };
+
+// ---- the vibe: an agent sets the page to fit the music (phone_vibe); the server checked it, the page applies it
+let vibeKey = '';
+const fontsLoaded = new Set();
+function applyVibe(v) {
+  if (!v || !v.css) return;
+  const k = JSON.stringify(v); if (k === vibeKey) return; vibeKey = k;
+  const root = document.documentElement.style;
+  root.setProperty('--vt', (v.transition_ms || 0) + 'ms');
+  Object.entries(v.css).forEach(([n, val]) => root.setProperty(n, val));
+  if (v.font_css && !fontsLoaded.has(v.font_css)) {
+    fontsLoaded.add(v.font_css); const l = document.createElement('link'); l.rel = 'stylesheet'; l.href = v.font_css; document.head.appendChild(l);
+  }
+  const meta = document.querySelector('meta[name=theme-color]'); if (meta) meta.content = v.css['--ground'];
+  const bg = $('bg');
+  if (v.image) { bg.style.backgroundImage = `url("${v.image}")`; bg.style.filter = `blur(${v.blur}px)`; bg.classList.add('on'); $('bgdim').style.opacity = v.dim; }
+  else { bg.classList.remove('on'); $('bgdim').style.opacity = 0; }
+  fx.set(v.effect, v.intensity, v.css['--accent'], v.css['--ink']);
+}
+// one ambient effect on a canvas behind the page; still while hidden, and for anyone who asked for less motion
+const fx = (() => {
+  const cv = $('fx'), cx = cv.getContext('2d');
+  let kind = 'none', amt = 0.5, acc = '#ffffff', ink = '#ffffff', raf = 0, last = 0, parts = [], W = 0, H = 0, dpr = 1;
+  const still = matchMedia('(prefers-reduced-motion: reduce)');
+  function size() {
+    dpr = Math.min(2, window.devicePixelRatio || 1); W = window.innerWidth; H = window.innerHeight;
+    cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); cv.style.width = W + 'px'; cv.style.height = H + 'px';
+  }
+  function seed() {
+    const n = Math.round((kind === 'rain' ? 140 : kind === 'particles' ? 70 : 3) * (0.3 + amt));
+    parts = Array.from({ length: n }, () => ({ x: Math.random() * W, y: Math.random() * H, v: 0.4 + Math.random(), r: Math.random() }));
+  }
+  function frame(t) {
+    raf = 0;
+    if (document.visibilityState !== 'visible' || kind === 'none') return;
+    raf = requestAnimationFrame(frame);
+    if (t - last < 33) return;                                       // about 30 frames a second is plenty
+    const dt = Math.min(0.1, (t - last) / 1000); last = t;
+    cx.setTransform(dpr, 0, 0, dpr, 0, 0); cx.clearRect(0, 0, W, H);
+    const a = 0.15 + amt * 0.5;
+    if (kind === 'rain') {
+      cx.strokeStyle = ink; cx.lineWidth = 1; cx.globalAlpha = a * 0.5; cx.beginPath();
+      for (const p of parts) { p.y += (500 + p.v * 500) * dt; p.x += 60 * dt; if (p.y > H) { p.y = -20; p.x = Math.random() * W; } cx.moveTo(p.x, p.y); cx.lineTo(p.x - 3, p.y - 14 - p.v * 8); }
+      cx.stroke();
+    } else if (kind === 'particles') {
+      cx.fillStyle = acc;
+      for (const p of parts) { p.y -= p.v * 8 * dt; p.x += Math.sin(t / 3000 + p.r * 6) * 6 * dt; if (p.y < -4) { p.y = H + 4; p.x = Math.random() * W; }
+        cx.globalAlpha = a * (0.4 + 0.6 * Math.abs(Math.sin(t / 900 + p.r * 9))); cx.beginPath(); cx.arc(p.x, p.y, 1 + p.r * 1.6, 0, 6.283); cx.fill(); }
+    } else if (kind === 'pulse') {
+      const bpm = (state.engine && state.engine.bpm) || 120, ph = ((t / 1000) * bpm / 60) % 1;
+      const k = Math.exp(-ph * 5), g = cx.createRadialGradient(W / 2, H + 40, 10, W / 2, H + 40, H * (0.55 + 0.25 * k));
+      g.addColorStop(0, acc); g.addColorStop(1, 'transparent'); cx.globalAlpha = a * (0.25 + 0.75 * k); cx.fillStyle = g; cx.fillRect(0, 0, W, H);
+    } else if (kind === 'grain') {
+      cx.fillStyle = ink; cx.globalAlpha = a * 0.35;
+      for (let i = 0; i < 900 * (0.3 + amt); i++) cx.fillRect(Math.random() * W, Math.random() * H, 1, 1);
+    } else if (kind === 'aurora') {
+      parts.forEach((p, i) => {
+        const x = W * (0.5 + 0.4 * Math.sin(t / (9000 + i * 2300) + p.r * 6)), y = H * (0.3 + 0.3 * Math.cos(t / (11000 + i * 1700) + p.r * 4));
+        const g = cx.createRadialGradient(x, y, 0, x, y, Math.max(W, H) * 0.6); g.addColorStop(0, i === 1 ? ink : acc); g.addColorStop(1, 'transparent');
+        cx.globalAlpha = a * (i === 1 ? 0.12 : 0.3); cx.fillStyle = g; cx.fillRect(0, 0, W, H);
+      });
+    }
+    cx.globalAlpha = 1;
+  }
+  function go() { if (!raf && kind !== 'none' && !still.matches && document.visibilityState === 'visible') raf = requestAnimationFrame(frame); }
+  window.addEventListener('resize', () => { size(); seed(); });
+  document.addEventListener('visibilitychange', go);
+  return {
+    set(k, i, a, n) {
+      kind = k || 'none'; amt = i == null ? 0.5 : i; acc = a || acc; ink = n || ink; size(); seed();
+      if (kind === 'none' || still.matches) { if (raf) cancelAnimationFrame(raf); raf = 0; cx.clearRect(0, 0, cv.width, cv.height); return; }
+      go();
+    },
+    get kind() { return kind; },
+  };
+})();
+
 const feedItems = [];
 function addFeed(it) { feedItems.unshift(it); feedItems.splice(12); renderFeed(); }
 function renderFeed() {
@@ -393,7 +483,10 @@ function render() {
   $('rec').classList.toggle('on', !!r.on);
   $('rectext').innerHTML = (r.on ? 'ON AIR' : 'REC OFF') + (r.why ? ` <small>${esc(r.why)}</small>` : '');
   const m = /bar (\d+)(?: beat ([\d.]+))?/.exec(h.of || '');
-  $('bar').innerHTML = m ? `BAR ${m[1]}<span>.${esc(Math.floor(+(m[2] || 1)))}</span>` : 'BAR <span>---</span>';
+  polledAt = Date.now();
+  if (clockMode) showInto();
+  else { $('heardcap').textContent = 'Heard'; $('bar').innerHTML = m ? `BAR ${m[1]}<span>.${esc(Math.floor(+(m[2] || 1)))}</span>` : 'BAR <span>---</span>'; }
+  applyVibe(state.vibe);
   $('behind').textContent = want && h.behind_s != null ? '+' + h.behind_s.toFixed(1) + ' s' : '--';
   $('now').textContent = e.now || (e.playing ? 'playing' : 'nothing playing');
   $('next').textContent = e.next || '--';

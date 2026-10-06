@@ -231,6 +231,24 @@ def phone_buttons(buttons: list = None, sender: str = None) -> str:
 
 
 @op()
+def phone_vibe(preset: str = None, ground: str = None, ink: str = None, accent: str = None, heading: str = None,
+               image: str = None, blur: int = None, dim: float = None, effect: str = None, intensity: float = None,
+               transition_ms: int = None, reset: bool = False, menu: bool = False, sender: str = None) -> str:
+    """Set the phone page's look to fit the music, so the person feels you there (as the stage does in VR): change it
+    with the mood, on chapter changes. preset: a starting point (default, rain, calm, warm, night, peak), then any
+    part over it. ground/ink/accent: colours ('#rrggbb', 'rgb(r g b)', 'hsl(h s% l%)'); the ground stays dark, ink
+    on ground 7:1 and accent 3:1 or it is refused with what to change. heading: the face of the titles (archivo,
+    fraunces, playfair, cormorant, space grotesk, syne, unbounded, bebas, major mono). image: a picture file (a cover,
+    a Blender still, art another agent made) behind the page, blurred by `blur` px (0-40) and darkened by `dim`
+    (0.2-0.9); '' removes it. effect: none, rain, particles, pulse (breathes on the set's beat), grain, aurora, at
+    `intensity` 0-1. Changes fade over transition_ms. reset=True starts from the default skin; menu=True lists the
+    presets, faces and effects and the current vibe."""
+    return _call('vibe', preset=preset, ground=ground, ink=ink, accent=accent, heading=heading, image=image, blur=blur,
+                 dim=dim, effect=effect, intensity=intensity, transition_ms=transition_ms, reset=reset or None,
+                 menu=menu or None, who=sender)
+
+
+@op()
 def phone_buzz(pattern: list = None) -> str:
     """Vibrate the phone (if the page is open): pattern in ms, e.g. [200, 100, 200]."""
     return _call('buzz', pattern=pattern)

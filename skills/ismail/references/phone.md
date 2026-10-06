@@ -78,6 +78,22 @@ in the bud, and a long press opens the phone's assistant). So, while a set plays
 
 Only `phone_listen` counts as listening on the page; watching the inbox file does not show them anyone is there.
 
+## Set the page's vibe to the music
+
+The page is part of the performance, as the stage is in VR: set its look with the music so the person feels you
+there. `phone_vibe(preset=)` starts from rain, calm, warm, night or peak (or default), then any part over it:
+ground, ink and accent colours, the face of the titles (`heading`), an art layer (`image=`: a cover, a Blender
+still, art another agent made, blurred by `blur` and darkened by `dim`) and one ambient effect (rain, particles,
+pulse on the set's beat, grain, aurora) at an `intensity`. Change it with the mood and on chapter changes, not on
+every bar; it fades over `transition_ms`. The server keeps every vibe readable on a walk (a dark ground, ink 7:1,
+accent 3:1) and refuses one that is not, saying what to change. `phone_vibe(menu=True)` lists the choices.
+
+## Bars or time
+
+Every line from the page carries `into_s` (seconds into the piece) beside the bar, and the page has a Bars/Time
+switch: in Time it reads "2:31 in" with the clock. Someone listening casually talks in time ("that bit at two
+minutes"); answer in their unit, and say bars only to someone who works in bars.
+
 ## The phone session is a take
 
 Like a VR take, the page reports what they do on it, timed: opened (which device, installed or in the browser),

@@ -38,6 +38,12 @@ from pathlib import Path
 
 import numpy as np
 
+try:                                       # a package module in ismail; a plain script when phone_start runs it
+    from . import vibe
+except ImportError:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import vibe
+
 HOME = Path(os.environ.get('ISMAIL_PHONE_HOME') or Path.home() / '.ismail' / 'phone')
 PAGE = Path(__file__).resolve().parent / 'page'
 SPEAK = os.environ.get('ISMAIL_SPEAK') or 'http://127.0.0.1:8765'
@@ -202,6 +208,13 @@ class Phone:
         except NameError:
             pass
         self.taps = collections.deque(self._recent_taps(), maxlen=60)   # what they loved and asked for, newest last
+        self.piece = (None, time.time())
+        try:
+            self.view['vibe'] = vibe.resolve(saved.get('vibe') or {})
+            if saved.get('vibe', {}).get('image'):
+                self.view['vibe'].update({k: saved['vibe'][k] for k in ('image', 'image_name') if k in saved['vibe']})
+        except (ValueError, TypeError):
+            self.view['vibe'] = vibe.resolve({})
         self.files = {k: Path(v) for k, v in (saved.get('files') or {}).items()}   # token -> path (only what an op offered is served); a panel
                                                       # or exam left open survives a restart with its clips
         self.page_seen = 0.0                       # the last time an open page asked for its state
@@ -249,11 +262,22 @@ class Phone:
     @staticmethod
     def _tap_item(r):
         return {'ts': r.get('ts'), 'what': r.get('what') or 'mood', 'mood': r.get('mood'),
-                'of': (r.get('heard') or {}).get('of'), 'now': r.get('now')}
+                'of': (r.get('heard') or {}).get('of') or (r.get('room') or {}).get('of'), 'now': r.get('now'),
+                'into_s': r.get('into_s')}
 
     def now_text(self):
         e = self.engine
-        return self.view['now'] or (', '.join(e['playing']) if e and e['playing'] else None)
+        t = self.view['now'] or (', '.join(e['playing']) if e and e['playing'] else None)
+        if t != self.piece[0]:
+            self.piece = (t, time.time())          # when this piece began (for "2:31 into it", Nate 10-06 08:24)
+        return t
+
+    def into_s(self, age_s=0.0):
+        """Seconds into the piece playing now (or age_s ago), from when it began; None when nothing names it."""
+        self.now_text()
+        if not self.piece[0]:
+            return None
+        return round(max(0.0, time.time() - age_s - self.piece[1]), 1)
 
     def mark(self, text):
         """How a piece stands with them: the DJ's mark (phone_now now_mark/next_mark), else 'loved' when they tapped
@@ -288,6 +312,7 @@ class Phone:
         if 'heard' in rec:                                   # from the page: where the set was, on one clock
             rec.setdefault('room', self.room(age))
             rec.setdefault('now', self.now_text())
+            rec.setdefault('into_s', self.into_s(age))       # and how far into that piece, in seconds
         with self.cond:
             self.seq += 1
             rec = {'n': self.seq, 'ts': now_iso(time.time() - age), **rec}
@@ -347,7 +372,8 @@ class Phone:
 
     def save(self):
         try:
-            st = {k: self.view[k] for k in ('now', 'next', 'rec_why', 'mood', 'buttons', 'pinned', 'marks', 'panels')}
+            st = {k: self.view[k] for k in ('now', 'next', 'rec_why', 'mood', 'buttons', 'pinned', 'marks', 'panels',
+                                            'vibe')}
             st['files'] = {k: str(v) for k, v in self.files.items()}
             (HOME / 'state.json').write_text(json.dumps(st), encoding='utf8')
         except OSError:
@@ -620,7 +646,8 @@ class Phone:
                 'pinned': self.view['pinned'], 'buttons': self.view['buttons'], 'panels': self.view['panels'],
                 'offers': self.view['offers'][-4:], 'listening': agents,
                 'voice': [{'id': k, 'state': v} for k, v in self.voice_state.items()],
-                'heard': self.heard(sid, t) if sid else {}, 'cmd': self.cmd_id}
+                'heard': self.heard(sid, t) if sid else {}, 'cmd': self.cmd_id,
+                'vibe': self.view['vibe'], 'into_s': self.into_s(), 'clock': time.strftime('%H:%M:%S')}
 
 
 def stt(audio, filename):
@@ -801,6 +828,32 @@ class Agent:
         self.ph.cmd('view')
         return f"buttons on the phone: {[b['label'] for b in bs] or 'none'}; a tap arrives as kind 'button'"
 
+    def op_vibe(self, preset=None, ground=None, ink=None, accent=None, heading=None, image=None, blur=None, dim=None,
+                effect=None, intensity=None, transition_ms=None, reset=False, menu=False, who=None):
+        ph = self.ph
+        if menu:
+            return vibe.menu() + '\n' + vibe.describe(ph.view['vibe'])
+        if preset is not None and preset not in vibe.PRESETS:
+            raise ValueError(f"preset {preset!r}: one of {sorted(vibe.PRESETS)} (or set the parts yourself)")
+        cur = {} if reset else {k: v for k, v in ph.view['vibe'].items() if k in vibe.DEFAULT}
+        if preset:
+            cur.update({k: v for k, v in vibe.DEFAULT.items() if k not in ('image', 'blur', 'dim')})
+            cur.update(vibe.PRESETS[preset])
+        for k, v in (('ground', ground), ('ink', ink), ('accent', accent), ('heading', heading), ('blur', blur),
+                     ('dim', dim), ('effect', effect), ('intensity', intensity), ('transition_ms', transition_ms)):
+            if v is not None:
+                cur[k] = v
+        name = ph.view['vibe'].get('image_name')
+        if image is not None:
+            cur['image'] = '/files/' + ph.offer_file(image) if image else None
+            name = Path(image).name if image else None
+        v = vibe.resolve(cur)
+        v['image_name'] = name if v.get('image') else None
+        ph.view['vibe'] = v
+        ph.save()
+        ph.cmd('vibe', vibe=v)
+        return vibe.describe(v) + " (on the page now, fading over " + str(v['transition_ms']) + " ms)"
+
     def op_buzz(self, pattern=None, who=None):
         self.ph.cmd('buzz', pattern=pattern or [200, 100, 200])
         return 'buzzed (if the page is open)'
@@ -836,6 +889,8 @@ class Agent:
                 piece = r['now']
                 L.append(f"            -- {piece}")
             where = (r.get('room') or {}).get('of') or ''
+            if r.get('into_s') is not None:
+                where += f" {int(r['into_s'] // 60)}:{int(r['into_s'] % 60):02d} in"
             h = (r.get('heard') or {}).get('of')
             if h and h != where:
                 where += f" (phone heard {h})"
