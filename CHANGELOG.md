@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Docs: where the machine board lives; 207 tools (S54, hq:D-30)
+
+- setup.md and development.md say the board follows `ISMAIL_SONGS` (`<ISMAIL_SONGS>/_machine`, or
+  `ISMAIL_MACHINE_DIR`): right for a stranger, a trap for a test on a shared machine (first-run dress rehearsal 2).
+- The README counts 207 MCP tools (82 `stage_*`).
+
 ### The governor holds a run to its threads and pauses a job far past its memory (ledger:M153, M154, hq:D-30)
 
 - `machine run` pins its command to as many cores as its threads (the highest cores no other job holds; children
