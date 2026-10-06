@@ -28,6 +28,25 @@ function connect(back) {
     if (want) setTimeout(() => want && connect(), backoff());
   });
 }
+// The two big keys show their state with an icon as well as a word (Nate 10-06 09:59)
+const KEYSVG = {
+  play: 'M7 5 19 12 7 19Z',                                         // Listen
+  stop: 'M7 7h10v10H7Z',                                            // playing: tap to stop
+  wait: 'M20 12a8 8 0 1 1-2.3-5.7M20 4v4h-4',                       // reconnecting or buffering
+  resume: 'M7 5 19 12 7 19ZM3 5v14',                                // the phone wants a tap first
+  mic: 'M9 3h6v10H9ZM5 11v1a7 7 0 0 0 14 0v-1M12 19v3M8 22h8',      // hold to talk
+  talking: 'M9 3h6v10H9ZM5 11v1a7 7 0 0 0 14 0v-1M12 19v3M8 22h8M1 8v6M23 8v6',
+  sending: 'M12 21V6M6 12l6-6 6 6M4 3h16',                          // the note is on its way
+  sent: 'M4 12l5 5L20 6',                                           // it arrived
+  blocked: 'M9 3h6v10H9ZM5 11v1a7 7 0 0 0 14 0v-1M12 19v3M3 3l18 18',  // the microphone is blocked or offline
+};
+function keyState(id, icon, label, cls) {
+  const b = $(id); if (!b) return;
+  b.querySelector('svg').innerHTML = `<path d="${KEYSVG[icon]}"/>`;
+  b.querySelector('.kl').textContent = label;
+  b.classList.remove('wait', 'sending', 'sent');
+  if (cls) b.classList.add(cls);
+}
 // A page that reloads (the phone dropped it while locked, or it was reopened) forgets it was listening and the set
 // goes quiet with nobody told (2026-10-06, a walk). It remembers, picks the stream back up when the phone allows, and
 // otherwise asks for one tap.
@@ -35,7 +54,7 @@ function remember() { store.set('listening', want ? Date.now() : 0); }
 function asleep() {
   ev('resume_asked');
   want = false; sid = null;
-  $('play').textContent = 'Resume'; $('play').classList.remove('on');
+  keyState('play', 'resume', 'Resume'); $('play').classList.remove('on');
   toast('the set is still playing: tap Resume to hear it'); buzz([80, 60, 80]);
 }
 function backoff() { retry = Math.min(retry + 1, 6); return 1000 * 2 ** (retry - 1); }
@@ -43,7 +62,7 @@ function setPlaying(on) {
   if (on !== want) ev(on ? 'listen' : 'stop');
   want = on;
   if (on) connect(); else { audio.pause(); audio.removeAttribute('src'); audio.load(); sid = null; }
-  $('play').textContent = on ? 'Stop' : 'Listen'; $('play').classList.toggle('on', on);
+  keyState('play', on ? 'wait' : 'play', on ? 'Stop' : 'Listen', on ? 'wait' : null); $('play').classList.toggle('on', on);
   if ('mediaSession' in navigator) navigator.mediaSession.playbackState = on ? 'playing' : 'paused';
   remember();
 }
@@ -51,6 +70,8 @@ $('play').onclick = () => { setPlaying(!want); if (want && keysOn) armMic(); };
 $('golive').onclick = () => { if (!want) return setPlaying(true); connect(0); toast('back to live'); };
 $('back').onclick = () => { want = true; connect(30); send('/api/tap', { what: 'rewind' }, true); toast('30 s back'); };
 ['error', 'ended'].forEach((ev) => audio.addEventListener(ev, () => { if (want) setTimeout(() => want && connect(), backoff()); }));
+audio.addEventListener('playing', () => { if (want) keyState('play', 'stop', 'Stop'); });
+['waiting', 'stalled'].forEach((x) => audio.addEventListener(x, () => { if (want) keyState('play', 'wait', 'Stop', 'wait'); }));
 audio.addEventListener('timeupdate', () => { if (audio.currentTime > lastT + 0.2) { lastT = audio.currentTime; lastAdvance = Date.now(); } });
 setInterval(() => {                     // a stream that stops moving reconnects (wifi dropped, server restarted)
   if (want && !clip.el && Date.now() - lastAdvance > 12000) { lastAdvance = Date.now(); $('livetext').textContent = 'reconnecting'; connect(); }
@@ -207,7 +228,7 @@ async function micStart() {
   if (talk.rec) return;
   try {
     talk.stream = talk.stream || await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
-  } catch (e) { toast('the microphone is blocked: allow it for this page'); return; }
+  } catch (e) { toast('the microphone is blocked: allow it for this page'); keyState('talk', 'blocked', 'Mic blocked'); return; }
   const mime = ['audio/webm;codecs=opus', 'audio/ogg;codecs=opus', 'audio/mp4'].find((m) => window.MediaRecorder && MediaRecorder.isTypeSupported(m)) || '';
   talk.chunks = []; talk.t = heardNow(); talk.sid = sid; talk.started = Date.now(); talk.end = 'press';
   ev('note_start');
@@ -215,7 +236,7 @@ async function micStart() {
   talk.rec.ondataavailable = (e) => { if (e.data.size) talk.chunks.push(e.data); };
   talk.rec.start(250);
   audio.volume = 0.25;
-  $('talk').classList.add('on'); $('talk').firstChild.textContent = 'Talking'; buzz([30]);
+  $('talk').classList.add('on'); keyState('talk', 'talking', 'Talking'); buzz([30]);
   meterStart(talk.stream);
   cue('start');
   // Nate 10-06: "the voice recording should not cut me off" (it stopped at 60 s mid-sentence). A note now runs as long
@@ -239,7 +260,7 @@ const NOTE_QUIET_MS = 30000, NOTE_MAX_MS = 10 * 60000;
 function micStop(sendIt) {
   const r = talk.rec; if (!r) return;
   talk.rec = null; talk.toggle = false;
-  $('talk').classList.remove('on'); $('talk').firstChild.textContent = 'Hold to talk'; audio.volume = 1;
+  $('talk').classList.remove('on'); keyState('talk', sendIt ? 'sending' : 'mic', sendIt ? 'Sending' : 'Hold to talk', sendIt ? 'sending' : null); audio.volume = 1;
   $('talkhint').textContent = 'tap once for hands-free, tap again to send';
   meterStop();
   clearTimeout(noteTimer); clearInterval(talk.quietT); cue('end');
@@ -248,7 +269,7 @@ function micStop(sendIt) {
   r.onstop = () => {
     const blob = new Blob(talk.chunks, { type: r.mimeType || 'audio/webm' });
     if (sendIt && blob.size > 1500) upload(blob, talk.sid, talk.t, dur, endBy);
-    else if (sendIt) toast('too short: hold a little longer');
+    else if (sendIt) { toast('too short: hold a little longer'); keyState('talk', 'mic', 'Hold to talk'); }
   };
   r.stop();
 }
@@ -286,8 +307,10 @@ async function upload(blob, s, t, dur, endBy) {
     if (!r.ok) throw new Error(j.error);
     addFeed({ me: true, id: j.id, ts: new Date().toTimeString().slice(0, 5), text: 'voice note' + (j.heard && j.heard.of ? ' at ' + j.heard.of : '') + ', transcribing' });
     toast('sent'); buzz([30, 60, 30]); setTimeout(() => cue('sent'), 350);
+    if (!talk.rec) { keyState('talk', 'sent', 'Sent', 'sent'); setTimeout(() => { if (!talk.rec) keyState('talk', 'mic', 'Hold to talk'); }, 1400); }
   } catch (e) {
     pending.push([blob, s, t, dur, endBy]); toast('offline: the note waits and sends when you are back'); cue('error');
+    if (!talk.rec) keyState('talk', 'blocked', 'Waiting to send');
   }
 }
 setInterval(() => { if (navigator.onLine && pending.length) { const p = pending.splice(0); p.forEach((x) => upload(...x)); } if (outbox.length) flush(); }, 8000);
@@ -339,7 +362,29 @@ function showInto() {                      // how far into the piece they are he
   $('heardcap').textContent = 'Into the piece, ' + (state.clock || '').slice(0, 5);
   $('bar').innerHTML = `${mmss(s)}<span> in</span>`;
 }
-setInterval(() => { if (clockMode) showInto(); }, 1000);
+setInterval(() => { if (clockMode) showInto(); showPos(); }, 1000);
+// Nate 10-06 09:12: "something that's always on screen ... that shows where we are in the song". The DJ sends the
+// piece's length and sections with phone_now; the line runs between polls, in time or bars like the counter.
+let posKey = '';
+function showPos() {
+  const sh = state.shape || {}, len = sh.length_s, e = state.engine || {}, h = state.heard || {};
+  const ok = len && state.into_s != null && sh.of && sh.of === e.now;
+  $('pos').hidden = !ok; if (!ok) return;
+  const s = Math.min(len, Math.max(0, state.into_s + (Date.now() - polledAt) / 1000 - (want && h.behind_s ? h.behind_s : 0)));
+  const bars = (x) => Math.floor(x * (e.bpm || 120) / 240) + 1;
+  const fmt = (x) => clockMode ? mmss(x) : 'bar ' + bars(x);
+  const secs = sh.sections || [];
+  const k = JSON.stringify([sh.of, len, secs]);
+  if (k !== posKey) {
+    posKey = k;
+    $('postrack').querySelectorAll('b').forEach((b) => b.remove());
+    secs.forEach((x) => { if (x.at_s > 0 && x.at_s < len) { const b = document.createElement('b'); b.style.left = (100 * x.at_s / len) + '%'; b.title = x.label; $('postrack').appendChild(b); } });
+  }
+  $('posfill').style.width = (100 * s / len) + '%';
+  const cur = secs.filter((x) => x.at_s <= s).pop(), nx = secs.find((x) => x.at_s > s);
+  $('poselapsed').textContent = `${fmt(s)} / ${fmt(len)}` + (cur && cur.label ? ` · ${cur.label}` : '');
+  $('posnext').textContent = nx ? `${nx.label || 'next'} in ${mmss(nx.at_s - s)}` : `ends in ${mmss(len - s)}`;
+}
 function clockLabel() { $('clockset').textContent = clockMode ? 'Time' : 'Bars'; }
 clockLabel();
 $('clockset').onclick = () => { clockMode = !clockMode; store.set('clock', clockMode); clockLabel(); ev('setting', { clock: clockMode ? 'time' : 'bars' }); render(); };
@@ -496,7 +541,7 @@ function render() {
   polledAt = Date.now();
   if (clockMode) showInto();
   else { $('heardcap').textContent = 'Heard'; $('bar').innerHTML = m ? `BAR ${m[1]}<span>.${esc(Math.floor(+(m[2] || 1)))}</span>` : 'BAR <span>---</span>'; }
-  applyVibe(state.vibe);
+  applyVibe(state.vibe); showPos();
   $('behind').textContent = want && h.behind_s != null ? '+' + h.behind_s.toFixed(1) + ' s' : '--';
   catchUp(h.behind_s);
   $('now').textContent = e.now || (e.playing ? 'playing' : 'nothing playing');
@@ -597,4 +642,5 @@ async function notifyBg(title, body) {
   if (!notifyOn || document.visibilityState === 'visible') return;
   try { const r = await navigator.serviceWorker.ready; r.showNotification(title, { body, tag: 'ismail', renotify: true, icon: 'icon-192.png', badge: 'icon-192.png' }); } catch (e) {}
 }
+keyState('play', 'play', 'Listen'); keyState('talk', 'mic', 'Hold to talk');
 poll();

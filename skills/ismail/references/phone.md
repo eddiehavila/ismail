@@ -123,6 +123,10 @@ actions out unless you pass `page=True`, so a scroll never wakes you. All of it 
   `now_mark=` / `next_mark=`: 'loved' (one they loved before, played again), 'replay' (played earlier, back
   again) or 'new' (just made). A small mark sits beside it; without one, the page shows a heart when they tapped
   Love this while that piece played.
+- The piece's shape: `phone_now(length=<seconds>, sections=[{'at_s': 0, 'label': 'intro'}, {'at_s': 64, 'label':
+  'drop'}], into=<seconds in, if it started before its name went up>)` on every chapter change. The page keeps a
+  position line on screen under now/next (elapsed / length, the section, the next one and when), in time or bars as
+  they chose. Send it from the chapter's form map; without a length the line hides.
 - What they tapped is kept: the page lists their taps and moods with the time and the piece that played, and
   today's count (it survives a reload and a server restart). The keys are momentary: a press sends, lights SENT,
   and the key is plain again.
@@ -137,7 +141,10 @@ actions out unless you pass `page=True`, so a scroll never wakes you. All of it 
   stage_panel_show shape). Either one with `wait=N` blocks for the answer.
 - `phone_exam(title, clips, question, chips, choices, answers_path)`: a blind exam. Label the clips blind (A, B). The
   live stream pauses while a clip plays. Submit writes to `answers_path`, so no "done" is needed.
-- `phone_offer(path, auto=True)`: a download (a render, a take, a PDF).
+- `phone_offer(path, label=, auto=True)`: a download (a render, a take, a PDF). The label is the card and the file's
+  name, so write it for a person ("Clair de lune, rain bed (highlight)"), not a slug. An mp3 goes out as a tagged copy:
+  title, artist, album (`title=`, `artist=`, `album=`), the date, and ismail with its GitHub link (provenance travels
+  with the file; their own file is never changed). Every mp3 `render` writes is tagged the same way.
 - `phone_buttons([...])`: your own buttons, as data, for this moment of the set ("darker", "drop it now"). Clear
   them when the moment passes.
 - `phone_buzz()`, `phone_status()` (who listens, the bar they hear, how far behind the room), `phone_stop()`.

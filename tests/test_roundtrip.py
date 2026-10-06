@@ -149,6 +149,9 @@ def test_render_mp3(proj):
     rd = os.path.join(proj, 'renders')
     assert 'preview.mp3' in txt and os.path.getsize(os.path.join(rd, 'preview.mp3')) > 1000
     assert not os.path.exists(os.path.join(rd, 'preview.wav'))
+    from ismail import tags                       # every mp3 ismail writes says what it is and that ismail made it
+    t = tags.read_tags(os.path.join(rd, 'preview.mp3'))
+    assert t['title'].endswith('(preview)') and t['url'] == tags.HOME_URL and 'Made with ismail' in t['comment']
 
 
 @pytest.mark.parametrize('name, vel', [('grand_piano', 90), ('additive_piano', 90), ('growl', 21), ('sfx', 10)])

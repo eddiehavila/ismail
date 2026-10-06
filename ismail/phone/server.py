@@ -40,9 +40,12 @@ import numpy as np
 
 try:                                       # a package module in ismail; a plain script when phone_start runs it
     from . import vibe
+    from .. import tags
 except ImportError:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     import vibe
+    import tags
 
 HOME = Path(os.environ.get('ISMAIL_PHONE_HOME') or Path.home() / '.ismail' / 'phone')
 PAGE = Path(__file__).resolve().parent / 'page'
@@ -84,6 +87,13 @@ VOICE_CMDS = [(r'stop (?:listening|the stream|streaming)', 'stop_listening'), (r
               (r'resume the set', 'resume')]
 STATUS = re.compile(r'live ([\d.]+) BPM (\d+)/4 \| heard bar (\d+)(?: beat ([\d.]+))? \((\d+) s\) \| '
                     r'mixed ahead ([\d.]+) s')
+
+
+def readable_name(text):
+    """A file name a person can read: the label's words, no slashes or odd characters (a download is named this)."""
+    s = re.sub(r'[\\/:*?"<>|]+', ' ', str(text)).replace('_', ' ')
+    s = re.sub(r'\s+', ' ', s).strip(' .')[:80]
+    return s or 'ismail'
 
 
 def now_iso(at=None):
@@ -214,8 +224,8 @@ class Phone:
         saved = {}
         try:
             saved = json.loads((HOME / 'state.json').read_text(encoding='utf8'))
-            self.view.update({k: saved[k] for k in ('now', 'next', 'rec_why', 'mood', 'buttons', 'pinned', 'panels')
-                              if k in saved})
+            self.view.update({k: saved[k] for k in ('now', 'next', 'rec_why', 'mood', 'buttons', 'pinned', 'panels',
+                                                    'shape') if k in saved and saved[k] is not None})
         except (OSError, ValueError):
             pass
         self.view.setdefault('marks', {})         # piece text -> 'loved' | 'replay' | 'new' (the DJ's, phone_now)
@@ -224,7 +234,7 @@ class Phone:
         except NameError:
             pass
         self.taps = collections.deque(self._recent_taps(), maxlen=60)   # what they loved and asked for, newest last
-        self.piece = (None, time.time())
+        self.piece = tuple(saved.get('piece') or (None, time.time()))   # when the playing piece began (M139)
         try:
             self.view['vibe'] = vibe.resolve(saved.get('vibe') or {})
             if saved.get('vibe', {}).get('image'):
@@ -286,6 +296,9 @@ class Phone:
         t = self.view['now'] or (', '.join(e['playing']) if e and e['playing'] else None)
         if t != self.piece[0]:
             self.piece = (t, time.time())          # when this piece began (for "2:31 into it", Nate 10-06 08:24)
+            if self.view.get('shape', {}).get('of') != t:
+                self.view['shape'] = {}            # a new piece: its length and sections come with its phone_now
+            self.save()
         return t
 
     def into_s(self, age_s=0.0):
@@ -388,8 +401,9 @@ class Phone:
 
     def save(self):
         try:
-            st = {k: self.view[k] for k in ('now', 'next', 'rec_why', 'mood', 'buttons', 'pinned', 'marks', 'panels',
-                                            'vibe')}
+            st = {k: self.view.get(k) for k in ('now', 'next', 'rec_why', 'mood', 'buttons', 'pinned', 'marks',
+                                                'panels', 'vibe', 'shape')}
+            st['piece'] = list(self.piece)
             st['files'] = {k: str(v) for k, v in self.files.items()}
             (HOME / 'state.json').write_text(json.dumps(st), encoding='utf8')
         except OSError:
@@ -664,6 +678,7 @@ class Phone:
                 'voice': [{'id': k, 'state': v} for k, v in self.voice_state.items()],
                 'heard': self.heard(sid, t) if sid else {}, 'cmd': self.cmd_id,
                 'vibe': self.view['vibe'], 'into_s': self.into_s(), 'clock': time.strftime('%H:%M:%S'),
+                'shape': self.view.get('shape') or {},
                 'boot': BOOT, 'build': BUILD}
 
 
@@ -750,7 +765,8 @@ class Agent:
                 out += f" (not spoken: the speech server does not answer: {e})"
         return out
 
-    def op_now(self, now=None, next=None, recording_why=None, mood=None, now_mark=None, next_mark=None, who=None):
+    def op_now(self, now=None, next=None, recording_why=None, mood=None, now_mark=None, next_mark=None, length=None,
+               sections=None, into=None, who=None):
         v, ph = self.ph.view, self.ph
         for k, val in (('now', now), ('next', next), ('rec_why', recording_why), ('mood', mood)):
             if val is not None:
@@ -766,6 +782,17 @@ class Agent:
                 v['marks'].pop(text, None)
         while len(v['marks']) > 200:
             v['marks'].pop(next(iter(v['marks'])))
+        t = ph.now_text()
+        if into is not None and t:                  # the piece did not start when its name went up: say where it is
+            ph.piece = (t, time.time() - max(0.0, float(into)))
+        if length is not None or sections is not None:
+            sh = v['shape'] if v.get('shape', {}).get('of') == t else {'of': t}
+            if length is not None:
+                sh['length_s'] = round(max(0.0, float(length)), 1)
+            if sections is not None:
+                sh['sections'] = sorted(({'at_s': round(float(s['at_s']), 1), 'label': str(s.get('label') or s.get('name') or '')[:40]}
+                                         for s in sections), key=lambda s: s['at_s'])[:24]
+            v['shape'] = sh
         ph.save()
         ph.cmd('view')
         return (f"now={v['now']!r} ({ph.mark(ph.now_text()) or 'no mark'}) next={v['next']!r} "
@@ -827,10 +854,24 @@ class Agent:
              'who': who}
         return self._panel(p, wait)
 
-    def op_offer(self, path, label=None, auto=False, who=None):
-        k = self.ph.offer_file(path)
-        o = {'url': '/files/' + k, 'name': Path(path).name, 'label': label or Path(path).name, 'auto': bool(auto),
-             'ts': now_iso()}
+    def op_offer(self, path, label=None, auto=False, title=None, album=None, artist=None, who=None):
+        src = Path(path).expanduser().resolve()
+        if not src.is_file():
+            raise ValueError(f'no file {path}')
+        nice = readable_name(label or src.stem) + src.suffix.lower()
+        if src.suffix.lower() == '.mp3':              # a tagged copy with a readable name; their file stays as it is
+            d = HOME / 'offers'
+            d.mkdir(parents=True, exist_ok=True)
+            out = d / nice
+            shutil.copy2(src, out)
+            try:
+                tags.tag_mp3(str(out), title=title or label or src.stem.replace('_', ' '), artist=artist, album=album)
+            except Exception as e:                    # a broken mp3 still downloads; say the tags failed
+                print(f'[phone] tags for {out.name}: {e}', flush=True)
+            src = out
+        k = self.ph.offer_file(str(src))
+        o = {'url': '/files/' + k, 'name': src.name if src.parent == HOME / 'offers' else nice,
+             'label': label or Path(path).name, 'auto': bool(auto), 'ts': now_iso()}
         self.ph.view['offers'].append(o)
         self.ph.cmd('offer', offer=o)
         return f"offered {o['name']} on the phone" + (" (starts downloading if the page is open)" if auto else '')
@@ -976,7 +1017,9 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header('Content-Length', str(len(data)))
         self.send_header('Cache-Control', 'no-cache')
         if download:
-            self.send_header('Content-Disposition', f'attachment; filename="{p.name}"')
+            name = next((o['name'] for o in self.ph.view['offers'] if o['url'].endswith('/' + self.path.split('/')[2]
+                                                                                     .split('?')[0])), p.name)
+            self.send_header('Content-Disposition', f'attachment; filename="{name}"')
         self.end_headers()
         self.wfile.write(data)
 

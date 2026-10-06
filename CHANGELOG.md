@@ -11,6 +11,25 @@
   every frame reads the song's time, so a beat-warped loop stays on the beat however late it started and wherever the
   song loops. The film's dancers were warped onto the beat, but a take started on a command landed 0.3 to 6 s late.
   Side server: the take followed the song within one take frame (median 16 ms, worst 41 ms at 30 Hz frames).
+
+### The phone's Listen and Talk keys show their state with an icon (Nate, 10-06 09:59)
+
+- Listen: play, stop while playing, a breathing arrow while it reconnects or buffers, Resume when the phone wants a
+  tap. Hold to talk: a mic, the mic with sound while talking, an arrow while the note uploads, a check when it
+  arrived, a struck mic when the mic is blocked or the note waits to send. A waiting icon breathes, and stops for
+  reduced motion.
+
+### Every mp3 carries ismail; downloads have names; the piece's position stays on screen (Nate, 10-06)
+
+- `ismail/tags.py`: ID3 tags on every mp3 ismail writes (title, artist, album, date, encoder, the GitHub link as a URL
+  frame and in the comment: "Made with ismail (https://github.com/newsbubbles/ismail)"). Nate: "very important for
+  provenance whenever we're shipping out MP3s". `render(mp3=)` tags with the song's name; `phone_offer` sends a
+  tagged copy with a readable name from its label (their own file is never changed). mutagen is a dependency.
+- The Download key no longer runs off the right edge of a phone.
+- `phone_now(length=, sections=, into=)`: the page keeps a position line on screen (elapsed / length, the section,
+  the next one), in time or bars. Nate: "something that's always on screen ... that shows where we are in the song".
+- When the playing piece began survives a server restart (ledger:M139: lines after a restart said 0:00 into it).
+
 ### The frame beat says where the head was
 
 - The page's 5 s beat (clientlog.jsonl) carries `head` (position in Blender metres, yaw and pitch in degrees, yaw 0

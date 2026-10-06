@@ -182,14 +182,18 @@ def phone_say(text: str, speak: bool = False, pin: bool = False, buzz: bool = Fa
 
 @op()
 def phone_now(now: str = None, next: str = None, recording_why: str = None, mood: str = None,
-              now_mark: str = None, next_mark: str = None, sender: str = None) -> str:
+              now_mark: str = None, next_mark: str = None, length: float = None, sections: list = None,
+              into: float = None, sender: str = None) -> str:
     """What the page shows as now playing and next up (default: read from the engine), and why recording is on or
     off (the page always shows whether it is). '' clears a field. mood: set the mood chip (calm, steady, lift, peak).
     now_mark/next_mark: a small mark beside the piece, so they know what they are hearing: 'loved' (one they loved
     before, played again), 'replay' (played earlier, back again), 'new' (just made). Set it on every chapter change;
-    without one the page shows a heart when they tapped Love this while that piece played."""
+    without one the page shows a heart when they tapped Love this while that piece played.
+    length: the piece's length in seconds and sections: [{'at_s': 0, 'label': 'intro'}, {'at_s': 64, 'label':
+    'drop'}, ...]: the page keeps a position line on screen (elapsed / length, the next section). into: seconds into
+    the piece now, when it did not start as its name went up."""
     return _call('now', now=now, next=next, recording_why=recording_why, mood=mood, now_mark=now_mark,
-                 next_mark=next_mark, who=sender)
+                 next_mark=next_mark, length=length, sections=sections, into=into, who=sender)
 
 
 @op()
@@ -238,10 +242,14 @@ def phone_exam(title: str, clips: list, question: str = '', chips: list = None, 
 
 
 @op()
-def phone_offer(path: str, label: str = None, auto: bool = False, sender: str = None) -> str:
+def phone_offer(path: str, label: str = None, auto: bool = False, title: str = None, album: str = None,
+                artist: str = None, sender: str = None) -> str:
     """Offer a file for download on the phone (a render, a take, a PDF). auto=True starts it at once if the page is
-    open; otherwise it waits as a card with a Download button."""
-    return _call('offer', path=os.path.abspath(path), label=label, auto=auto, who=sender)
+    open; otherwise it waits as a card with a Download button. label: what the card says, and the downloaded file's
+    name (readable words, not a slug). An mp3 goes out as a tagged copy (their file is never changed): title (default
+    the label), artist (default 'ismail'), album (the song or set), the date, and ismail with its GitHub link."""
+    return _call('offer', path=os.path.abspath(path), label=label, auto=auto, title=title, album=album, artist=artist,
+                 who=sender)
 
 
 @op()
