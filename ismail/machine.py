@@ -1040,7 +1040,8 @@ def slot(kind, what, est_s=None, mem_gb=0.0, who=None, force=False, threads=THRE
                                                                disk_gb=disk_gb, disk_path=disk_path,
                                                                disk_hint=disk_hint, what=what, cmd=cmd,
                                                                threads=threads)
-                if not why or not deadline or time.time() >= deadline:
+                # a job with a lighter way to run (disk_hint) is told it at once: a full drive rarely clears in line
+                if not why or not deadline or time.time() >= deadline or (disk_hint and why.startswith('disk:')):
                     if why:
                         raise MachineBusy(f"not starting {kind} job '{what}': {why}. Retry when that clears (the "
                                           f"machine op shows the board), wait in line (`run --wait 30m`), do lighter "
