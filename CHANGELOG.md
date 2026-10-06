@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### The blind crop check: a pre-exam gate by eye (ledger:M158, Voice's method, Nate's rotation idea)
+
+- `exam_eye_crops(pairs, out, windows=)` cuts the same window from the real and the made clip of each pair as
+  spectrograms, side by side in a random order, with the key hidden; `exam_eye_score(out, answers)` scores the
+  agent's picks and says NOT READY when they beat chance (p < 0.05). blind-tests.md: the check, zooming two ways,
+  and the reveal after the answer. 211 tools.
+
 ### A pause tap stops the set by itself (the Live DJ's HANDOFF 50, Nate 10-06 15:08)
 
 - The phone server fades the playing engine out over 4 s and stops it when the person taps Pause or says "pause the
