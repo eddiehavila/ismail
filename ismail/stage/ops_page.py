@@ -341,7 +341,7 @@ def stage_take_view_clear(scene: str) -> str:
 @op(mutates=True)
 def stage_actor_play(scene: str, person: str, take: str, actor: str = None, loop: bool = True, rate: float = 1,
                trim: list = None, in_place: bool = False, assets: str = None, takes: str = None, voice: bool = None,
-               mirror: bool = None) -> str:
+               mirror: bool = None, at_music: float = None) -> str:
     """Play a take on a person: their skinned body replaces the statue and is driven by the take's head and hands,
     scaled to their height (page command: actor_play). actor defaults from the person (a fixed table in actors.js);
     trim [t0, t1] in the take's seconds defaults to the take's saved trim (the page treats an explicit null as "no
@@ -349,10 +349,13 @@ def stage_actor_play(scene: str, person: str, take: str, actor: str = None, loop
     person stands; assets / takes read the body / take from another scene. voice: a take made in a performance plays
     its recorded voice only on the person it was recorded for (None, the default); True plays it on this body too,
     False keeps it silent. One clip sounds once however many bodies play the take. mirror: a take plays mirrored as it
-    was recorded (meta.mirror, from the Follow's mirror; None, the default); True or False overrides. Errors: no actor for that person,
+    was recorded (meta.mirror, from the Follow's mirror; None, the default); True or False overrides. at_music: play
+    on the music clock: the take's first frame (after trim) sits at this song second and every frame reads the song's
+    time as heard, so a beat-warped loop stays on the beat however late it started (stage_music plays the song; with
+    no music playing it runs on the wall clock). Errors: no actor for that person,
     no take, no frames. Page replies {person, actor, frames, scale}. Emits: actor_stop (a take already on them),
     actor_play."""
-    return page_cmd(scene, 'actor_play', {'person': person, 'take': take, 'actor': actor, 'loop': loop, 'rate': rate, 'trim': trim, 'in_place': in_place, 'assets': assets, 'takes': takes, 'voice': voice, 'mirror': mirror}, timeout=30)
+    return page_cmd(scene, 'actor_play', {'person': person, 'take': take, 'actor': actor, 'loop': loop, 'rate': rate, 'trim': trim, 'in_place': in_place, 'assets': assets, 'takes': takes, 'voice': voice, 'mirror': mirror, 'at_music': at_music}, timeout=30)
 
 
 @op(mutates=True)
@@ -457,13 +460,22 @@ def stage_trees_reload(scene: str) -> str:
 
 @op(mutates=True)
 def stage_music(scene: str, action: str = 'play', url: str = None, at: str = None, lift: float = 1.0,
-                ref: float = 3, rolloff: float = 1, loop: bool = True, volume: float = 0.6) -> str:
+                ref: float = 3, rolloff: float = 1, loop: bool = True, volume: float = 0.6, start: float = 0) -> str:
     """Play one audio file from a place in the room, positional (louder as the person walks up), or stop it, or set
     its volume (page command: music). action: play | stop | volume (any value other than stop or volume plays). at is
     an object to play from (its position, lifted by lift metres; none: the room origin). One music source at a time:
-    play replaces it. volume with nothing playing falls through to play and needs url. Page replies {playing, at,
-    seconds} | {stopped: true} | {volume}. Emits: nothing."""
-    return page_cmd(scene, 'music', {'action': action, 'url': url, 'at': at, 'lift': lift, 'ref': ref, 'rolloff': rolloff, 'loop': loop, 'volume': volume}, timeout=30)
+    play replaces it. volume with nothing playing falls through to play and needs url. start: begin this many seconds
+    into the song. The song's time as heard is in the page state (`music`: {playing, url, t, duration, loop}) and from
+    stage_music_time; takes can play on it (stage_actor_play at_music). Page replies {playing, at, seconds, from} |
+    {stopped: true} | {volume}. Emits: music_start {url, from, seconds, at}, music_stop {url, at_s}."""
+    return page_cmd(scene, 'music', {'action': action, 'url': url, 'at': at, 'lift': lift, 'ref': ref, 'rolloff': rolloff, 'loop': loop, 'volume': volume, 'from': start}, timeout=30)
+
+
+@op()
+def stage_music_time(scene: str) -> str:
+    """The song's time as the person hears it (page command: music_time): {playing, url, t (song seconds), duration,
+    loop}, or {playing: false}. Read it to place a take on the beat (stage_actor_play at_music)."""
+    return page_cmd(scene, 'music_time', {}, timeout=15)
 
 
 @op(mutates=True)
@@ -643,4 +655,4 @@ def stage_actor_pose(scene: str, person: str, t: float = None) -> str:
     return page_cmd(scene, 'actor_pose', {'person': person, 't': t}, timeout=30)
 
 
-TYPED = {'actor_pose': 'stage_actor_pose', 'key_interp': 'stage_key_interp', 'control_set': 'stage_control_set', 'control_map': 'stage_control_map', 'perform': 'stage_perform', 'follow_anchor': 'stage_follow_anchor', 'take_keep_last': 'stage_take_keep_last', 'ack': 'stage_voice_ack', 'actor_follow': 'stage_actor_follow', 'actor_play': 'stage_actor_play', 'actor_stop': 'stage_actor_stop', 'anchor': 'stage_anchor_set', 'anchor_release': 'stage_anchor_release', 'anim_clear': 'stage_anim_clear', 'anim_save': 'stage_anim_save', 'ask': 'stage_ask', 'clear_markers': 'stage_markers_clear', 'clock': 'stage_clock_set', 'cue': 'stage_cue_set', 'cue_remove': 'stage_cue_remove', 'cues_clear': 'stage_cues_clear', 'cues_list': 'stage_cues_list', 'deselect': 'stage_object_deselect', 'drop': 'stage_object_drop', 'eyecam': 'stage_view_eyecam', 'focus': 'stage_view_focus', 'gallery_add': 'stage_gallery_add', 'goto': 'stage_person_goto', 'goto_camera': 'stage_camera_goto', 'growth': 'stage_growth_set', 'highlight': 'stage_object_highlight', 'key': 'stage_key_set', 'key_delete': 'stage_key_delete', 'light': 'stage_light_set', 'look_through': 'stage_view_look_through', 'marker': 'stage_marker_set', 'music': 'stage_music', 'panel': 'stage_panel_show', 'panel_close': 'stage_panel_close', 'reload': 'stage_scene_reload', 'say': 'stage_say', 'scene_go': 'stage_scene_go', 'scene_list': 'stage_scene_list', 'select': 'stage_object_select', 'set': 'stage_object_set', 'sky': 'stage_sky_set', 'snapshot': 'stage_view_snapshot', 'stream': 'stage_stream', 'take_start': 'stage_take_start', 'take_stop': 'stage_take_stop', 'take_view': 'stage_take_view', 'take_view_clear': 'stage_take_view_clear', 'timeline': 'stage_timeline_show', 'trees_reload': 'stage_trees_reload', 'undo': 'stage_edit_undo', 'voice_rec': 'stage_voice_note', 'walk': 'stage_view_walk', 'waypoint': 'stage_waypoint_set', 'waypoint_go': 'stage_waypoint_go', 'waypoint_remove': 'stage_waypoint_remove', 'waypoints_clear': 'stage_waypoints_clear', 'waypoints_list': 'stage_waypoints_list'}
+TYPED = {'music_time': 'stage_music_time', 'actor_pose': 'stage_actor_pose', 'key_interp': 'stage_key_interp', 'control_set': 'stage_control_set', 'control_map': 'stage_control_map', 'perform': 'stage_perform', 'follow_anchor': 'stage_follow_anchor', 'take_keep_last': 'stage_take_keep_last', 'ack': 'stage_voice_ack', 'actor_follow': 'stage_actor_follow', 'actor_play': 'stage_actor_play', 'actor_stop': 'stage_actor_stop', 'anchor': 'stage_anchor_set', 'anchor_release': 'stage_anchor_release', 'anim_clear': 'stage_anim_clear', 'anim_save': 'stage_anim_save', 'ask': 'stage_ask', 'clear_markers': 'stage_markers_clear', 'clock': 'stage_clock_set', 'cue': 'stage_cue_set', 'cue_remove': 'stage_cue_remove', 'cues_clear': 'stage_cues_clear', 'cues_list': 'stage_cues_list', 'deselect': 'stage_object_deselect', 'drop': 'stage_object_drop', 'eyecam': 'stage_view_eyecam', 'focus': 'stage_view_focus', 'gallery_add': 'stage_gallery_add', 'goto': 'stage_person_goto', 'goto_camera': 'stage_camera_goto', 'growth': 'stage_growth_set', 'highlight': 'stage_object_highlight', 'key': 'stage_key_set', 'key_delete': 'stage_key_delete', 'light': 'stage_light_set', 'look_through': 'stage_view_look_through', 'marker': 'stage_marker_set', 'music': 'stage_music', 'panel': 'stage_panel_show', 'panel_close': 'stage_panel_close', 'reload': 'stage_scene_reload', 'say': 'stage_say', 'scene_go': 'stage_scene_go', 'scene_list': 'stage_scene_list', 'select': 'stage_object_select', 'set': 'stage_object_set', 'sky': 'stage_sky_set', 'snapshot': 'stage_view_snapshot', 'stream': 'stage_stream', 'take_start': 'stage_take_start', 'take_stop': 'stage_take_stop', 'take_view': 'stage_take_view', 'take_view_clear': 'stage_take_view_clear', 'timeline': 'stage_timeline_show', 'trees_reload': 'stage_trees_reload', 'undo': 'stage_edit_undo', 'voice_rec': 'stage_voice_note', 'walk': 'stage_view_walk', 'waypoint': 'stage_waypoint_set', 'waypoint_go': 'stage_waypoint_go', 'waypoint_remove': 'stage_waypoint_remove', 'waypoints_clear': 'stage_waypoints_clear', 'waypoints_list': 'stage_waypoints_list'}

@@ -1468,16 +1468,21 @@ def audio_place(project: str, track: str, sound: str, bar: float, gain_db: float
 
 @op()
 def render(project: str, bars: list = None, tracks: list = None, stems: bool = False, out: str = None,
-           cache: bool = True, mp3: str = 'none') -> str:
+           cache: bool = True, mp3: str = 'none', wait: str = '10m') -> str:
     """Render to renders/latest.wav (and renders/<out>.wav). bars=[a,b] renders a window (fast iteration); tracks
     limits to those tracks (+ their sidechain sources, which stay silent); stems=True writes per-track files for
     analysis as 'track:<name>'. Analysis of a windowed render and its stems still uses song bar numbers (bars outside
     the window raise). mp3='also' writes renders/<out or latest>.mp3 next to the wav, mp3='only' writes the named
     render as mp3 only (latest.wav is always written: analysis reads it); needs ffmpeg on PATH or $ISMAIL_FFMPEG.
+    wait: when the machine is busy, stand in line this long ('10m' default, '0' refuses at once).
     Returns levels, clipping and timing."""
     if mp3 not in ('none', 'also', 'only'):
         raise OpError("mp3 must be 'none', 'also' (wav + mp3) or 'only' (the named render as mp3 only)")
     from .render import Renderer, write_wav, prune_cache, RenderError
+    try:
+        wait_s = machine.duration_s(wait) if str(wait).strip() not in ('', '0', 'none', 'None') else None
+    except ValueError as e:
+        raise OpError(f"wait: {e}")
     P = _load(project)
     if tracks:
         for t in tracks:
@@ -1485,10 +1490,13 @@ def render(project: str, bars: list = None, tracks: list = None, stems: bool = F
     try:
         R = Renderer(P.d, P.root, bars[0] if bars else None, (bars[1] + 1) if bars else None, tracks, cache)
         cache_gb, out_gb = _render_disk_gb(P.d, R.n, tracks, cache, stems, out and mp3 != 'only')
+        t_line = time.time()
         with machine.slot('cpu', f"render {os.path.basename(P.root)}" + (f" bars {bars[0]}-{bars[1]}" if bars else ''),
                           mem_gb=_render_gb(P.d, R.n, tracks), disk_gb=cache_gb + out_gb, disk_path=P.root,
                           disk_hint=(f"cache=False skips the track cache ({cache_gb:.1f} GB of it)" if cache_gb else
-                                     '') + (", a shorter window (bars=) writes less" if not bars else '')):
+                                     '') + (", a shorter window (bars=) writes less" if not bars else ''),
+                          wait=wait_s):     # a newcomer's agent stands in line, as sketch's renders do (ledger:M152)
+            waited = time.time() - t_line
             y, st = R.run()
     except (RenderError, fxmod.FxError, inst_mod.InstrumentError) as e:
         raise OpError(f"render failed: {e}")
@@ -1529,6 +1537,8 @@ def render(project: str, bars: list = None, tracks: list = None, stems: bool = F
     L = [f"rendered {y.shape[1] / R.sr:.1f}s" + (f" (bars {bars[0]}-{bars[1]})" if bars else '') +
          f" in {R.elapsed:.1f}s -> renders/latest.wav{' + renders/' + out + '.wav' if out and mp3 != 'only' else ''}{mp3_note}",
          f"master: {lufs:.1f} LUFS, peak {peak:.1f} dBFS" + (f", CLIPPING {clip:.2f}% of samples (lower levels or add limiter)" if clip > 0.001 else '')]
+    if waited >= 5:
+        L.append(f"  waited {waited / 60:.1f} min in line for the machine (wait='0' refuses at once instead)")
     if R.full and lufs < -20:
         L.append(f"  QUIET: {lufs:.1f} LUFS is under every genre target (classical and ambient sit at -18 to -16): raise "
                  f"the master (limiter gain_db) or the faders; at low playback volume this reads as nothing")

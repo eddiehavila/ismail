@@ -27,7 +27,18 @@ EFFECTS = {
     'aurora': 'three soft colour fields drifting slowly',
 }
 DEFAULT = {'ground': '#0e0d0b', 'ink': '#efe9dd', 'accent': 'hsl(293 68% 66%)', 'heading': 'archivo', 'image': None,
-           'blur': 14, 'dim': 0.62, 'effect': 'none', 'intensity': 0.5, 'transition_ms': 1200}
+           'blur': 14, 'dim': 0.62, 'effect': 'none', 'intensity': 0.5, 'transition_ms': 1200, 'layers': None,
+           'hue_drift': 0.0}
+# One layer of the background (ledger:M160, Nate 10-06 14:47: "way more creative control over the background"). Up to
+# MAX_LAYERS at once, drawn in order. Each value: (default, low, high); colours default to the vibe's ink or accent.
+LAYER = {'intensity': (0.5, 0.0, 1.0),      # how present it is overall
+         'speed': (1.0, 0.1, 4.0),          # how fast it moves (pulse: beats per breath, 1 = every beat)
+         'density': (0.5, 0.0, 1.0),        # how many drops, motes, grains
+         'size': (1.0, 0.25, 4.0),          # how big each is
+         'angle': (8.0, -60.0, 60.0),       # rain's slant, in degrees
+         'opacity': (1.0, 0.0, 1.0)}        # the layer's alpha on top of its intensity
+BLENDS = {'normal': 'source-over', 'add': 'lighter', 'screen': 'screen', 'multiply': 'multiply', 'overlay': 'overlay'}
+MAX_LAYERS = 3
 PRESETS = {
     'default': {},
     'rain': {'ground': '#0b0f14', 'ink': '#e3e9ef', 'accent': 'hsl(205 70% 64%)', 'heading': 'fraunces',
@@ -79,6 +90,35 @@ def contrast(a, b):
     return (la + 0.05) / (lb + 0.05)
 
 
+def layer(x, i=0):
+    """One checked layer: {'effect': ..., and any of LAYER's keys, 'color', 'color2', 'blend'}."""
+    if not isinstance(x, dict):
+        raise ValueError(f"layer {i + 1}: a dict like {{'effect': 'rain', 'density': 0.8, 'angle': 20}}")
+    x = {k: v for k, v in x.items() if k != 'op'}             # a resolved layer goes back in as it came out
+    unknown = set(x) - set(LAYER) - {'effect', 'color', 'color2', 'blend'}
+    if unknown:
+        raise ValueError(f"layer {i + 1}: unknown {', '.join(sorted(unknown))}; a layer takes effect, "
+                         f"{', '.join(LAYER)}, color, color2, blend")
+    eff = x.get('effect', 'none')
+    if eff not in EFFECTS:
+        raise ValueError(f"layer {i + 1}: effect {eff!r}: one of {sorted(EFFECTS)}")
+    out = {'effect': eff}
+    for k, (d, lo, hi) in LAYER.items():
+        try:
+            out[k] = round(max(lo, min(hi, float(x.get(k, d)))), 3)
+        except (TypeError, ValueError):
+            raise ValueError(f"layer {i + 1}: {k} is a number from {lo:g} to {hi:g}")
+    for k in ('color', 'color2'):
+        if x.get(k):
+            out[k] = hexc(parse_color(x[k]))
+    blend = x.get('blend', 'normal')
+    if blend not in BLENDS:
+        raise ValueError(f"layer {i + 1}: blend {blend!r}: one of {', '.join(BLENDS)}")
+    out['blend'] = blend
+    out['op'] = BLENDS[blend]
+    return out
+
+
 def resolve(v):
     """A checked vibe and the CSS values the page sets. Raises ValueError saying what to change."""
     out = dict(DEFAULT, **{k: x for k, x in v.items() if k in DEFAULT})
@@ -99,6 +139,14 @@ def resolve(v):
         raise ValueError(f"heading {out['heading']!r}: one of {sorted(FONTS)}")
     if out['effect'] not in EFFECTS:
         raise ValueError(f"effect {out['effect']!r}: one of {sorted(EFFECTS)}")
+    if out.get('layers'):
+        if not isinstance(out['layers'], list) or len(out['layers']) > MAX_LAYERS:
+            raise ValueError(f"layers: a list of at most {MAX_LAYERS} layers, drawn in order")
+        out['layers'] = [layer(x, i) for i, x in enumerate(out['layers'])]
+    else:                                              # the one-effect shortcut is layer 1
+        out['layers'] = [layer({'effect': out['effect'], 'intensity': out['intensity']})]
+    out['effect'], out['intensity'] = out['layers'][0]['effect'], out['layers'][0]['intensity']
+    out['hue_drift'] = round(max(-120.0, min(120.0, float(out.get('hue_drift') or 0.0))), 2)
     out['heading'] = head
     out['blur'] = max(0, min(40, int(out['blur'])))
     out['dim'] = round(max(0.2, min(0.9, float(out['dim']))), 2)
@@ -114,12 +162,25 @@ def resolve(v):
     return out
 
 
+def describe_layer(x):
+    extra = [f"{k} {x[k]:g}" for k, (d, _, _) in LAYER.items() if k != 'intensity' and x.get(k, d) != d]
+    extra += [f"{k} {x[k]}" for k in ('color', 'color2') if x.get(k)]
+    extra += [f"blend {x['blend']}"] if x.get('blend', 'normal') != 'normal' else []
+    return f"{x['effect']} at {x['intensity']:g}" + (f" ({', '.join(extra)})" if extra else '')
+
+
 def describe(v):
-    return (f"vibe: ground {v['ground']}, ink {v['ink']}, accent {v['accent']}, heading {v['heading']}, effect "
-            f"{v['effect']} at {v['intensity']}" + (f", art {v['image_name']} (blur {v['blur']} px, dim {v['dim']})"
-                                                    if v.get('image') else ', no art'))
+    ls = v.get('layers') or [{'effect': v['effect'], 'intensity': v['intensity']}]
+    fx = (f"effect {describe_layer(ls[0])}" if len(ls) == 1 else
+          f"layers: " + '; '.join(f"{i + 1}. {describe_layer(x)}" for i, x in enumerate(ls)))
+    return (f"vibe: ground {v['ground']}, ink {v['ink']}, accent {v['accent']}, heading {v['heading']}, {fx}"
+            + (f", hue drift {v['hue_drift']:g} deg/min" if v.get('hue_drift') else '')
+            + (f", art {v['image_name']} (blur {v['blur']} px, dim {v['dim']})" if v.get('image') else ', no art'))
 
 
 def menu():
     return ("presets: " + ', '.join(PRESETS) + "\nheadings: " + ', '.join(FONTS) + "\neffects: "
-            + '; '.join(f"{k} ({d})" for k, d in EFFECTS.items()))
+            + '; '.join(f"{k} ({d})" for k, d in EFFECTS.items())
+            + f"\nlayers (up to {MAX_LAYERS}): effect, " + ', '.join(f"{k} {lo:g}-{hi:g} (default {d:g})"
+                                                              for k, (d, lo, hi) in LAYER.items())
+            + ", color, color2, blend (" + ', '.join(BLENDS) + ")\nhue_drift: degrees a minute the colours turn")

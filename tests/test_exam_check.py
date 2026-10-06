@@ -110,3 +110,34 @@ def test_the_op_reports_and_the_phone_refuses_a_leaky_exam(tmp_path, monkeypatch
                      key={'A': 'real', 'B': 'fake'})
     assert P.phone_exam('round 1', [{'label': 'A', 'path': a}, {'label': 'B', 'path': b}], key={'A': 'real', 'B': 'fake'},
                         check=False) == 'shown'
+
+
+def noise(path, cut=None, s=1.5, seed=0, db=-23):
+    y = np.random.default_rng(seed).standard_normal(int(s * SR))
+    if cut:                                                # a 16 kHz recording: nothing at all above its cut
+        Y = np.fft.rfft(y)
+        Y[np.fft.rfftfreq(len(y), 1 / SR) > cut] = 0
+        y = np.fft.irfft(Y, len(y))
+    y *= 10 ** (db / 20) / np.sqrt((y ** 2).mean())
+    sf.write(str(path), y, SR)
+    return str(path)
+
+
+def test_a_band_limited_class_and_lopsided_sides_are_heard(tmp_path):
+    """ledger:M146 (vox:r39, r41): the real takes went through an earbud mic (nothing above 7 kHz) while the synth
+    filled that band, and exam_check said READY; a build put the real take first in every pair."""
+    clips, key = [], {}
+    for i in range(4):                                     # 4 pairs: real band-limited, mine full band
+        for side, cls, cut in (('A', 'real', 7000), ('B', 'mine', None)) if i % 2 else (('A', 'mine', None), ('B', 'real', 7000)):
+            lab = f'{i + 1}{side}'
+            clips.append({'label': lab, 'path': noise(tmp_path / f'c{i}{side}.wav', cut, seed=i * 2 + (side == 'B'))})
+            key[lab] = cls
+    ok, lines = EC.run(clips=clips, key=key, answers_path=str(tmp_path / 'a.jsonl'))
+    out = text(lines)
+    assert not ok and 'differ above 6 kHz' in out and 'nothing above 8 kHz' in out, out
+    full = [{'label': c['label'], 'path': noise(tmp_path / f"f{c['label']}.wav", None, seed=j)} for j, c in enumerate(clips)]
+    ok, lines = EC.run(clips=full, key=key, answers_path=str(tmp_path / 'a.jsonl'))
+    assert ok and '6 kHz' not in text(lines), text(lines)
+    key2 = {c['label']: ('real' if c['label'].endswith('A') else 'mine') for c in full}   # r41: real on A, every pair
+    ok, lines = EC.run(clips=full, key=key2, answers_path=str(tmp_path / 'a.jsonl'))
+    assert not ok and "every trial starts with 'real'" in text(lines), text(lines)

@@ -205,16 +205,20 @@ nudges you, follow it.
   (Blender, whisper, demucs, a long script) runs through `python -m ismail.machine run --gpu|--cpu -- <command>` so
   it takes one too. A script it runs may call ismail's ops (render, measure): they run in the run's slot. A slot
   counts jobs, not cores, so `--threads` caps the command's numeric threads (BLAS, OpenMP, torch; 2 by default for
-  `--cpu`): ask for more only when the machine is quiet. Give `--est` a unit (`--est 10m`, `600s`) so the board tells others when you will be done.
+  `--cpu`) and pins it to that many cores: ask for more only when the machine is quiet. Give `--est` a unit (`--est 10m`, `600s`) so the board tells others when you will be done.
   Declare what it really needs: `--mem` (peak GB) and `--disk` (GB it writes). A job past its `--mem` is flagged
   OVER on the board and in its own output: stop it if it keeps growing, because on Windows the pagefile grows into
-  the disk. Heavy jobs wait while a drive is under 15 GB free or commit under 6 GB; `machine_disk` shows where the
+  the disk. At 3 times its `--mem` with commit under 10 GB (less on a small machine) its processes are paused (SUSPENDED: OVER, never
+  killed); `python -m ismail.machine resume <job>` goes on once memory is free. Heavy jobs wait while a drive is under 15 GB free or commit under 6 GB; `machine_disk` shows where the
   space went. To free space, move finished intermediates (caches, old renders, uncut takes) into the project's
   `_reclaim/` folder and tell the user: nobody deletes, the user clears `_reclaim`.
   While a live set is on air, GPU jobs and Blender renders wait until it ends, and the CPU jobs beside it share
   half the machine's threads (a temporary rule, "only for now during sets": `machine on-air` shows it; only the
   user lifts it). Register Blender honestly: a `--cpu` Blender
   render waits too.
+  Set `ISMAIL_SESSION=<your name>` in your shell before you run jobs, so the board names you and a priority the user
+  gives you finds your jobs (without it every job from the repo shows as `ismail`); the board warns when a priority
+  matches no job.
   `run --wait 30m` (or `slot(..., wait=)`) stands in line for a slot instead of being refused. Every finished job
   leaves a line in the board's history (what, which song, how long it waited, its exit, CPU seconds, peak memory, the
   GPU's load and the machine's state at its start): `python -m ismail.machine history --song <slug> --since 7d` sums

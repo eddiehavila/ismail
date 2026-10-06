@@ -2,6 +2,112 @@
 
 ## Unreleased
 
+### A pause tap stops the set by itself (the Live DJ's HANDOFF 50, Nate 10-06 15:08)
+
+- The phone server fades the playing engine out over 4 s and stops it when the person taps Pause or says "pause the
+  set", then captions it and posts `{'kind': 'control', 'what': 'paused'}`. Before, the set played on until an agent
+  read the tap (70 s on 10-06).
+
+### phone_unsay: take captions back off the phone page (Nate 10-06 15:03)
+
+- `phone_unsay(match=, since=, n=)` removes captions from the page, its history and its pinned line, and closes the
+  matching notification. phone.md: nothing personal on the page (it may be on a screen recording). 209 tools.
+
+### The phone page measures its gaps (Nate 10-06 14:56: "a profiler")
+
+- Every stall the browser reports and every freeze (the stream not advancing for over 1.5 s) is logged as a `stall`
+  page event with its length, whether a voice note was recording, the playback rate, the network and which mic was
+  open; audio route changes log as `route`, and `note_start` says which mic and how long it took to open. They show
+  in `phone_timeline` and `phone_listen(page=True)`.
+
+### The phone page's background: layers, looks on the bar, scenes (ledger:M160 phase 1, Nate 10-06)
+
+- `phone_vibe(layers=[...])`: up to three effects at once, each with speed, density, size, angle, opacity, colours
+  and a blend mode; `hue_drift` turns the colours over time. New looks crossfade in.
+- `phone_vibe(at='bar:N', ramp_beats=)`: a look lands on the bar the phone hears (the page applies it on its own
+  stream clock; the server folds it into the standing vibe 8 bars later), and repeated calls build a list of moves.
+- `save=` and `scene=` keep and recall named looks. The state carries `room` (the engine's bar) for a page that is
+  not on the stream.
+
+### phone_sounds: the page plays sounds an agent made, one per event (Nate, 10-06)
+
+- `phone_sounds(event, path, gain_db)` attaches a short sound (wav, ogg or mp3, at most 5 s and 1 MB) to an event:
+  message, note_start, note_end, note_sent, error, tap, love, change, mood, offer, panel, chapter. The page plays it
+  on that event only; events without one are silent, and the four note tones fall back to the built-in ones. The
+  sounds persist across restarts. phone.md: make them with ismail, then attach them. 208 tools.
+
+### The phone page opens the mic only for a note, so earbuds keep music quality (Nate, 10-06)
+
+- With the mic open the whole time the page played, Bluetooth earbuds (Nate's Dime 3) stayed in call mode and the
+  set sounded bad. The mic now opens when a note starts and every track stops when it ends. "Mic: kept open" brings
+  back the old way (earbud notes with the screen off, in call quality); "Record: phone mic" records with the
+  phone's own microphone.
+
+### The live engine renders lazily and says STARVING before the underruns (ledger:M156, hq:D-30)
+
+- A clip queued more than 32 bars ahead renders nothing until it comes within 32 bars (PRELOAD_WITHIN_BARS). On
+  10-06 a 21-minute piano set queued in one call rendered every clip's first pass at once: a backlog of 10,089
+  renders and 82 underruns in 6 bars. Renders already went out earliest-needed first.
+- live_status says STARVING (the bar, the track, the seconds of render work before it against the seconds until it
+  sounds) when the line, earliest-needed first at the measured rates, cannot keep up.
+
+### Docs: where the machine board lives; 207 tools (S54, hq:D-30)
+
+- setup.md and development.md say the board follows `ISMAIL_SONGS` (`<ISMAIL_SONGS>/_machine`, or
+  `ISMAIL_MACHINE_DIR`): right for a stranger, a trap for a test on a shared machine (first-run dress rehearsal 2).
+- The README counts 207 MCP tools (82 `stage_*`).
+
+### The governor holds a run to its threads and pauses a job far past its memory (ledger:M153, M154, hq:D-30)
+
+- `machine run` pins its command to as many cores as its threads (the highest cores no other job holds; children
+  inherit it, and the meter sets it again on a child that changed it), and the thread variables now include Numba's
+  and Rayon's. A `run --cpu` at 2 threads used about 5 cores, because CTranslate2 ignores the BLAS variables.
+- A job at 3 times its `--mem` while less than 10 GB of commit is free (or 15% of the commit limit, if smaller) has its processes paused, never killed: the
+  board says SUSPENDED: OVER and how to go on, `python -m ismail.machine resume <job id, pid or name>`, after which
+  it is not paused again. 10-06: an ffmpeg declared 3 GB and took 37 GB during a live set.
+- The board reads a job's file again when its meter is replacing it (Windows), so a running job never drops off
+  the board for a moment.
+- A docstring's `D:\ismail` made an invalid escape warning; it reads D:/ismail now.
+
+### render stands in line when the machine is busy (ledger:M152, hq:D-30)
+
+- A plain `render` refused on WAIT and told a newcomer's agent "force=True only if the user says so" (first-run dress
+  rehearsal 2). It now waits in line up to `wait='10m'` (the default), says how long it waited, and `wait='0'`
+  refuses at once as before.
+
+### phone_route survives a restart (ledger:M157, hq:D-30)
+
+- The route is kept in the phone's state.json and loaded again when the server starts (when its folder still
+  exists), so a restart no longer sends the person's notes back to the playing engine's project.
+
+### Exams know the devices; exam_check hears a band-limited take and lopsided sides (ledger:M146, Nate's approval 10-06)
+
+- vox:r39 was wasted: the takes went through Bluetooth earbuds' microphone (16 kHz audio, nothing above 7 kHz), the
+  synth filled that band 45-50 dB above them, and exam_check said READY. It now fails classes whose 1/3-octave levels
+  above 6 kHz differ by more than 10 dB and twice the spread within a class, warns on any clip with nothing above
+  8 kHz, and warns when a class comes first in 80 % or more of 6 or more trials (all of them, as in vox:r41's first build,
+  already fails).
+- `phone_exam` asks what they listened on (earbuds, headphones, phone speaker, speaker; remembered) and sends it with
+  the answers, with the output and microphone the browser can name. blind-tests.md: record the devices every round.
+
+### A priority says when it matches no job; `--for 3d` (ledger:M143, Nate's approval 10-06)
+
+- `who` defaults to the working folder's name, so nearly every job from the repo is `ismail` and a priority given to
+  a session matched nothing unless that session set `ISMAIL_SESSION`. Setting or reading a priority, and the board,
+  now warn when no job of that name ran or waited in 48 h, and list the names in use. SKILL.md tells every session to
+  set `ISMAIL_SESSION`.
+- Durations take days (`priority voice --for 3d`), and a grant beyond today shows its day.
+
+### Takes on the music clock
+
+- The page keeps the song's time as the person hears it (the audio context's clock, less the output latency):
+  `stage_music_time`, `music` in the page state, and `music_start` / `music_stop` events. `stage_music(start=)` begins
+  a song partway in.
+- `stage_actor_play(at_music=<song seconds>)` plays a take on that clock: its first frame sits at that song second and
+  every frame reads the song's time, so a beat-warped loop stays on the beat however late it started and wherever the
+  song loops. The film's dancers were warped onto the beat, but a take started on a command landed 0.3 to 6 s late.
+  Side server: the take followed the song within one take frame (median 16 ms, worst 41 ms at 30 Hz frames).
+
 ### The phone's Listen and Talk keys show their state with an icon (Nate, 10-06 09:59)
 
 - Listen: play, stop while playing, a breathing arrow while it reconnects or buffers, Resume when the phone wants a

@@ -73,8 +73,36 @@ in the bud, and a long press opens the phone's assistant). So, while a set plays
 - a short note that is only a command acts as one: "stop listening" stops the stream (a press starts it again),
   "love this", "change it up", "more energy", "calmer", "louder", "quieter", "pause the set", "resume the set" arrive
   as taps with `via: 'voice'` and the note's `id`. The words also arrive as `voice_text`: act once, not twice.
-- the microphone is opened when they press Listen on the page and held while it plays, so a press can record with
-  the screen off. If the phone blocks that, a low tone says so.
+- the microphone opens when a note starts and closes when it ends ("Mic: per note", the default): while a mic is
+  open, Bluetooth earbuds switch to call mode (mono, narrowband) and the music sounds bad, so a mic held open the
+  whole set ruins it (Nate's Dime 3, 10-06). The switch takes a second or two at each end of a note. "Mic: kept
+  open" holds it while the set plays, so a press can record with the screen off, in call quality; "Record: phone
+  mic" records with the phone's own microphone, so the earbuds may stay in music quality throughout. If the phone
+  will not open the mic (the screen off, or blocked), a low tone and a line say so.
+
+## Pause means stop, now
+
+A pause from the person (the Pause key, or "pause the set" said in a note) is acted on by the phone server itself:
+it fades the set out over 4 s and stops the engine, then says so on the page and posts a `control` line
+(`what: 'paused'`) to the inbox. No agent has to be awake for it (10-06: the DJ was mid-task and the set played on
+for 70 s after Nate pressed pause). Starting again is yours, when they say or tap Resume.
+
+## Nothing personal on the page
+
+The page may be on someone's screen recording or a shared video: never put where the person lives, their name, or
+other personal details in a caption, a panel or a title (10-06: a story named Nate's town while he recorded).
+`phone_unsay(match='text')` (or `since='HH:MM'`, or `n=`) takes lines back off the page, its history, its pinned
+line and its notification; it cannot reach a recording already made.
+
+## The page's sounds: make them, attach them
+
+Every sound the page makes is crafted (Nate, 10-06: "the same thing applies to everything as like a design
+philosophy"). Make each one with ismail like any sound (short, under 5 s, its peak well under the set: about
+-14 dBFS), render it with `mp3='also'`, and attach it: `phone_sounds(event='message', path=...)`. Events: `message`
+(a `phone_say` caption arrives), `note_start`, `note_end`, `note_sent`, `error` (these replace the built-in tones),
+`tap` (any key that sends, unless it has its own), `love`, `change`, `mood`, `offer`, `panel` (a panel, question or
+exam opens), `chapter` (the piece changes). An event without a sound is silent, so nothing plays that nobody chose;
+`phone_sounds(menu=True)` lists what each plays, and `path=''` clears one. Sounds stay across server restarts.
 
 Only `phone_listen` counts as listening on the page; watching the inbox file does not show them anyone is there.
 
@@ -98,6 +126,14 @@ still, art another agent made, blurred by `blur` and darkened by `dim`) and one 
 pulse on the set's beat, grain, aurora) at an `intensity`. Change it with the mood and on chapter changes, not on
 every bar; it fades over `transition_ms`. The server keeps every vibe readable on a walk (a dark ground, ink 7:1,
 accent 3:1) and refuses one that is not, saying what to change. `phone_vibe(menu=True)` lists the choices.
+
+For more than one effect, give `layers`: up to three, drawn in order, each with its own `speed`, `density`, `size`,
+`angle` (rain's slant), `opacity`, `color`/`color2` and `blend` (normal, add, screen, multiply, overlay), e.g.
+`layers=[{'effect': 'aurora', 'speed': 0.5}, {'effect': 'rain', 'density': 0.9, 'angle': 25, 'blend': 'add'}]`;
+`hue_drift` turns the colours a few degrees a minute. Land a look on the music: `at='bar:65'` puts it on bar 65 as
+the phone hears it (the stream's delay included), `ramp_beats=` fades into it over that many beats, and each call
+with `at=` adds a move after the last one, so a drop flashes on its downbeat. `cancel_moves=True` drops them. Keep a
+look for a chapter with `save='gnawa_drop'` and bring it back with `scene='gnawa_drop'`.
 
 ## Bars or time
 
