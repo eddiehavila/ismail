@@ -13,6 +13,14 @@
   the next one), in time or bars. Nate: "something that's always on screen ... that shows where we are in the song".
 - When the playing piece began survives a server restart (ledger:M139: lines after a restart said 0:00 into it).
 
+### The frame beat says where the head was
+
+- The page's 5 s beat (clientlog.jsonl) carries `head` (position in Blender metres, yaw and pitch in degrees, yaw 0
+  along +Y) and `worstAt`: the head and the triangles and draw calls of the worst frame in those 5 s, so a stall is
+  read against the view it happened in (the frame budget: under 400k triangles and 300 draw calls per view). It also
+  carries `shadowFrames` (frames in the window that re-drew the shadow maps), `playing` (people playing or following)
+  and `eyes` (2 in the headset: triangles and calls count both eyes).
+
 ### Takes keep what was said while recording
 
 - A take's audio is transcribed as it lands (`takes/<id>/voice.json`, a `take_voice` event), with word times on the
