@@ -16,6 +16,19 @@ Read it at the start of a session that works with a person, beside SKILL.md.
 - All of it stays on the machine (`songs/_user/`, `notes/feedback.md`). A quote or a number measured from the person
   goes public only after they say yes to exactly what would be published (development.md, the inclusion review).
 
+## The rest waits for its moment
+
+The first session stays narrow: two sentences, two questions, sound in minutes. Everything else ismail can do (the
+phone page, live play, the VR stage, building an instrument from recordings) is offered later, each at the moment it
+answers something the person just did or said, in one sentence they can say no to:
+- they keep a sketch or say they like one: "You can hear it on your phone and talk back to me while it plays."
+- they want to jam, perform, or hear the music change while it plays: live play.
+- they mention a VR headset, or want to see the music: the stage.
+- they step away from the computer while something plays: the phone (phone.md, "When to offer it").
+One feature per moment. A no holds for the session. Never list them all at once: a list of features up front is
+what the intro avoids (Nate, 10-07: the intro "needs to be a specific scope", and "an agent can let people know that
+those features exist").
+
 ## Their first answer decides the words
 
 In a first session the first question carries "and do you play?" (guide's FIRST SESSION block). Their answer sets
