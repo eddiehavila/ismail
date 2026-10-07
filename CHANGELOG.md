@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### The phone page shows the set's notes as they reach the ear (ledger:M160 phase 2, Nate 10-06 14:48)
+
+- `phone_vibe(react={track: reaction})`: flash, glow, burst, sparks, drops or ring on every note of that track
+  ('qrq*' matches a prefix), each fired when the phone hears its beat (the stream's delay included). The engine's new
+  `onsets` command lists the events it has placed (track, beat, level); the phone server passes them on only while
+  a look reacts to them. No audio analysis on the phone.
+
 ### First session: one opening, the person's words, calmer setup (ledger:M151 G-1, G-2, U-1..U-4)
 
 - One opening: guide's FIRST SESSION block is the only one. SKILL.md's step 0 no longer asks for a recording first

@@ -264,7 +264,7 @@ def phone_vibe(preset: str = None, ground: str = None, ink: str = None, accent: 
                image: str = None, blur: int = None, dim: float = None, effect: str = None, intensity: float = None,
                transition_ms: int = None, reset: bool = False, menu: bool = False, layers: list = None,
                hue_drift: float = None, at: str = None, ramp_beats: float = None, save: str = None, scene: str = None,
-               cancel_moves: bool = False, sender: str = None) -> str:
+               cancel_moves: bool = False, react: dict = None, sender: str = None) -> str:
     """Set the phone page's look to fit the music, so the person feels you there (as the stage does in VR): change it
     with the mood, on chapter changes. preset: a starting point (default, rain, calm, warm, night, peak), then any
     part over it. ground/ink/accent: colours ('#rrggbb', 'rgb(r g b)', 'hsl(h s% l%)'); the ground stays dark, ink
@@ -281,11 +281,15 @@ def phone_vibe(preset: str = None, ground: str = None, ink: str = None, accent: 
     at='bar:N': the look lands on bar N as the phone hears it (a drop on its downbeat); each call with at= adds a
     move, building on the last one, and they play in bar order; ramp_beats: fade into it over that many beats.
     cancel_moves=True drops the scheduled ones. save='name' keeps the resulting look as a scene; scene='name'
-    starts from a saved one (then any part over it)."""
+    starts from a saved one (then any part over it).
+    react: the set's own notes drive the page, each on the beat the phone hears it: {track: reaction} with flash,
+    glow, burst, sparks, drops or ring, or {track: {'do': 'glow', 'color': '#ff8844', 'amount': 0.8}}; 'qrq*'
+    matches every track starting qrq. E.g. {'kick': 'glow', 'qrq': 'sparks', 'stab': 'flash', 'piano': 'drops'}.
+    {} turns it off."""
     return _call('vibe', preset=preset, ground=ground, ink=ink, accent=accent, heading=heading, image=image, blur=blur,
                  dim=dim, effect=effect, intensity=intensity, transition_ms=transition_ms, reset=reset or None,
                  menu=menu or None, layers=layers, hue_drift=hue_drift, at=at, ramp_beats=ramp_beats, save=save,
-                 scene=scene, cancel_moves=cancel_moves or None, who=sender)
+                 scene=scene, cancel_moves=cancel_moves or None, react=react, who=sender)
 
 
 @op()
