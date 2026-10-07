@@ -214,9 +214,11 @@ const talk = { rec: null, stream: null, chunks: [], down: 0, toggle: false, t: n
 // the music sounds bad. So by default the mic opens for a note and closes after it, and the earbuds go back to music
 // quality. 'Mic: kept open' is the old way (an earbud press starts a note even with the screen off, in call quality).
 // 'Record: phone mic' records with the phone's own microphone, so the earbuds may never enter call mode.
-let micKeep = store.get('mic_keep', false), micSrc = store.get('mic_src', 'earbuds');
+let micKeep = store.get('mic_keep', false), micSrc = store.get('mic_src', 'earbuds'), micRaw = store.get('mic_raw', true);
 async function openMic() {
-  const base = { echoCancellation: true, noiseSuppression: true };
+  // raw by default (ledger:M163): the phone's echo cancelling, noise suppression and gain control strip the music that
+  // bleeds into the mic, and that bleed is what lines a hummed part up with the beat heard; speech reads fine without
+  const on = !micRaw, base = { echoCancellation: on, noiseSuppression: on, autoGainControl: on };
   if (micSrc === 'phone') {
     try {
       const ds = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'audioinput' && d.label);
@@ -292,6 +294,11 @@ $('micsrc').onclick = () => {
   $('micsrc').textContent = micSrc === 'phone' ? 'Record: phone mic' : 'Record: earbuds';
   closeMic(); if (micKeep && keysOn && want) armMic();
 };
+$('micraw').onclick = () => {
+  micRaw = !micRaw; store.set('mic_raw', micRaw); $('micraw').textContent = micRaw ? 'Mic: raw' : 'Mic: cleaned';
+  closeMic(); if (micKeep && keysOn && want) armMic();
+};
+$('micraw').textContent = micRaw ? 'Mic: raw' : 'Mic: cleaned';
 $('mickeep').textContent = micKeep ? 'Mic: kept open' : 'Mic: per note';
 $('micsrc').textContent = micSrc === 'phone' ? 'Record: phone mic' : 'Record: earbuds';
 async function micStart() {
@@ -305,6 +312,10 @@ async function micStart() {
   }
   const mime = ['audio/webm;codecs=opus', 'audio/ogg;codecs=opus', 'audio/mp4'].find((m) => window.MediaRecorder && MediaRecorder.isTypeSupported(m)) || '';
   talk.chunks = []; talk.t = heardNow(); talk.sid = sid; talk.started = Date.now(); talk.end = 'press';
+  try {                                     // what the browser actually applied, so each route's numbers stay apart
+    const g = talk.stream.getAudioTracks()[0].getSettings(), f = (k) => (g[k] === undefined ? '?' : g[k] ? 1 : 0);
+    talk.mic = `${micSrc} ${micRaw ? 'raw' : 'cleaned'} ec${f('echoCancellation')} ns${f('noiseSuppression')} agc${f('autoGainControl')}`;
+  } catch (e) { talk.mic = micSrc; }
   ev('note_start', { mic: micSrc, open_ms: talk.openMs || 0, kept: micKeep });
   talk.rec = new MediaRecorder(talk.stream, mime ? { mimeType: mime } : undefined);
   talk.rec.ondataavailable = (e) => { if (e.data.size) talk.chunks.push(e.data); };
@@ -342,7 +353,7 @@ function micStop(sendIt) {
   ev('note_end', { dur: Math.round(dur * 10) / 10, by: endBy, sent: !!sendIt });
   r.onstop = () => {
     const blob = new Blob(talk.chunks, { type: r.mimeType || 'audio/webm' });
-    if (sendIt && blob.size > 1500) upload(blob, talk.sid, talk.t, dur, endBy);
+    if (sendIt && blob.size > 1500) upload(blob, talk.sid, talk.t, dur, endBy, talk.mic, Date.now());
     else if (sendIt) { toast('too short: hold a little longer'); keyState('talk', 'mic', 'Hold to talk'); }
     if (!micKeep) closeMic();
   };
@@ -374,8 +385,9 @@ function meterStop() {
   [...$('meter').children].forEach((b) => b.classList.remove('lit'));
 }
 const pending = [];
-async function upload(blob, s, t, dur, endBy) {
-  const u = `api/voice?sid=${encodeURIComponent(s || '')}&t=${t == null ? '' : t}` + (dur ? `&dur=${dur.toFixed(1)}&end=${endBy || 'press'}` : '');
+async function upload(blob, s, t, dur, endBy, mic, ended) {
+  const u = `api/voice?sid=${encodeURIComponent(s || '')}&t=${t == null ? '' : t}` + (dur ? `&dur=${dur.toFixed(1)}&end=${endBy || 'press'}` : '') +
+    (mic ? `&mic=${encodeURIComponent(mic)}` : '') + (ended ? `&ago=${((Date.now() - ended) / 1000).toFixed(2)}` : '');
   try {
     const r = await fetch(u, { method: 'POST', headers: { 'Content-Type': blob.type }, body: blob });
     const j = await r.json();
@@ -384,7 +396,7 @@ async function upload(blob, s, t, dur, endBy) {
     toast('sent'); buzz([30, 60, 30]); setTimeout(() => cue('sent'), 350);
     if (!talk.rec) { keyState('talk', 'sent', 'Sent', 'sent'); setTimeout(() => { if (!talk.rec) keyState('talk', 'mic', 'Hold to talk'); }, 1400); }
   } catch (e) {
-    pending.push([blob, s, t, dur, endBy]); toast('offline: the note waits and sends when you are back'); cue('error');
+    pending.push([blob, s, t, dur, endBy, mic, ended]); toast('offline: the note waits and sends when you are back'); cue('error');
     if (!talk.rec) keyState('talk', 'blocked', 'Waiting to send');
   }
 }

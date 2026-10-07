@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Hum a part into a voice note (ledger:M163, the Live DJ's handoff 52)
+
+- The phone server keeps the last 150 s of the master in memory while an engine plays (page open or not), and every
+  voice note saves the music under it (`<id>_ref.wav`, 3 s before to 2 s after, with beat stamps), so the bleed into
+  the mic can line a sung part up with the beat heard, with no recording on. Heard from the room speaker with the
+  stream off, the start is a guess from the note's arrival and the ref spans 20 s either side.
+- A hum is told from the note itself, with no button (Nate): pitched, holding its notes, few words. It reaches the
+  inbox as kind `hum`. `phone_hum(voice_id)` answers for any note.
+- The page records raw by default ("Mic: raw"; "Mic: cleaned" turns the phone's echo cancelling, noise suppression
+  and gain control back on): the processing stripped the bleed on Nate's first hum. Each note carries `mic` (the
+  route and what the browser applied) and how long ago it ended, so an upload that waited offline still lines up. The notes, grid and swing come from the Live DJ's
+  measuring once it holds on real hums. 213 tools.
+
 ### The phone page stays awake while the stream is down (ledger:M142)
 
 - After a server restart a page in a pocket never reconnected: a hidden page whose audio stops is frozen by

@@ -80,6 +80,28 @@ in the bud, and a long press opens the phone's assistant). So, while a set plays
   mic" records with the phone's own microphone, so the earbuds may stay in music quality throughout. If the phone
   will not open the mic (the screen off, or blocked), a low tone and a line say so.
 
+## A hum is a part: the music under every note
+
+Every voice note keeps the master the page played under it, from 3 s before the person began to 2 s after they
+stopped (`<id>_ref.wav` beside the note, with the beat at points through it in `<id>_ref.json`). The server keeps the
+last two and a half minutes of the master in memory for this, whenever an engine plays, page open or not, so nothing
+has to be recording (`ISMAIL_PHONE_KEEP_MASTER=0` turns that off). When they listen on the room speaker with the
+stream off, the note's start is a guess from when it arrived, and the ref spans 20 s either side
+(`start_is_guess`, `search_s`): search that window, and the room route gets its own latency.
+
+The page records raw by default ("Mic: raw"): the phone's echo cancelling, noise suppression and gain control strip
+the bleed, and the first real hum would not line up through them (PSR 5 to 7, against 17 to 51 on clean tests).
+"Mic: cleaned" turns them back on. Every note says what it was recorded with (`mic`: 'phone raw ec0 ns0 agc0', what
+the browser actually applied), so keep each route's numbers apart. The music bleeds into
+their mic a little, and that is the sync signal: cross-correlate the note with its ref and every sample of what they
+sang maps to the beat they heard, with the stream delay and the latency of their input folded in.
+
+There is no hum button. A note that is mostly pitched, holds its notes and has few words is a hum: it arrives in the
+inbox as kind `hum` (with the pitch it sits around and the ref), right after its transcript. `phone_hum(voice_id)`
+answers for any note, the latest by default, so you can look at one the check let pass. Answer a hum by playing it
+back on an instrument at the next loop line and asking whether that is what they sang. The thresholds are first
+guesses: measure them on the phone mic first, then on each headset, and keep the latency of each input.
+
 ## Pause means stop, now
 
 A pause from the person (the Pause key, or "pause the set" said in a note) is acted on by the phone server itself:
