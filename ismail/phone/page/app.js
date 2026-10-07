@@ -77,11 +77,15 @@ audio.addEventListener('timeupdate', () => { if (audio.currentTime > lastT + 0.2
 // profiler"): every stall the browser reports and every freeze (sound not advancing for over 1.5 s) is logged with
 // its length, whether a voice note was recording, the playback rate and the network, so phone_timeline shows each gap
 const gap = { at: 0, kind: '', note: false };
-function gapStart(kind) { if (!want || gap.at) return; gap.at = Date.now(); gap.kind = kind; gap.note = !!talk.rec; }
+function gapStart(kind) {
+  if (!want || gap.at) return;
+  gap.at = Date.now(); gap.kind = kind; gap.note = !!talk.rec; gap.rate = audio.playbackRate; gap.buf = +bufAhead().toFixed(1);
+  if (audio.playbackRate !== 1) { audio.playbackRate = 1; catchHold = Date.now() + HOLD_MS; }   // the network can't keep up
+}
 function gapEnd() {
   if (!gap.at) return;
   const ms = Date.now() - gap.at, c = navigator.connection || {};
-  if (ms >= 300) ev('stall', { cause: gap.kind, ms, during_note: gap.note || !!talk.rec, rate: audio.playbackRate,
+  if (ms >= 300) ev('stall', { cause: gap.kind, ms, during_note: gap.note || !!talk.rec, rate: gap.rate, buf: gap.buf,
     net: c.effectiveType || '', downlink: c.downlink, mic: talk.stream ? (micSrc === 'phone' ? 'phone' : 'earbuds') : 'closed' });
   gap.at = 0;
 }
@@ -412,11 +416,23 @@ function renderTaps() {
 // The phone's player pauses when the network stalls and carries on from there, so every stall adds to the delay
 // (17 s, then 40 s on a walk, 10-06). Past CATCH_S behind it plays 8 % faster (the pitch is kept) until it is close
 // to the room again, and the Live key says how far behind it is.
-const CATCH_S = 15, CLOSE_S = 6, CATCH_RATE = 1.08;
+// Faster only while the phone holds BUF_GO seconds of sound ahead of the playhead: on 4G the network often delivers
+// barely faster than real time, and 1.08x then drained the buffer and stalled every 4 to 9 s (Nate 10-07 07:44,
+// "cutouts on the phone that are not on the speakers": 32 stalls in 45 min, every one at 1.08x). A stall while
+// catching up sets the rate back and holds it at 1 for HOLD_MS: a steady delay beats a gap every few seconds.
+const CATCH_S = 15, CLOSE_S = 6, CATCH_RATE = 1.08, BUF_GO = 4, BUF_STOP = 2, HOLD_MS = 120000;
+let catchHold = 0;
+function bufAhead() {
+  const b = audio.buffered, t = audio.currentTime;
+  for (let i = 0; i < b.length; i++) if (b.start(i) <= t + 0.1 && b.end(i) >= t) return b.end(i) - t;
+  return 0;
+}
 function catchUp(b) {
   if (!want || b == null || clip.el) { if (audio.playbackRate !== 1) audio.playbackRate = 1; return; }
-  if (b > CATCH_S && audio.playbackRate === 1) { audio.preservesPitch = true; audio.playbackRate = CATCH_RATE; ev('catch_up', { behind: Math.round(b) }); }
-  else if (b < CLOSE_S && audio.playbackRate !== 1) audio.playbackRate = 1;
+  const buf = bufAhead();
+  if (b > CATCH_S && audio.playbackRate === 1 && buf >= BUF_GO && Date.now() > catchHold) {
+    audio.preservesPitch = true; audio.playbackRate = CATCH_RATE; ev('catch_up', { behind: Math.round(b), buf: +buf.toFixed(1) });
+  } else if (audio.playbackRate !== 1 && (b < CLOSE_S || buf < BUF_STOP)) audio.playbackRate = 1;
   $('golive').textContent = b > CATCH_S ? `Live -${Math.round(b)} s` : 'Live';
 }
 let clockMode = store.get('clock', false), polledAt = Date.now();
