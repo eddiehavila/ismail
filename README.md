@@ -68,7 +68,7 @@ Everything goes in as text (notes, instrument patches, effect chains, automation
 
 One set of operations, three ways in:
 
-- **MCP server** for Claude Code, Cursor or any MCP client: `ismail mcp` (stdio, 212 tools: 111 for music and live play, 82 `stage_*` for the VR stage, 19 `phone_*` for the phone page)
+- **MCP server** for Claude Code, Cursor or any MCP client: `ismail mcp` (stdio, 213 tools: 111 for music and live play, 82 `stage_*` for the VR stage, 20 `phone_*` for the phone page)
 - **CLI**: `ismail -p <project> <op> [args]` (same as `python -m ismail ...`)
 - **Python**: `from ismail import api`
 
@@ -98,12 +98,14 @@ readings.
    [uv](https://docs.astral.sh/uv/) it is one command:
    `uvx --from git+https://github.com/newsbubbles/ismail ismail mcp`). Ask the person only for what only they can do.
 2. **Call `guide`.** It returns the workflow and the conventions, and for someone new it opens with their first
-   session: two sentences, at most two questions, sound within minutes.
+   session. That block is the one opening: two sentences, at most two questions, sound within minutes. Ask nothing
+   before it (a recording is welcome, never required), and let their first answer set your words
+   (`guide(first_answer=...)`: a musician gets their trade's words, everyone else plain words).
 3. **Load the skill.** `skills/ismail` is the playbook: plan before writing notes, read every render back, and
    compare against references with the tools. The Claude Code plugin loads it for you; elsewhere, clone the repo and
    link the folder.
-4. **Start small.** A short loop rendered to an mp3 they can play. Ask before playing anything live through their
-   speakers.
+4. **Start small.** A short loop rendered to an mp3 they can play (for someone new, the first session's `sketch`).
+   Ask before playing anything live through their speakers.
 5. **Measure first.** Read the analysis before you call a sound right. Anything that can be measured (the grid,
    the swing, a kit, levels against a reference) is measured, never guessed.
 6. **Then ask their senses, with exams.** Your person's ears and eyes are the instrument for what no reading
@@ -156,14 +158,19 @@ Runs on Windows, macOS and Linux; CI tests all three on every push. The one OS-s
 
 ## Use it with Claude Code
 
-**As a plugin (tools and skill in one step).** Needs [uv](https://docs.astral.sh/uv/). In Claude Code:
+**As a plugin (tools and skill in one step).** Needs [uv](https://docs.astral.sh/uv/). In Claude Code, these two
+lines add ismail's marketplace and install the plugin from it (send them one at a time):
 
 ```
 /plugin marketplace add newsbubbles/ismail
 /plugin install ismail@ismail
 ```
 
-The plugin runs the server with uvx (from this repo) and loads the composing skill.
+On Claude Code 2.1.275 or newer one line does both: `/plugin install ismail --marketplace newsbubbles/ismail`. From
+a shell (no pasting): `claude plugin marketplace add newsbubbles/ismail`, then `claude plugin install ismail@ismail`.
+The plugin runs the server with uvx (from this repo) and loads the composing skill. The first time each ismail tool
+runs, Claude asks to allow it: expect about 10 to 20 Allow boxes over setup and a first session
+([setup.md](skills/ismail/references/setup.md) says how to count them).
 
 **By hand:**
 

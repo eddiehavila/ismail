@@ -198,11 +198,15 @@ def phone_now(now: str = None, next: str = None, recording_why: str = None, mood
 
 @op()
 def phone_panel_show(panel_id: str = None, title: str = '', text: str = '', image: str = None, buttons: list = None,
-                     wait: float = 0, sender: str = None) -> str:
-    """A panel over the phone page (the stage_panel_show shape): title, text, an image file, buttons (labels). The
-    tap arrives in the inbox as kind 'answer' {id, answer}; wait=N blocks up to N seconds for it."""
+                     inputs: list = None, wait: float = 0, sender: str = None) -> str:
+    """A panel over the phone page (the stage_panel_show shape): title, text, an image file, buttons (labels), and
+    inputs for a fuller answer: [{'id', 'kind': 'choice' (one of options) | 'check' (any of options) | 'toggle' (on
+    or off) | 'text', 'label', 'options'}]. A tap arrives as kind 'answer' {id, answer, values: {input id: value},
+    for: sender}; wait=N blocks up to N seconds for it. Every panel has a record button: what they say on it arrives
+    as kind 'voice' and 'voice_text' with panel=<id> and for=<sender>, so pass sender (your name) to get it back.
+    A panel never interrupts a voice note: it waits until they stop recording."""
     return _call('panel_show', timeout=float(wait or 0) + 15, panel_id=panel_id, title=title, text=text, image=image,
-                 buttons=buttons, wait=wait, who=sender)
+                 buttons=buttons, inputs=inputs, wait=wait, who=sender)
 
 
 @op()
@@ -264,7 +268,7 @@ def phone_vibe(preset: str = None, ground: str = None, ink: str = None, accent: 
                image: str = None, blur: int = None, dim: float = None, effect: str = None, intensity: float = None,
                transition_ms: int = None, reset: bool = False, menu: bool = False, layers: list = None,
                hue_drift: float = None, at: str = None, ramp_beats: float = None, save: str = None, scene: str = None,
-               cancel_moves: bool = False, sender: str = None) -> str:
+               cancel_moves: bool = False, react: dict = None, sender: str = None) -> str:
     """Set the phone page's look to fit the music, so the person feels you there (as the stage does in VR): change it
     with the mood, on chapter changes. preset: a starting point (default, rain, calm, warm, night, peak), then any
     part over it. ground/ink/accent: colours ('#rrggbb', 'rgb(r g b)', 'hsl(h s% l%)'); the ground stays dark, ink
@@ -281,11 +285,15 @@ def phone_vibe(preset: str = None, ground: str = None, ink: str = None, accent: 
     at='bar:N': the look lands on bar N as the phone hears it (a drop on its downbeat); each call with at= adds a
     move, building on the last one, and they play in bar order; ramp_beats: fade into it over that many beats.
     cancel_moves=True drops the scheduled ones. save='name' keeps the resulting look as a scene; scene='name'
-    starts from a saved one (then any part over it)."""
+    starts from a saved one (then any part over it).
+    react: the set's own notes drive the page, each on the beat the phone hears it: {track: reaction} with flash,
+    glow, burst, sparks, drops or ring, or {track: {'do': 'glow', 'color': '#ff8844', 'amount': 0.8}}; 'qrq*'
+    matches every track starting qrq. E.g. {'kick': 'glow', 'qrq': 'sparks', 'stab': 'flash', 'piano': 'drops'}.
+    {} turns it off."""
     return _call('vibe', preset=preset, ground=ground, ink=ink, accent=accent, heading=heading, image=image, blur=blur,
                  dim=dim, effect=effect, intensity=intensity, transition_ms=transition_ms, reset=reset or None,
                  menu=menu or None, layers=layers, hue_drift=hue_drift, at=at, ramp_beats=ramp_beats, save=save,
-                 scene=scene, cancel_moves=cancel_moves or None, who=sender)
+                 scene=scene, cancel_moves=cancel_moves or None, react=react, who=sender)
 
 
 @op()
@@ -309,6 +317,15 @@ def phone_unsay(match: str = None, since: str = None, n: int = None) -> str:
     case ignored), since='HH:MM' (today), or n=3 (the last three). Never put where the person lives, their name or
     other personal details on the page: they may be recording the screen."""
     return _call('unsay', match=match, since=since, n=n)
+
+
+@op()
+def phone_hum(voice_id: str = None) -> str:
+    """Is a voice note a hum or a sung line, and where is the music he heard under it: any note (the latest when no
+    voice_id). A hum is told from the note itself (pitched, holding its notes, few words) and also arrives in the
+    inbox as kind 'hum'. Every note keeps the master the page played under it (<id>_ref.wav, from 3 s before to 2 s
+    after, with beat stamps): the music bleeding into the mic lines the note up with the beat he heard."""
+    return _call('hum', voice_id=voice_id)
 
 
 @op()

@@ -61,7 +61,7 @@ function backoff() { retry = Math.min(retry + 1, 6); return 1000 * 2 ** (retry -
 function setPlaying(on) {
   if (on !== want) ev(on ? 'listen' : 'stop');
   want = on;
-  if (on) connect(); else { audio.pause(); audio.removeAttribute('src'); audio.load(); sid = null; }
+  if (on) connect(); else { holdOff(); audio.pause(); audio.removeAttribute('src'); audio.load(); sid = null; }
   keyState('play', on ? 'wait' : 'play', on ? 'Stop' : 'Listen', on ? 'wait' : null); $('play').classList.toggle('on', on);
   if ('mediaSession' in navigator) navigator.mediaSession.playbackState = on ? 'playing' : 'paused';
   remember();
@@ -69,19 +69,32 @@ function setPlaying(on) {
 $('play').onclick = () => { setPlaying(!want); if (want && keysOn) armMic(); };
 $('golive').onclick = () => { if (!want) return setPlaying(true); connect(0); toast('back to live'); };
 $('back').onclick = () => { want = true; connect(30); send('/api/tap', { what: 'rewind' }, true); toast('30 s back'); };
-['error', 'ended'].forEach((ev) => audio.addEventListener(ev, () => { if (want) setTimeout(() => want && connect(), backoff()); }));
-audio.addEventListener('playing', () => { if (want) keyState('play', 'stop', 'Stop'); });
+// ledger:M142: after a server restart a page in a pocket never came back. A hidden page whose audio stops loses the
+// media exemption and Android freezes its timers, so the retries never run. While the stream is down, a loop far
+// under hearing (40 Hz at -80 dBFS) keeps the page playing, and so awake, until the stream plays again.
+let keep = null;
+function holdOn() {
+  if (!want) return;
+  try { if (!keep) { keep = new Audio(wav([[40, 1000]], 3)); keep.loop = true; } if (keep.paused) keep.play().catch(() => {}); } catch (e) {}
+}
+function holdOff() { if (keep && !keep.paused) keep.pause(); }
+['error', 'ended'].forEach((ev) => audio.addEventListener(ev, () => { if (want) { holdOn(); setTimeout(() => want && connect(), backoff()); } }));
+audio.addEventListener('playing', () => { holdOff(); if (want) keyState('play', 'stop', 'Stop'); });
 ['waiting', 'stalled'].forEach((x) => audio.addEventListener(x, () => { if (want) keyState('play', 'wait', 'Stop', 'wait'); }));
 audio.addEventListener('timeupdate', () => { if (audio.currentTime > lastT + 0.2) { lastT = audio.currentTime; lastAdvance = Date.now(); } });
 // the stream's gaps, measured (Nate 10-06 14:56: "dropouts ... is that the stream due to buffering ... or CPU ... a
 // profiler"): every stall the browser reports and every freeze (sound not advancing for over 1.5 s) is logged with
 // its length, whether a voice note was recording, the playback rate and the network, so phone_timeline shows each gap
 const gap = { at: 0, kind: '', note: false };
-function gapStart(kind) { if (!want || gap.at) return; gap.at = Date.now(); gap.kind = kind; gap.note = !!talk.rec; }
+function gapStart(kind) {
+  if (!want || gap.at) return;
+  gap.at = Date.now(); gap.kind = kind; gap.note = !!talk.rec; gap.rate = audio.playbackRate; gap.buf = +bufAhead().toFixed(1);
+  if (audio.playbackRate !== 1) { audio.playbackRate = 1; catchHold = Date.now() + HOLD_MS; }   // the network can't keep up
+}
 function gapEnd() {
   if (!gap.at) return;
   const ms = Date.now() - gap.at, c = navigator.connection || {};
-  if (ms >= 300) ev('stall', { cause: gap.kind, ms, during_note: gap.note || !!talk.rec, rate: audio.playbackRate,
+  if (ms >= 300) ev('stall', { cause: gap.kind, ms, during_note: gap.note || !!talk.rec, rate: gap.rate, buf: gap.buf,
     net: c.effectiveType || '', downlink: c.downlink, mic: talk.stream ? (micSrc === 'phone' ? 'phone' : 'earbuds') : 'closed' });
   gap.at = 0;
 }
@@ -91,7 +104,7 @@ audio.addEventListener('timeupdate', () => { if (gap.at && gap.kind === 'freeze'
 setInterval(() => { if (want && !audio.paused && !clip.el && Date.now() - lastAdvance > 1500) gapStart('freeze'); }, 500);
 try { navigator.mediaDevices.addEventListener('devicechange', () => ev('route', { during_note: !!talk.rec })); } catch (e) {}
 setInterval(() => {                     // a stream that stops moving reconnects (wifi dropped, server restarted)
-  if (want && !clip.el && Date.now() - lastAdvance > 12000) { lastAdvance = Date.now(); $('livetext').textContent = 'reconnecting'; connect(); }
+  if (want && !clip.el && Date.now() - lastAdvance > 12000) { lastAdvance = Date.now(); $('livetext').textContent = 'reconnecting'; holdOn(); connect(); }
 }, 3000);
 setInterval(() => { if (want) remember(); }, 30000);
 window.addEventListener('online', () => { if (want) connect(); flush(); });
@@ -205,9 +218,11 @@ const talk = { rec: null, stream: null, chunks: [], down: 0, toggle: false, t: n
 // the music sounds bad. So by default the mic opens for a note and closes after it, and the earbuds go back to music
 // quality. 'Mic: kept open' is the old way (an earbud press starts a note even with the screen off, in call quality).
 // 'Record: phone mic' records with the phone's own microphone, so the earbuds may never enter call mode.
-let micKeep = store.get('mic_keep', false), micSrc = store.get('mic_src', 'earbuds');
+let micKeep = store.get('mic_keep', false), micSrc = store.get('mic_src', 'earbuds'), micRaw = store.get('mic_raw', true);
 async function openMic() {
-  const base = { echoCancellation: true, noiseSuppression: true };
+  // raw by default (ledger:M163): the phone's echo cancelling, noise suppression and gain control strip the music that
+  // bleeds into the mic, and that bleed is what lines a hummed part up with the beat heard; speech reads fine without
+  const on = !micRaw, base = { echoCancellation: on, noiseSuppression: on, autoGainControl: on };
   if (micSrc === 'phone') {
     try {
       const ds = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'audioinput' && d.label);
@@ -226,7 +241,7 @@ function closeMic() {                     // every track stopped: the earbuds ca
 }
 // ---- earbud button and the tones you hear in your pocket
 let keysOn = store.get('keys', true), noteTimer = 0;
-function wav(parts) {                       // [[freq, ms], ...] -> a data: URI of a short 16-bit tone sequence
+function wav(parts, amp = 9000) {           // [[freq, ms], ...] -> a data: URI of a short 16-bit tone sequence
   const sr = 22050, n = parts.reduce((a, [, ms]) => a + Math.round(sr * ms / 1000), 0);
   const b = new DataView(new ArrayBuffer(44 + 2 * n)); let o = 44;
   const str = (i, t) => [...t].forEach((c, k) => b.setUint8(i + k, c.charCodeAt(0)));
@@ -235,7 +250,7 @@ function wav(parts) {                       // [[freq, ms], ...] -> a data: URI 
   str(36, 'data'); b.setUint32(40, 2 * n, true);
   for (const [f, ms] of parts) {
     const m = Math.round(sr * ms / 1000);
-    for (let i = 0; i < m; i++) { const env = Math.min(1, i / 200, (m - i) / 400); b.setInt16(o, f ? Math.sin(2 * Math.PI * f * i / sr) * 9000 * env : 0, true); o += 2; }
+    for (let i = 0; i < m; i++) { const env = Math.min(1, i / 200, (m - i) / 400); b.setInt16(o, f ? Math.sin(2 * Math.PI * f * i / sr) * amp * env : 0, true); o += 2; }
   }
   let bin = ''; new Uint8Array(b.buffer).forEach((x) => { bin += String.fromCharCode(x); });
   return 'data:audio/wav;base64,' + btoa(bin);
@@ -283,6 +298,11 @@ $('micsrc').onclick = () => {
   $('micsrc').textContent = micSrc === 'phone' ? 'Record: phone mic' : 'Record: earbuds';
   closeMic(); if (micKeep && keysOn && want) armMic();
 };
+$('micraw').onclick = () => {
+  micRaw = !micRaw; store.set('mic_raw', micRaw); $('micraw').textContent = micRaw ? 'Mic: raw' : 'Mic: cleaned';
+  closeMic(); if (micKeep && keysOn && want) armMic();
+};
+$('micraw').textContent = micRaw ? 'Mic: raw' : 'Mic: cleaned';
 $('mickeep').textContent = micKeep ? 'Mic: kept open' : 'Mic: per note';
 $('micsrc').textContent = micSrc === 'phone' ? 'Record: phone mic' : 'Record: earbuds';
 async function micStart() {
@@ -296,6 +316,10 @@ async function micStart() {
   }
   const mime = ['audio/webm;codecs=opus', 'audio/ogg;codecs=opus', 'audio/mp4'].find((m) => window.MediaRecorder && MediaRecorder.isTypeSupported(m)) || '';
   talk.chunks = []; talk.t = heardNow(); talk.sid = sid; talk.started = Date.now(); talk.end = 'press';
+  try {                                     // what the browser actually applied, so each route's numbers stay apart
+    const g = talk.stream.getAudioTracks()[0].getSettings(), f = (k) => (g[k] === undefined ? '?' : g[k] ? 1 : 0);
+    talk.mic = `${micSrc} ${micRaw ? 'raw' : 'cleaned'} ec${f('echoCancellation')} ns${f('noiseSuppression')} agc${f('autoGainControl')}`;
+  } catch (e) { talk.mic = micSrc; }
   ev('note_start', { mic: micSrc, open_ms: talk.openMs || 0, kept: micKeep });
   talk.rec = new MediaRecorder(talk.stream, mime ? { mimeType: mime } : undefined);
   talk.rec.ondataavailable = (e) => { if (e.data.size) talk.chunks.push(e.data); };
@@ -325,6 +349,9 @@ const NOTE_QUIET_MS = 30000, NOTE_MAX_MS = 10 * 60000;
 function micStop(sendIt) {
   const r = talk.rec; if (!r) return;
   talk.rec = null; talk.toggle = false;
+  const onPanel = talk.panel; talk.panel = null;
+  const pb = document.getElementById('panelrec');
+  if (pb) { pb.classList.remove('on'); pb.textContent = sendIt ? 'Sent. Say more' : 'Say more'; }
   $('talk').classList.remove('on'); keyState('talk', sendIt ? 'sending' : 'mic', sendIt ? 'Sending' : 'Hold to talk', sendIt ? 'sending' : null); audio.volume = 1;
   $('talkhint').textContent = 'tap once for hands-free, tap again to send';
   meterStop();
@@ -333,9 +360,10 @@ function micStop(sendIt) {
   ev('note_end', { dur: Math.round(dur * 10) / 10, by: endBy, sent: !!sendIt });
   r.onstop = () => {
     const blob = new Blob(talk.chunks, { type: r.mimeType || 'audio/webm' });
-    if (sendIt && blob.size > 1500) upload(blob, talk.sid, talk.t, dur, endBy);
+    if (sendIt && blob.size > 1500) upload(blob, talk.sid, talk.t, dur, endBy, talk.mic, Date.now(), onPanel);
     else if (sendIt) { toast('too short: hold a little longer'); keyState('talk', 'mic', 'Hold to talk'); }
     if (!micKeep) closeMic();
+    if (heldPanel) { heldPanel = false; renderPanel(); }      // a panel that came in while they talked shows now
   };
   r.stop();
 }
@@ -365,8 +393,10 @@ function meterStop() {
   [...$('meter').children].forEach((b) => b.classList.remove('lit'));
 }
 const pending = [];
-async function upload(blob, s, t, dur, endBy) {
-  const u = `api/voice?sid=${encodeURIComponent(s || '')}&t=${t == null ? '' : t}` + (dur ? `&dur=${dur.toFixed(1)}&end=${endBy || 'press'}` : '');
+async function upload(blob, s, t, dur, endBy, mic, ended, panel) {
+  const u = `api/voice?sid=${encodeURIComponent(s || '')}&t=${t == null ? '' : t}` + (dur ? `&dur=${dur.toFixed(1)}&end=${endBy || 'press'}` : '') +
+    (mic ? `&mic=${encodeURIComponent(mic)}` : '') + (ended ? `&ago=${((Date.now() - ended) / 1000).toFixed(2)}` : '') +
+    (panel ? `&panel=${encodeURIComponent(panel)}` : '');
   try {
     const r = await fetch(u, { method: 'POST', headers: { 'Content-Type': blob.type }, body: blob });
     const j = await r.json();
@@ -375,7 +405,7 @@ async function upload(blob, s, t, dur, endBy) {
     toast('sent'); buzz([30, 60, 30]); setTimeout(() => cue('sent'), 350);
     if (!talk.rec) { keyState('talk', 'sent', 'Sent', 'sent'); setTimeout(() => { if (!talk.rec) keyState('talk', 'mic', 'Hold to talk'); }, 1400); }
   } catch (e) {
-    pending.push([blob, s, t, dur, endBy]); toast('offline: the note waits and sends when you are back'); cue('error');
+    pending.push([blob, s, t, dur, endBy, mic, ended, panel]); toast('offline: the note waits and sends when you are back'); cue('error');
     if (!talk.rec) keyState('talk', 'blocked', 'Waiting to send');
   }
 }
@@ -412,11 +442,23 @@ function renderTaps() {
 // The phone's player pauses when the network stalls and carries on from there, so every stall adds to the delay
 // (17 s, then 40 s on a walk, 10-06). Past CATCH_S behind it plays 8 % faster (the pitch is kept) until it is close
 // to the room again, and the Live key says how far behind it is.
-const CATCH_S = 15, CLOSE_S = 6, CATCH_RATE = 1.08;
+// Faster only while the phone holds BUF_GO seconds of sound ahead of the playhead: on 4G the network often delivers
+// barely faster than real time, and 1.08x then drained the buffer and stalled every 4 to 9 s (Nate 10-07 07:44,
+// "cutouts on the phone that are not on the speakers": 32 stalls in 45 min, every one at 1.08x). A stall while
+// catching up sets the rate back and holds it at 1 for HOLD_MS: a steady delay beats a gap every few seconds.
+const CATCH_S = 15, CLOSE_S = 6, CATCH_RATE = 1.08, BUF_GO = 4, BUF_STOP = 2, HOLD_MS = 120000;
+let catchHold = 0;
+function bufAhead() {
+  const b = audio.buffered, t = audio.currentTime;
+  for (let i = 0; i < b.length; i++) if (b.start(i) <= t + 0.1 && b.end(i) >= t) return b.end(i) - t;
+  return 0;
+}
 function catchUp(b) {
   if (!want || b == null || clip.el) { if (audio.playbackRate !== 1) audio.playbackRate = 1; return; }
-  if (b > CATCH_S && audio.playbackRate === 1) { audio.preservesPitch = true; audio.playbackRate = CATCH_RATE; ev('catch_up', { behind: Math.round(b) }); }
-  else if (b < CLOSE_S && audio.playbackRate !== 1) audio.playbackRate = 1;
+  const buf = bufAhead();
+  if (b > CATCH_S && audio.playbackRate === 1 && buf >= BUF_GO && Date.now() > catchHold) {
+    audio.preservesPitch = true; audio.playbackRate = CATCH_RATE; ev('catch_up', { behind: Math.round(b), buf: +buf.toFixed(1) });
+  } else if (audio.playbackRate !== 1 && (b < CLOSE_S || buf < BUF_STOP)) audio.playbackRate = 1;
   $('golive').textContent = b > CATCH_S ? `Live -${Math.round(b)} s` : 'Live';
 }
 let clockMode = store.get('clock', false), polledAt = Date.now();
@@ -534,7 +576,7 @@ const fx = (() => {
   }
   function frame(t) {
     raf = 0;
-    if (document.visibilityState !== 'visible' || !(layers.length || old.length)) return;
+    if (document.visibilityState !== 'visible' || !(layers.length || old.length || hits.length)) return;
     raf = requestAnimationFrame(frame);
     if (t - last < 33) return;                                       // about 30 frames a second is plenty
     const dt = Math.min(0.1, (t - last) / 1000); last = t;
@@ -543,10 +585,36 @@ const fx = (() => {
     if (k >= 1) old = [];
     for (const L of old) draw(L, t, dt, 1 - k);
     for (const L of layers) draw(L, t, dt, k);
+    hitDraw(t);
     cx.globalAlpha = 1; cx.globalCompositeOperation = 'source-over';
     cv.style.filter = drift ? `hue-rotate(${(drift * t / 60000) % 360}deg)` : '';
   }
-  function go() { if (!raf && (layers.length || old.length) && !still.matches && document.visibilityState === 'visible') raf = requestAnimationFrame(frame); }
+  // the notes' reactions (ledger:M160 phase 2): short-lived marks drawn over the layers
+  let hits = [];
+  function hitDraw(t) {
+    const now = performance.now();
+    hits = hits.filter((h) => now - h.at < h.life);
+    for (const h of hits) {
+      const k = 1 - (now - h.at) / h.life, a = h.amount * k;
+      cx.globalCompositeOperation = 'lighter';
+      if (h.do === 'flash') { cx.globalAlpha = a * 0.35; cx.fillStyle = h.color; cx.fillRect(0, 0, W, H); }
+      else if (h.do === 'glow') {
+        const g = cx.createRadialGradient(W / 2, H + 30, 10, W / 2, H + 30, H * (0.35 + 0.35 * h.amount));
+        g.addColorStop(0, h.color); g.addColorStop(1, 'transparent'); cx.globalAlpha = a * 0.8; cx.fillStyle = g; cx.fillRect(0, 0, W, H);
+      } else if (h.do === 'burst' || h.do === 'sparks') {
+        cx.fillStyle = h.color;
+        for (const p of h.parts) { const d = (1 - k) * p.v; cx.globalAlpha = a; cx.beginPath(); cx.arc(h.x + Math.cos(p.a) * d, h.y + Math.sin(p.a) * d, p.r, 0, 6.283); cx.fill(); }
+      } else if (h.do === 'drops') {
+        const y = (1 - k) * H * 1.1; cx.strokeStyle = h.color; cx.globalAlpha = a; cx.lineWidth = 2;
+        cx.beginPath(); cx.moveTo(h.x, y - 40); cx.lineTo(h.x, y); cx.stroke();
+      } else if (h.do === 'ring') {
+        cx.strokeStyle = h.color; cx.globalAlpha = a; cx.lineWidth = 2;
+        cx.beginPath(); cx.arc(W / 2, H / 2, (1 - k) * Math.max(W, H) * 0.6, 0, 6.283); cx.stroke();
+      }
+    }
+    return hits.length;
+  }
+  function go() { if (!raf && (layers.length || old.length || hits.length) && !still.matches && document.visibilityState === 'visible') raf = requestAnimationFrame(frame); }
   window.addEventListener('resize', () => { size(); layers.forEach(seed); });
   document.addEventListener('visibilitychange', go);
   return {
@@ -558,6 +626,15 @@ const fx = (() => {
       if (still.matches || !(layers.length || old.length)) { if (raf) cancelAnimationFrame(raf); raf = 0; cx.clearRect(0, 0, cv.width, cv.height); return; }
       go();
     },
+    hit(x) {
+      if (still.matches) return;
+      const life = { flash: 220, glow: 420, burst: 600, sparks: 300, drops: 900, ring: 900 }[x.do] || 400;
+      const n = x.do === 'burst' ? 18 : x.do === 'sparks' ? 6 : 0;
+      hits.push(Object.assign({ at: performance.now(), life, x: Math.random() * W, y: Math.random() * H * 0.8,
+        parts: Array.from({ length: n }, () => ({ a: Math.random() * 6.283, v: 40 + Math.random() * 120, r: 1 + Math.random() * 2 })) }, x));
+      hits.splice(0, Math.max(0, hits.length - 60)); go();
+    },
+    get hits() { return hits.length; },
     get kind() { return layers.map((L) => L.effect).join('+') || 'none'; },
     get layers() { return layers; },
   };
@@ -581,6 +658,26 @@ function vibeNow() {
   return v;
 }
 setInterval(() => { if (state.vibe && document.visibilityState === 'visible') applyVibe(vibeNow()); }, 50);
+// the set's notes on the beat this phone hears (phone_vibe react=): each onset fires once, as it reaches the ear
+const fired = new Set();
+function reactFor(track, map) {
+  if (map[track]) return map[track];
+  const k = Object.keys(map).find((p) => p.endsWith('*') && track.startsWith(p.slice(0, -1)));
+  return k ? map[k] : null;
+}
+setInterval(() => {
+  const v = vibeNow(), map = v && v.react, b = heardBeat();
+  if (!map || b == null || document.visibilityState !== 'visible') return;
+  const acc = (v.css && v.css['--accent']) || '#ffffff';
+  for (const o of state.onsets || []) {
+    const key = o.t + '@' + o.b;
+    if (o.b > b || o.b < b - 0.5 || fired.has(key)) continue;
+    fired.add(key);
+    const r = reactFor(o.t, map);
+    if (r) fx.hit({ do: r.do, color: r.color || acc, amount: r.amount * Math.min(1, Math.max(0.3, (o.l + 40) / 34)) });
+  }
+  if (fired.size > 2000) fired.clear();
+}, 30);
 
 const feedItems = [];
 function addFeed(it) { feedItems.unshift(it); feedItems.splice(12); renderFeed(); }
@@ -606,12 +703,19 @@ function playClip(url, box) {
   a.onended = () => { box.classList.remove('playing'); clip.el = null; };
   a.play().catch(() => toast('could not play that clip'));
 }
-let shown = null;
+let shown = null, heldPanel = false;
 function renderPanel() {
   const ps = state.panels || [];
   const p = ps[ps.length - 1];
   if (!p) { if (shown) { $('sheet').classList.remove('show'); stopClip(); shown = null; } return; }
   if (shown === p.id) return;
+  // a new panel never covers a voice note being recorded (Nate 10-07 08:56: "Am I still recording right now? ... it
+  // was still recording geez"): no sound, no buzz, no sheet; the record key says one is waiting, and it opens when
+  // the note ends
+  if (talk.rec) {
+    if (!heldPanel) { heldPanel = true; $('talkhint').textContent = 'recording. A question is waiting: it opens when you send'; }
+    return;
+  }
   shown = p.id; buzz([80, 60, 80]); sound('panel'); ev('panel_open', { id: p.id, title: p.title || '' });
   const box = $('panel');
   let h = `<h2>${esc(p.title)}</h2>` + (p.text ? `<p>${esc(p.text)}</p>` : '') + (p.image ? `<img src="${esc(p.image)}">` : '');
@@ -624,12 +728,45 @@ function renderPanel() {
     h += `<div class="hint">Listening on</div><div class="chips" id="listenon">${['Earbuds', 'Headphones', 'Phone speaker', 'Speaker'].map((w) => `<button data-on="${w}" class="${w === dev ? 'sel' : ''}">${w}</button>`).join('')}</div>`;
     h += `<textarea id="examnote" placeholder="a note (optional)"></textarea><div class="btns"><button id="submit" style="font-weight:700">Submit</button></div>`;
   } else {
+    h += (p.inputs || []).map((x) => {
+      const lab = x.label ? `<div class="inlab">${esc(x.label)}</div>` : '';
+      if (x.kind === 'text') return lab + `<textarea data-in="${esc(x.id)}" data-kind="text">${esc(x.value || '')}</textarea>`;
+      if (x.kind === 'toggle') return `<div class="chips"><button data-in="${esc(x.id)}" data-kind="toggle" class="${x.value ? 'sel' : ''}">${esc(x.label || x.id)}: ${x.value ? 'on' : 'off'}</button></div>`;
+      const val = [].concat(x.value || []);
+      return lab + `<div class="chips" data-in="${esc(x.id)}" data-kind="${x.kind}">${(x.options || []).map((o) => `<button data-opt="${esc(o)}" class="${val.includes(o) ? 'sel' : ''}">${esc(o)}</button>`).join('')}</div>`;
+    }).join('');
     h += `<div class="btns">${(p.buttons || ['OK']).map((b) => `<button data-answer="${esc(b)}">${esc(b)}</button>`).join('')}</div>`;
   }
+  // every panel takes a voice reply too (Nate 10-07 08:52: "I felt like I should be able to say more"): tap to
+  // record, tap again to send; it reaches the agent that sent the panel, and the panel stays open
+  h += `<div class="btns"><button id="panelrec" class="rec">Say more</button></div>`;
   box.innerHTML = h;
+  box.querySelectorAll('[data-kind="toggle"]').forEach((b) => { b.onclick = () => {
+    const on = !b.classList.contains('sel'); b.classList.toggle('sel', on);
+    const x = (p.inputs || []).find((i) => i.id === b.dataset.in); b.textContent = `${(x && x.label) || b.dataset.in}: ${on ? 'on' : 'off'}`; }; });
+  box.querySelectorAll('.chips[data-kind="choice"], .chips[data-kind="check"]').forEach((g) => {
+    g.querySelectorAll('[data-opt]').forEach((b) => { b.onclick = () => {
+      if (g.dataset.kind === 'choice') g.querySelectorAll('[data-opt]').forEach((o) => { if (o !== b) o.classList.remove('sel'); });
+      b.classList.toggle('sel'); }; }); });
+  const values = () => {
+    const v = {};
+    box.querySelectorAll('[data-kind="text"]').forEach((t) => { v[t.dataset.in] = t.value; });
+    box.querySelectorAll('[data-kind="toggle"]').forEach((b) => { v[b.dataset.in] = b.classList.contains('sel'); });
+    box.querySelectorAll('.chips[data-kind="choice"]').forEach((g) => { const s = g.querySelector('.sel'); v[g.dataset.in] = s ? s.dataset.opt : null; });
+    box.querySelectorAll('.chips[data-kind="check"]').forEach((g) => { v[g.dataset.in] = [...g.querySelectorAll('.sel')].map((s) => s.dataset.opt); });
+    return v;
+  };
+  $('panelrec').onclick = async () => {
+    if (talk.rec && talk.panel === p.id) { micStop(true); return; }
+    if (talk.rec) { toast('finish the note you are recording first'); return; }
+    talk.panel = p.id; await micStart();
+    if (talk.rec) { talk.toggle = true; $('panelrec').classList.add('on'); $('panelrec').textContent = 'Recording: tap to send'; }
+    else talk.panel = null;
+  };
   $('sheet').classList.add('show');
   box.querySelectorAll('[data-answer]').forEach((b) => { b.onclick = async () => {
-    const j = await send('/api/answer', { id: p.id, answer: b.dataset.answer });
+    if (talk.rec && talk.panel === p.id) micStop(true);        // what they were saying goes too
+    const j = await send('/api/answer', { id: p.id, answer: b.dataset.answer, ...(p.inputs ? { values: values() } : {}) });
     if (j) { toast('sent: ' + b.dataset.answer); } } });
   box.querySelectorAll('.playclip').forEach((b) => { b.onclick = () => playClip(b.dataset.url, b.closest('.clip')); });
   box.querySelectorAll('[data-chip]').forEach((b) => { b.onclick = () => b.classList.toggle('sel'); });
@@ -717,7 +854,7 @@ function onCmd(c) {
   else if (c.type === 'vibe') { state.vibe = c.vibe; applyVibe(vibeNow()); }
   else if (c.type === 'caption') { sound('message'); toast(c.text); if (c.buzz) buzz([150, 80, 150]); notifyBg(c.who || 'ismail live', c.text); }
   else if (c.type === 'buzz') buzz(c.pattern);
-  else if (c.type === 'restarting') { restarting = Date.now(); toast('updating, back in a few seconds'); }
+  else if (c.type === 'restarting') { restarting = Date.now(); holdOn(); toast('updating, back in a few seconds'); }
   else if (c.type === 'say_clip') {                // spoken to the page itself: nobody was on the stream
     const a = new Audio(c.url); a.play().catch(() => { toast((c.who || 'DJ') + ': ' + c.text); buzz([150, 80, 150]); });
   }

@@ -80,6 +80,36 @@ in the bud, and a long press opens the phone's assistant). So, while a set plays
   mic" records with the phone's own microphone, so the earbuds may stay in music quality throughout. If the phone
   will not open the mic (the screen off, or blocked), a low tone and a line say so.
 
+## A hum is a part: the music under every note
+
+Every voice note keeps the master the page played under it, from 3 s before the person began to 2 s after they
+stopped (`<id>_ref.wav` beside the note, with the beat at points through it in `<id>_ref.json`). The server keeps the
+last two and a half minutes of the master in memory for this, whenever an engine plays, page open or not, so nothing
+has to be recording (`ISMAIL_PHONE_KEEP_MASTER=0` turns that off). When they listen on the room speaker with the
+stream off, the note's start is a guess from when it arrived, and the ref spans 20 s either side
+(`start_is_guess`, `search_s`): search that window, and the room route gets its own latency.
+
+The page records raw by default ("Mic: raw"): the phone's echo cancelling, noise suppression and gain control strip
+the bleed, and the first real hum would not line up through them (PSR 5 to 7, against 17 to 51 on clean tests).
+"Mic: cleaned" turns them back on. Every note says what it was recorded with (`mic`: 'phone raw ec0 ns0 agc0', what
+the browser actually applied), so keep each route's numbers apart. The music bleeds into
+their mic a little, and that is the sync signal: cross-correlate the note with its ref and every sample of what they
+sang maps to the beat they heard, with the stream delay and the latency of their input folded in.
+
+There is no hum button. A note that is mostly pitched, holds its notes and has few words is a hum: it arrives in the
+inbox as kind `hum` (with the pitch it sits around and the ref), right after its transcript. `phone_hum(voice_id)`
+answers for any note, the latest by default, so you can look at one the check let pass. Answer a hum by playing it
+back on an instrument at the next loop line and asking whether that is what they sang. The thresholds are first
+guesses: measure them on the phone mic first, then on each headset, and keep the latency of each input.
+
+## Panels: a fuller answer, said or tapped
+
+`phone_panel_show` takes `inputs` beside the buttons when one tap is not enough: `choice` (one of `options`),
+`check` (any of them), `toggle`, `text`. The answer arrives as kind `answer` with `values` by input id. Every panel
+also has a "Say more" button: what they say there arrives as `voice` and `voice_text` with `panel` and `for` (your
+`sender`), so always pass `sender`, and listen for both. A panel never interrupts a voice note: it waits, silent,
+until the note is sent.
+
 ## Pause means stop, now
 
 A pause from the person (the Pause key, or "pause the set" said in a note) is acted on by the phone server itself:
@@ -130,7 +160,10 @@ accent 3:1) and refuses one that is not, saying what to change. `phone_vibe(menu
 For more than one effect, give `layers`: up to three, drawn in order, each with its own `speed`, `density`, `size`,
 `angle` (rain's slant), `opacity`, `color`/`color2` and `blend` (normal, add, screen, multiply, overlay), e.g.
 `layers=[{'effect': 'aurora', 'speed': 0.5}, {'effect': 'rain', 'density': 0.9, 'angle': 25, 'blend': 'add'}]`;
-`hue_drift` turns the colours a few degrees a minute. Land a look on the music: `at='bar:65'` puts it on bar 65 as
+`hue_drift` turns the colours a few degrees a minute. Let the set's own notes drive it: `react={'kick': 'glow',
+'qrq*': 'sparks', 'stab': 'flash', 'piano': 'drops'}` fires each track's reaction (flash, glow, burst, sparks,
+drops, ring) on every note, on the beat the phone hears it, from the engine's own schedule, so the page shows the
+arrangement, not a guess at the beat. Land a look on the music: `at='bar:65'` puts it on bar 65 as
 the phone hears it (the stream's delay included), `ramp_beats=` fades into it over that many beats, and each call
 with `at=` adds a move after the last one, so a drop flashes on its downbeat. `cancel_moves=True` drops them. Keep a
 look for a chapter with `save='gnawa_drop'` and bring it back with `scene='gnawa_drop'`.
