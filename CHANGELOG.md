@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Phone page: catch up only while the phone holds sound ahead (the 4G cutouts)
+
+- The page played 1.08x to catch up with the room whenever it was over 15 s behind; on 4G that drained its buffer and
+  stalled every 4 to 9 s (Nate 10-07: "cutouts on the phone that are not on the speakers"; 32 stalls in 45 min, all at
+  1.08x). It now speeds up only while 4 s are buffered, drops back under 2 s, and holds normal speed for 2 min after a
+  stall. Each stall logs the rate and seconds buffered when it began.
+
 ### Hum a part into a voice note (ledger:M163, the Live DJ's handoff 52)
 
 - The phone server keeps the last 150 s of the master in memory while an engine plays (page open or not), and every
