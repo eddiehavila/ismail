@@ -102,6 +102,14 @@ answers for any note, the latest by default, so you can look at one the check le
 back on an instrument at the next loop line and asking whether that is what they sang. The thresholds are first
 guesses: measure them on the phone mic first, then on each headset, and keep the latency of each input.
 
+## Panels: a fuller answer, said or tapped
+
+`phone_panel_show` takes `inputs` beside the buttons when one tap is not enough: `choice` (one of `options`),
+`check` (any of them), `toggle`, `text`. The answer arrives as kind `answer` with `values` by input id. Every panel
+also has a "Say more" button: what they say there arrives as `voice` and `voice_text` with `panel` and `for` (your
+`sender`), so always pass `sender`, and listen for both. A panel never interrupts a voice note: it waits, silent,
+until the note is sent.
+
 ## Pause means stop, now
 
 A pause from the person (the Pause key, or "pause the set" said in a note) is acted on by the phone server itself:

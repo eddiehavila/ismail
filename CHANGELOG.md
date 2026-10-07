@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Phone panels: choices, checkboxes, toggles, a voice reply, and never over a voice note (ledger:M167)
+
+- `phone_panel_show(inputs=[...])`: choice (one of), check (any of), toggle and text inputs beside the buttons; the
+  answer carries `values` and `for` (the sender). Nate 10-07: "checkboxes or toggles so that I could give more of a
+  detailed response".
+- Every panel has "Say more": tap to record, tap to send; the note carries `panel` and `for`, so it reaches the agent
+  that sent the panel, and the panel stays open ("I felt like I should be able to say more").
+- A panel that arrives while a voice note records waits, silent, until the note is sent; the talk hint says one is
+  waiting (Nate 10-07 08:56: "Am I still recording right now? ... it was still recording geez").
+
 ### Hum a part into a voice note (ledger:M163, the Live DJ's handoff 52)
 
 - The phone server keeps the last 150 s of the master in memory while an engine plays (page open or not), and every
