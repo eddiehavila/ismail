@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### First session: the rest of ismail waits for its moment (ledger:M168)
+
+- guide's first-session block (step 8) and user-experience.md: the phone page, live play and the VR stage are each
+  offered in one sentence at the moment they answer something the person did (kept a sketch, wants to jam, has a
+  headset, steps away), never up front; a no holds for the session.
+
 ### Phone page: catch up only while the phone holds sound ahead (the 4G cutouts)
 
 - The page played 1.08x to catch up with the room whenever it was over 15 s behind; on 4G that drained its buffer and
