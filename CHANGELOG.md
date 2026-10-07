@@ -9,6 +9,19 @@
   page now plays a loop far under hearing (40 Hz at -80 dBFS) until the stream plays again. Needs a check on a
   phone with the screen off.
 
+### Spectrogram windows for eyes (ledger:M165 step 1, moved from vox)
+
+- `spectrogram(seconds=, f_lo=, f_hi=, ruler=, words=)` and `analysis.spectrogram_png(...)`: one sound on a fixed
+  plot box (two pictures of a window line up pixel for pixel), a ms ruler, words drawn and named, and a `.json` map
+  from pixel to (s, Hz); `analysis.eye_address` names a spot the way the person and the agent both read it. Parity
+  with vox's `eyeword.crop_png2` and its page's address: 20 of 20 pictures identical on its own files, every click
+  on the plot box the same address. The mel view with bar lines is unchanged.
+
+### Skill: loudness matching is one fixed gain, never ffmpeg loudnorm as a filter (ledger:S55, the Live DJ's handoff 51)
+
+- instruments.md (A/B clips) and mastering.md: measure, then apply one fixed gain; `loudnorm` as the filter rides the
+  level, even two-pass with `linear=true` when the true-peak ceiling would break.
+
 ### The phone page shows the set's notes as they reach the ear (ledger:M160 phase 2, Nate 10-06 14:48)
 
 - `phone_vibe(react={track: reaction})`: flash, glow, burst, sparks, drops or ring on every note of that track
