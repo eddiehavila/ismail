@@ -546,7 +546,7 @@ const fx = (() => {
   }
   function frame(t) {
     raf = 0;
-    if (document.visibilityState !== 'visible' || !(layers.length || old.length)) return;
+    if (document.visibilityState !== 'visible' || !(layers.length || old.length || hits.length)) return;
     raf = requestAnimationFrame(frame);
     if (t - last < 33) return;                                       // about 30 frames a second is plenty
     const dt = Math.min(0.1, (t - last) / 1000); last = t;
@@ -555,10 +555,36 @@ const fx = (() => {
     if (k >= 1) old = [];
     for (const L of old) draw(L, t, dt, 1 - k);
     for (const L of layers) draw(L, t, dt, k);
+    hitDraw(t);
     cx.globalAlpha = 1; cx.globalCompositeOperation = 'source-over';
     cv.style.filter = drift ? `hue-rotate(${(drift * t / 60000) % 360}deg)` : '';
   }
-  function go() { if (!raf && (layers.length || old.length) && !still.matches && document.visibilityState === 'visible') raf = requestAnimationFrame(frame); }
+  // the notes' reactions (ledger:M160 phase 2): short-lived marks drawn over the layers
+  let hits = [];
+  function hitDraw(t) {
+    const now = performance.now();
+    hits = hits.filter((h) => now - h.at < h.life);
+    for (const h of hits) {
+      const k = 1 - (now - h.at) / h.life, a = h.amount * k;
+      cx.globalCompositeOperation = 'lighter';
+      if (h.do === 'flash') { cx.globalAlpha = a * 0.35; cx.fillStyle = h.color; cx.fillRect(0, 0, W, H); }
+      else if (h.do === 'glow') {
+        const g = cx.createRadialGradient(W / 2, H + 30, 10, W / 2, H + 30, H * (0.35 + 0.35 * h.amount));
+        g.addColorStop(0, h.color); g.addColorStop(1, 'transparent'); cx.globalAlpha = a * 0.8; cx.fillStyle = g; cx.fillRect(0, 0, W, H);
+      } else if (h.do === 'burst' || h.do === 'sparks') {
+        cx.fillStyle = h.color;
+        for (const p of h.parts) { const d = (1 - k) * p.v; cx.globalAlpha = a; cx.beginPath(); cx.arc(h.x + Math.cos(p.a) * d, h.y + Math.sin(p.a) * d, p.r, 0, 6.283); cx.fill(); }
+      } else if (h.do === 'drops') {
+        const y = (1 - k) * H * 1.1; cx.strokeStyle = h.color; cx.globalAlpha = a; cx.lineWidth = 2;
+        cx.beginPath(); cx.moveTo(h.x, y - 40); cx.lineTo(h.x, y); cx.stroke();
+      } else if (h.do === 'ring') {
+        cx.strokeStyle = h.color; cx.globalAlpha = a; cx.lineWidth = 2;
+        cx.beginPath(); cx.arc(W / 2, H / 2, (1 - k) * Math.max(W, H) * 0.6, 0, 6.283); cx.stroke();
+      }
+    }
+    return hits.length;
+  }
+  function go() { if (!raf && (layers.length || old.length || hits.length) && !still.matches && document.visibilityState === 'visible') raf = requestAnimationFrame(frame); }
   window.addEventListener('resize', () => { size(); layers.forEach(seed); });
   document.addEventListener('visibilitychange', go);
   return {
@@ -570,6 +596,15 @@ const fx = (() => {
       if (still.matches || !(layers.length || old.length)) { if (raf) cancelAnimationFrame(raf); raf = 0; cx.clearRect(0, 0, cv.width, cv.height); return; }
       go();
     },
+    hit(x) {
+      if (still.matches) return;
+      const life = { flash: 220, glow: 420, burst: 600, sparks: 300, drops: 900, ring: 900 }[x.do] || 400;
+      const n = x.do === 'burst' ? 18 : x.do === 'sparks' ? 6 : 0;
+      hits.push(Object.assign({ at: performance.now(), life, x: Math.random() * W, y: Math.random() * H * 0.8,
+        parts: Array.from({ length: n }, () => ({ a: Math.random() * 6.283, v: 40 + Math.random() * 120, r: 1 + Math.random() * 2 })) }, x));
+      hits.splice(0, Math.max(0, hits.length - 60)); go();
+    },
+    get hits() { return hits.length; },
     get kind() { return layers.map((L) => L.effect).join('+') || 'none'; },
     get layers() { return layers; },
   };
@@ -593,6 +628,26 @@ function vibeNow() {
   return v;
 }
 setInterval(() => { if (state.vibe && document.visibilityState === 'visible') applyVibe(vibeNow()); }, 50);
+// the set's notes on the beat this phone hears (phone_vibe react=): each onset fires once, as it reaches the ear
+const fired = new Set();
+function reactFor(track, map) {
+  if (map[track]) return map[track];
+  const k = Object.keys(map).find((p) => p.endsWith('*') && track.startsWith(p.slice(0, -1)));
+  return k ? map[k] : null;
+}
+setInterval(() => {
+  const v = vibeNow(), map = v && v.react, b = heardBeat();
+  if (!map || b == null || document.visibilityState !== 'visible') return;
+  const acc = (v.css && v.css['--accent']) || '#ffffff';
+  for (const o of state.onsets || []) {
+    const key = o.t + '@' + o.b;
+    if (o.b > b || o.b < b - 0.5 || fired.has(key)) continue;
+    fired.add(key);
+    const r = reactFor(o.t, map);
+    if (r) fx.hit({ do: r.do, color: r.color || acc, amount: r.amount * Math.min(1, Math.max(0.3, (o.l + 40) / 34)) });
+  }
+  if (fired.size > 2000) fired.clear();
+}, 30);
 
 const feedItems = [];
 function addFeed(it) { feedItems.unshift(it); feedItems.splice(12); renderFeed(); }

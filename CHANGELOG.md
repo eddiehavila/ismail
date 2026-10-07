@@ -15,6 +15,42 @@
   route and what the browser applied) and how long ago it ended, so an upload that waited offline still lines up. The notes, grid and swing come from the Live DJ's
   measuring once it holds on real hums. 213 tools.
 
+### Spectrogram windows for eyes (ledger:M165 step 1, moved from vox)
+
+- `spectrogram(seconds=, f_lo=, f_hi=, ruler=, words=)` and `analysis.spectrogram_png(...)`: one sound on a fixed
+  plot box (two pictures of a window line up pixel for pixel), a ms ruler, words drawn and named, and a `.json` map
+  from pixel to (s, Hz); `analysis.eye_address` names a spot the way the person and the agent both read it. Parity
+  with vox's `eyeword.crop_png2` and its page's address: 20 of 20 pictures identical on its own files, every click
+  on the plot box the same address. The mel view with bar lines is unchanged.
+
+### Skill: loudness matching is one fixed gain, never ffmpeg loudnorm as a filter (ledger:S55, the Live DJ's handoff 51)
+
+- instruments.md (A/B clips) and mastering.md: measure, then apply one fixed gain; `loudnorm` as the filter rides the
+  level, even two-pass with `linear=true` when the true-peak ceiling would break.
+
+### The phone page shows the set's notes as they reach the ear (ledger:M160 phase 2, Nate 10-06 14:48)
+
+- `phone_vibe(react={track: reaction})`: flash, glow, burst, sparks, drops or ring on every note of that track
+  ('qrq*' matches a prefix), each fired when the phone hears its beat (the stream's delay included). The engine's new
+  `onsets` command lists the events it has placed (track, beat, level); the phone server passes them on only while
+  a look reacts to them. No audio analysis on the phone.
+
+### First session: one opening, the person's words, calmer setup (ledger:M151 G-1, G-2, U-1..U-4)
+
+- One opening: guide's FIRST SESSION block is the only one. SKILL.md's step 0 no longer asks for a recording first
+  (one is welcome, never required), and the skill's first-session section, README, AGENTS.md and setup.md point to
+  the block. At most two questions before any sound: what it is for and whether they play, then a mood or a
+  reference.
+- `guide(first_answer=<their words>)` says which words to use from then on: musician (they name an instrument they
+  play, a style they trained in, or reading music; a negated mention does not count), with their trade's words, or
+  plain words. user-experience.md has the rule.
+- setup.md: before the first command, "about 10 to 20 Allow boxes" (how it was counted is in a comment beside it);
+  the plugin added from the shell when a `claude` command is there, otherwise both lines in one block with one
+  sentence, or one line on Claude Code 2.1.275+; "Quit Claude from the tray" on Windows; Documents found through
+  the known-folder path (OneDrive moves it), replacing the `%USERPROFILE%\Documents` setx line; every wait named
+  with its time from the dress rehearsals (install, warm-up, first call, first sketch). The first-session block
+  says the sketch times too.
+
 ### The update card lists every change waiting
 
 - The left-wrist update card lists the changes waiting (up to five, the most important first, then "+N more") and

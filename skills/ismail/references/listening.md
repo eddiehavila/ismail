@@ -18,6 +18,14 @@
 | Why does it sound fake or digital? | `spectrogram` of the reference and of yours, same bars | look at them together, one above the other: "chopped rectangles vs ringing lines" showed partials that stopped instead of decaying. Then an ear test (`references/blind-tests.md`) |
 | Anything else | `spectrogram` (PNG) | last resort; it caught a missing low-pass that no text view showed |
 
+Zoom in for eyes. `spectrogram(seconds=[t0, t1], f_lo=, f_hi=, ruler=True, words=[...])` draws one sound (a word,
+a hit, a note plus 60 ms either side) on a fixed plot box, so the reference's picture and yours line up pixel for
+pixel; the ruler counts ms from the window start and each word's start is drawn and named. A `.json` beside the PNG
+maps a pixel to (s, Hz): `analysis.eye_address(view, fx, fy)` gives the spot the way you and the person both name it
+(`0.19 s 7.9 kHz "this" hiss`; bands body 0-1 kHz, vowel bands 1-4, hiss 4-8, air 8-16), so a screenshot they mark
+points you to the same place. From the Voice agent's work, where the eye found in one look what 40 rounds of numbers
+missed.
+
 Tracks are analysable as `track:<name>` only after `render(stems=True)`. A track stem is the track after its own effects and fader, scaled by the master chain's gain, so the stems sum to the mix. That means a sidechain duck shows up in `track:<name>`; if it barely dips, the duck depth is small, not the stem pre-fx.
 
 Readings that mislead:

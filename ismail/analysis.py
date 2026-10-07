@@ -1193,7 +1193,21 @@ def formants(path, grid, bars, steps_per_beat=2, order=12, fmax=5000, max_bars=8
     return out, '\n'.join(lines)
 
 
-def spectrogram_png(path, out_png, t0=0.0, t1=None, grid=None, n_mels=128):
+EYE_BOX = (0.08, 0.11, 0.9, 0.86)        # the plot box in figure fractions (left, bottom, width, height): fixed, so
+                                         # two pictures of one window line up pixel for pixel and a page maps clicks
+EYE_BANDS = ((1000, 'body'), (4000, 'vowel bands'), (8000, 'hiss'), (16001, 'air'))   # the names both sides use
+
+
+def spectrogram_png(path, out_png, t0=0.0, t1=None, grid=None, n_mels=128, f_lo=None, f_hi=None, words=None,
+                    target=None, ruler=False, box=None):
+    """A spectrogram PNG of [t0, t1] s. By default a mel view with bar lines (grid). With any of f_lo, f_hi,
+    words, ruler or box: the picture for eyes (ledger:M165 step 1, vox's eyeword.crop_png2): a linear STFT on a
+    fixed plot box (EYE_BOX), the band f_lo..f_hi Hz, a ruler in ms from t0, each word's start drawn and named
+    (words: [{'w', 't0', 't1'}] in s; target: the one word whose bounds are bright), and out_png + '.json', the map
+    from a pixel to (s, Hz) that a page or eye_address reads."""
+    if f_lo is not None or f_hi is not None or words or ruler or box:
+        return _eye_png(path, out_png, t0, t1, f_lo or 0.0, f_hi or 16000.0, words or [], target, ruler,
+                        tuple(box or EYE_BOX))
     import matplotlib
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
@@ -1218,3 +1232,82 @@ def spectrogram_png(path, out_png, t0=0.0, t1=None, grid=None, n_mels=128):
     fig.savefig(out_png)
     plt.close(fig)
     return out_png
+
+
+def _eye_png(path, out_png, t0, t1, f_lo, f_hi, words, target, ruler, box, size=(6.4, 4.2), dpi=100):
+    import json
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    import matplotlib.mlab as mlab
+    import soundfile as sf
+    y, sr = sf.read(str(path), dtype='float64')
+    if y.ndim > 1:
+        y = y.mean(axis=1)
+    t1 = len(y) / sr if t1 is None else t1
+    if not 0 <= f_lo < f_hi:
+        raise ValueError(f"f_lo {f_lo} Hz must be under f_hi {f_hi} Hz")
+    seg = y[max(0, int((t0 - 0.03) * sr)):int((t1 + 0.03) * sr)]
+    S, f, t = mlab.specgram(seg, NFFT=1024, Fs=sr, noverlap=1024 - 64)
+    t = t + max(0.0, t0 - 0.03)
+    m = (t >= t0) & (t <= t1)
+    if not m.any():
+        raise ValueError(f"window {t0:.3f}-{t1:.3f} s holds no frame of {path} ({len(y) / sr:.2f} s)")
+    d = t1 - t0
+    fig = plt.figure(figsize=size, dpi=dpi)
+    ax = fig.add_axes(list(box))
+    ax.imshow(10 * np.log10(S[:, m] + 1e-20), origin='lower', aspect='auto', cmap='magma', vmin=-150, vmax=-40,
+              extent=[0, d * 1000, 0, f[-1]], interpolation='nearest')
+    ax.set_ylim(f_lo, f_hi)
+    ax.set_xlim(0, d * 1000)
+    ticks = [x for x in (0, 2000, 4000, 8000, 12000, 16000, 20000) if f_lo <= x <= f_hi]
+    ax.set_yticks(ticks)
+    ax.set_yticklabels([f"{x // 1000}k" if x else '0' for x in ticks], fontsize=7)
+    if ruler:
+        step = 50 if d < 0.6 else 100 if d < 2 else 500 if d < 10 else 1000
+        ax.set_xticks(np.arange(0, d * 1000 + 1, step))
+        ax.tick_params(axis='x', labelsize=7)
+        ax.set_xlabel('ms', fontsize=7, labelpad=1)
+    else:
+        ax.set_xticks([])
+    top = f_lo + (f_hi - f_lo) * 15300 / 16000
+    for w in words:
+        if w['t1'] < t0 or w['t0'] > t1:
+            continue
+        hot = bool(target) and w['w'] == target['w'] and abs(w['t0'] - target['t0']) < 1e-6
+        for e in (w['t0'], w['t1']) if hot else (w['t0'],):
+            if t0 <= e <= t1:
+                ax.axvline((e - t0) * 1000, color='w', lw=1.2 if hot else 0.6, alpha=0.9 if hot else 0.5)
+        ax.text(max(0.0, (w['t0'] - t0) * 1000) + 3, top, w['w'], color='w', fontsize=10 if hot else 8,
+                fontweight='bold' if hot else 'normal', va='top')
+    fig.savefig(out_png)
+    plt.close(fig)
+    with open(str(out_png) + '.json', 'w', encoding='utf8') as fh:
+        json.dump({'png': os.path.basename(str(out_png)), 'axes': list(box), 'px': [int(size[0] * dpi), int(size[1] * dpi)],
+                   't0': round(t0, 4), 't1': round(t1, 4), 'f_lo': f_lo, 'f_hi': f_hi,
+                   'words': [{'w': w['w'], 't0': w['t0'], 't1': w.get('t1')} for w in words
+                             if w['t1'] >= t0 and w['t0'] <= t1]}, fh)
+    return out_png
+
+
+def eye_point(view, fx, fy):
+    """A spot on an eye picture as fractions of the image (fx from the left, fy from the top, as a page reads a
+    click) -> (s from the start of the file, Hz), or None off the plot box. view: the picture's .json."""
+    l, b, w, h = view['axes']
+    u, v = (fx - l) / w, (1 - fy - b) / h
+    if not (0 <= u <= 1 and 0 <= v <= 1):
+        return None
+    return view['t0'] + u * (view['t1'] - view['t0']), view['f_lo'] + v * (view['f_hi'] - view['f_lo'])
+
+
+def eye_address(view, fx, fy, label=''):
+    """The shared address of a spot, as the person reads it off a screenshot and the agent finds it again:
+    '<label> 0.19 s 7.9 kHz "this" hiss' (time from the window start; the word under it or 'gap'; the band name)."""
+    p = eye_point(view, fx, fy)
+    if p is None:
+        return None
+    t, f = p
+    w = [x for x in view.get('words') or [] if x['t0'] <= t]
+    word = w[-1]['w'] if w and (w[-1].get('t1') is None or t <= w[-1]['t1'] + 0.02) else 'gap'
+    band = next(n for top, n in EYE_BANDS if f < top) if f < EYE_BANDS[-1][0] else EYE_BANDS[-1][1]
+    return (f"{label} " if label else '') + f'{t - view["t0"]:.2f} s {f / 1000:.1f} kHz "{word}" {band}'

@@ -241,6 +241,7 @@ class Phone:
         self.cond = threading.Condition()
         self.route = inbox
         self.paused_at = 0.0
+        self.onsets = []                         # the engine's placed events (cmd_onsets), when the look reacts to them
         self.seq = self._last_seq()
         self.cmd_id = 0
         self.cmds = []
@@ -504,6 +505,11 @@ class Phone:
                         got.update(port=port, project=eng[port].get('project'), at=time.time())
                 except Exception:
                     got = None
+                if got and (self.view.get('vibe') or {}).get('react'):
+                    try:                                  # only while the look reacts to the notes
+                        self.onsets = engine_call(port, 'onsets').get('onsets') or []
+                    except Exception:
+                        pass
             self.engine = got
             if got and got.get('playing') and KEEP_MASTER:  # the music under a note heard from the room speaker too
                 with self.cond:
@@ -881,6 +887,7 @@ class Phone:
                 'voice': [{'id': k, 'state': v} for k, v in self.voice_state.items()],
                 'heard': self.heard(sid, t) if sid else {}, 'cmd': self.cmd_id,
                 'vibe': self.vibe_now(), 'vibe_moves': self.view.get('vibe_moves') or [], 'room': self.room(),
+                'onsets': self.onsets if (self.view.get('vibe') or {}).get('react') else [],
                 'sounds': self.view.get('sounds') or {}, 'into_s': self.into_s(), 'clock': time.strftime('%H:%M:%S'),
                 'shape': self.view.get('shape') or {},
                 'boot': BOOT, 'build': BUILD}
@@ -1093,7 +1100,8 @@ class Agent:
 
     def op_vibe(self, preset=None, ground=None, ink=None, accent=None, heading=None, image=None, blur=None, dim=None,
                 effect=None, intensity=None, transition_ms=None, reset=False, menu=False, layers=None,
-                hue_drift=None, at=None, ramp_beats=None, save=None, scene=None, cancel_moves=False, who=None):
+                hue_drift=None, at=None, ramp_beats=None, save=None, scene=None, cancel_moves=False, react=None,
+                who=None):
         ph = self.ph
         moves = ph.view.setdefault('vibe_moves', [])
         scenes = ph.view.setdefault('scenes', {})
@@ -1130,7 +1138,7 @@ class Agent:
             cur['layers'] = None                       # the one-effect shortcut replaces the layers
         for k, v in (('ground', ground), ('ink', ink), ('accent', accent), ('heading', heading), ('blur', blur),
                      ('dim', dim), ('effect', effect), ('intensity', intensity), ('transition_ms', transition_ms),
-                     ('layers', layers), ('hue_drift', hue_drift)):
+                     ('layers', layers), ('hue_drift', hue_drift), ('react', react)):
             if v is not None:
                 cur[k] = v
         if preset and layers is None and effect is None:
