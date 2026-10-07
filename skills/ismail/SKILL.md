@@ -77,22 +77,19 @@ own drum scanner and band comparisons had all of them available. A measuring scr
 ## A person's first session
 
 When `guide` opens with FIRST SESSION, the person has made nothing with ismail yet, and this try decides whether
-they come back. Say in two sentences what this is (you write the music as notes and instruments, render it and read
-it back as numbers; they judge by ear; everything stays as editable files on their machine). Ask at most two
-questions: what it is for, and a mood or a reference if they have one. Then give them sound within about five
-minutes: `sketch(project, brief=<their words>)` reads their tempo, key, genre, instruments and form and renders
-three readings of it on measured voices. Say first what its reply names as having no voice yet (a Rhodes played by
-the piano). Open each for them one at a time and ask which is closest or what each is missing; their correction is
-the next round, `sketch(project, <their words>, base='<letter>')`. An instrument they named with no voice is a later
-step: offer to find an example and build it (step 0); never present the stand-in as the instrument. `sketch_keep` makes the pick the song: the sketch they chose is the song's
-example (step 0 below), so a recording is welcome but never required. Then short rounds of one named change, two
-versions played in turn, and early on one deliberate "change just one thing" edit that changes only that. At the
-end, say where their files are and what it took, and name in one line what else is here (recreate a reference,
-build an instrument from recordings, play live, the VR stage).
+they come back. That block is the one opening: follow it as written, and ask nothing before it from this skill,
+the README or AGENTS.md (not even for a recording: one is welcome, never required). The shape: two sentences on what
+this is; at most two questions before any sound (what it is for and whether they play, then a mood or a reference if
+they have one); `guide(first_answer=<their words>)` says whether to talk to them as a musician or in plain words
+(`references/user-experience.md`), and you keep to it; `sketch` with their words, saying what is happening and about
+how long while it renders; play each sketch, take their correction as the next round, and `sketch_keep` the pick. An
+instrument they named with no voice is a later step (offer to find an example and build it, step 0); never present
+the stand-in as the instrument. At the end, say where their files are and what it took, and name in one line what
+else is here (recreate a reference, build an instrument from recordings, play live, the VR stage).
 
 ## The loop (every piece, every time)
 
-0. **Examples.** Ask the user for a recording of what they want (a song, a sound, a link), even if they did not offer one (in a person's first session, the sketch they keep is the example). Recall what the genre is played on and find an example of each instrument that matters (`references/instruments.md`). A live set, a jam or a "quick" request starts here too: a quick framing shortens the Session Sheet, never this step or the non-negotiables (a live G-funk beat skipped them and the user called draft 1 "horrible").
+0. **Examples.** A recording of what they want (a song, a sound, a link) is welcome, never required: offer to work from one, and when they have none, the sketch they keep is the example. In a person's first session, `guide`'s FIRST SESSION block is the opening; don't ask for a recording before their first sound. Recall what the genre is played on and find an example of each instrument that matters (`references/instruments.md`). A live set, a jam or a "quick" request starts here too: a quick framing shortens the Session Sheet, never this step or the non-negotiables (a live G-funk beat skipped them and the user called draft 1 "horrible").
 1. **Session Sheet** (artifact, write it in your reply before any note): see the template below.
 2. **Build** the skeleton: tracks with instruments from the Sheet, drums first, then bass, then harmony, then lead, then ear candy. Use `batch` for multi-op edits (atomic, one round trip).
 3. **Render a window**, not the song: `render(bars=[a, b], stems=True)` on the section you just changed.
