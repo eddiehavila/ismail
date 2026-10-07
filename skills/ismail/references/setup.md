@@ -12,6 +12,17 @@ Claude Code, Cursor, Codex, or any agent that runs commands and can call MCP too
 cannot set it up. If that is you, say so plainly, and tell the person which app to install and what to type in it
 first. Installing that app is the one step only they can do.
 
+**Say what's coming, before your first command.** In an app that asks before each new tool (Claude's desktop app,
+Claude Code), tell them once: "You'll see about 10 to 20 Allow boxes in this window. Each one is me or ismail asking
+to use a tool on your computer. Click Allow (or Always allow, so that one stops asking)."
+<!-- How the 10 to 20 was counted (2026-10-06): the app asks once per tool the first time it runs: once per ismail
+tool (per tool, not per server) and once per shell command its permission mode doesn't already allow. On a machine
+missing everything, setup runs about 3 to 5 checks (section 1), up to 4 winget lines and a PATH reload (2), the
+warm-up, up to 2 plugin lines and 1 or 2 for the songs folder (3); the first session then calls 3 to 5 distinct
+ismail tools (guide, sketch, sketch_keep, lexicon_note, machine_status) and 1 to 3 play commands. That is about 7 to
+23, fewer when they press Always allow. To recount: walk sections 1 to 4 and guide's FIRST SESSION block and add
+them up again; keep README's "Use it with Claude Code" in step. -->
+
 ## 1. Look before you install
 
 Find out what is there before you change anything:
@@ -48,10 +59,15 @@ about 100 MB, anything that costs money.
 
 ## 3. Install ismail
 
-**Tell them how long it takes before you start.** The first install downloads and builds the audio libraries:
-about 5 minutes, and pip shows nothing while it works. Say "this takes about five minutes and looks frozen; it
-isn't" so silence doesn't worry them. `uv pip install` is faster than pip and shows progress: prefer it when uv is
-there.
+**Name every wait before it starts.** Say what is happening and about how long, and say it again if it runs past
+that ("still building the audio libraries, a minute or two more"). Minutes of silence read as broken. The waits a
+new person meets (dress rehearsals 1 and 2, 2026-10-05 and 10-06):
+- the install: about 5 minutes with pip, which shows nothing while it works ("this takes about five minutes and
+  looks frozen; it isn't"); `uv pip install` took 2 min 37 s and shows progress, so prefer it when uv is there;
+- the warm-up before the plugin (below): about 5 minutes, the same libraries;
+- the first ismail call after an install (`guide`): about a minute, while Python loads it the first time;
+- the first sketch: about 2 minutes (1 min 43 s), all three about 5;
+- without MCP, every CLI call: 15 to 20 seconds to start.
 
 Pick the first route that fits:
 - **In Claude Code or the desktop app's Code tab:** the plugin brings the tools and this skill in one step.
@@ -59,13 +75,27 @@ Pick the first route that fits:
      it runs, and a first start that takes minutes can time out. Run the exact command once yourself before the
      plugin lines, and tell them it is the five-minute step:
      `uvx --python 3.12 --from git+https://github.com/newsbubbles/ismail ismail --help`.
-  2. **The plugin lines.** Slash commands are typed by the person in the chat box: give them the exact lines to
-     paste, one at a time: `/plugin marketplace add newsbubbles/ismail`, then `/plugin install ismail@ismail`.
-  3. **The restart.** If ismail's tools aren't listed after the install, the app has to be closed and opened
-     again. Say so before it happens, once: "I'll ask you to close this app and open it again; this conversation
-     will still be here." Do the songs folder (below) first, so one restart covers both.
-  4. **The Allow prompts.** The first time each ismail tool runs, the app asks whether to allow it. Tell them
-     before the first one: "A box will ask to allow ismail. Press Allow (or Always allow, so it stops asking)."
+  2. **The plugin, with as little pasting as possible.** If a `claude` command runs in your shell
+     (`claude --version`), add it yourself, and they paste nothing:
+     `claude plugin marketplace add newsbubbles/ismail`, then `claude plugin install ismail@ismail`.
+     Otherwise slash commands are typed by the person in the chat box. Give them both lines in one block, with one
+     sentence: "These two lines add ismail to Claude: paste the first into the message box and press Enter, then
+     the second."
+     ```
+     /plugin marketplace add newsbubbles/ismail
+     /plugin install ismail@ismail
+     ```
+     On Claude Code 2.1.275 or newer one line does both: `/plugin install ismail --marketplace newsbubbles/ismail`
+     (it asks them to confirm the source). An install in the chat box opens the plugin's page and asks where to
+     install it: tell them to choose "Install for you".
+  3. **The restart.** The songs folder (below) reaches ismail only when the app starts again, and so do the
+     plugin's tools if they aren't listed yet. Do the songs folder first, so one restart covers both. Say so before
+     it happens, once: "I'll ask you to quit Claude and open it again; this conversation will still be here." On
+     Windows closing the window only hides it: "Quit Claude from the tray (right-click its icon by the clock,
+     Quit), then open it again." On macOS: Claude, then Quit Claude, in the menu bar.
+  4. **The Allow prompts.** The first time each ismail tool runs, the app asks whether to allow it. You told them
+     the count at the start; at the first one say: "A box will ask to allow ismail. Press Allow (or Always allow,
+     so it stops asking)."
 - **Any MCP client:** register the server command
   `uvx --python 3.12 --from git+https://github.com/newsbubbles/ismail ismail mcp`, the way that client adds MCP
   servers, after warming it up as above.
@@ -78,8 +108,13 @@ it is. Every song lives in its own subfolder there. Then point ismail at it with
 variable, or ismail looks for songs next to the installed package: the first-session check (`guide`) and the
 machine board (`machine`) won't see their songs. The board lives in `<ISMAIL_SONGS>/_machine` (or
 `ISMAIL_MACHINE_DIR`), so every agent on this computer that uses the same songs folder shares one board.
-- **Windows:** `setx ISMAIL_SONGS "%USERPROFILE%\Documents\ismail"` (new processes see it: the app restart
-  above picks it up).
+- **Windows:** find Documents through the known-folder path, not `%USERPROFILE%\Documents`: with OneDrive backup
+  on (the default on many new PCs) the Documents they see in Explorer is OneDrive\Documents. In PowerShell:
+  ```
+  $docs = [Environment]::GetFolderPath('MyDocuments'); New-Item -ItemType Directory -Force "$docs\ismail" | Out-Null; setx ISMAIL_SONGS "$docs\ismail"
+  ```
+  New processes see it: the app restart above picks it up. Tell them the folder the way Explorer shows it
+  ("Documents, then ismail").
 - **macOS and Linux:** `export ISMAIL_SONGS=~/Documents/ismail` in their shell profile; for an MCP client also put
   it in the server's `env` block, since desktop apps don't read shell profiles.
 
@@ -111,8 +146,10 @@ Nothing is public.
 
 ## 6. Then the first session
 
-`guide` says how the first session runs. Its first question can carry whether they play or read music ("what is
-it for, and do you play?"), so they answer two questions, not three. Speak their language from then on
+`guide`'s FIRST SESSION block is the one opening: follow it, and ask nothing of your own before their first sound
+(a recording is welcome, never required). Its first question carries whether they play or read music ("what is it
+for, and do you play?"), so they answer two questions, not three. Pass that answer, verbatim, to
+`guide(first_answer=...)`: it says whether to talk to them as a musician or in plain words, and you keep to it
 (`user-experience.md`).
 
 If `machine` says WAIT while you set up or render (an antivirus scan, an update), wait quietly: tell someone new

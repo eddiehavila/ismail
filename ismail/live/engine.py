@@ -2136,6 +2136,24 @@ class Engine:
             L.append(f"  automation points [bar, value]: {json.dumps(pts[-int(last):])}")
         return '\n'.join(L)
 
+    def cmd_onsets(self, ahead_s=12.0, behind_s=2.0, limit=400):
+        """The events placed to sound from behind_s ago to ahead_s ahead, one per rendered note group: {'t': track,
+        'b': its beat, 'l': its peak in dB}, earliest first, plus the clock. A visualizer plays them against its own
+        playback position (ledger:M160 phase 2, Nate 10-06 14:48: "representing every element of the song to the
+        rhythm ... synchronized with what's playing now on the stream")."""
+        with self.lock:
+            lo, hi = self.pos - int(float(behind_s) * SR), self.pos + int(float(ahead_s) * SR)
+            segs = [s for s in self.active if not s.dead and lo <= s.start <= hi] + \
+                   [q[2] for q in self.pending if not q[2].dead and lo <= q[0] <= hi]
+            now = self.beat(self.pos)
+        segs.sort(key=lambda s: s.start)
+        out = []
+        for s in segs[:int(limit)]:
+            head = s.y[:, :min(s.y.shape[1], SR // 10)]
+            pk = float(np.max(np.abs(head))) if head.size else 0.0
+            out.append({'t': s.track, 'b': round(self.beat(s.start), 3), 'l': round(20 * math.log10(pk + 1e-9), 1)})
+        return {'beat': round(now, 3), 'bpm': self.bpm, 'bpb': self.bpb, 'onsets': out}
+
     def cmd_status(self, deck=None):
         if deck is not None and deck not in self.decks:
             raise LiveError(f"no deck {deck!r}; decks: {list(self.decks) or 'none'}")
@@ -2392,7 +2410,7 @@ def serve(engine, port=0, idle_min=None):
            'cancel': engine.cmd_cancel, 'view': engine.cmd_view, 'listen': engine.cmd_listen_dump,
            'record': engine.cmd_record, 'stop': engine.cmd_stop, 'device': engine.cmd_device,
            'stream': engine.cmd_stream, 'map': engine.cmd_map, 'control': engine.cmd_control,
-           'controls': engine.cmd_controls}
+           'controls': engine.cmd_controls, 'onsets': engine.cmd_onsets}
 
     class H(BaseHTTPRequestHandler):
         def log_message(self, *a):
