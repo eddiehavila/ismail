@@ -592,3 +592,34 @@ def test_the_page_reacts_to_the_sets_own_notes(phone):
     P.phone_vibe(react={})
     assert get(base, '/api/state?since=0&wait=0')['onsets'] == []      # off: nothing sent
     assert 'react (a track' in P.phone_vibe(menu=True)
+
+
+def test_a_panel_takes_choices_checks_toggles_and_a_voice_reply(phone, monkeypatch):
+    ph, base, _ = phone
+    monkeypatch.setattr(S, 'stt', lambda audio, name: 'more like the second one but slower')
+    with pytest.raises(Exception) as e:
+        P.phone_panel_show(title='Next?', inputs=[{'id': 'x', 'kind': 'slider'}])
+    assert 'choice, check, toggle, text' in str(e.value)
+    out = P.phone_panel_show(panel_id='dj-1', title='Next section?', sender='dj',
+                             inputs=[{'id': 'tempo', 'kind': 'choice', 'label': 'Tempo', 'options': ['slower', 'same']},
+                                     {'id': 'parts', 'kind': 'check', 'options': ['bass', 'pads', 'arp']},
+                                     {'id': 'drop', 'kind': 'toggle', 'label': 'A drop'}])
+    assert 'shown: panel dj-1' in out
+    p = ph.view['panels'][-1]
+    assert p['buttons'] == ['Send'] and [x['kind'] for x in p['inputs']] == ['choice', 'check', 'toggle']
+    # said on the panel: it carries the panel and goes to the agent that sent it; the panel stays open
+    req = urllib.request.Request(base + '/api/voice?sid=&t=&panel=dj-1', data=b'\x1a' * 2000,
+                                 headers={'Content-Type': 'audio/webm'})
+    vid = json.loads(urllib.request.urlopen(req, timeout=5).read())['id']
+    for _ in range(50):
+        lines = json.loads(P.phone_listen('dj', since=0, wait=0))['lines']
+        if any(x['kind'] == 'voice_text' and x.get('id') == vid for x in lines):
+            break
+        time.sleep(0.1)
+    v = [x for x in lines if x.get('id') == vid]
+    assert all(x.get('panel') == 'dj-1' and x.get('for') == 'dj' for x in v) and len(v) == 2
+    assert any(x['id'] == 'dj-1' for x in ph.view['panels'])
+    post(base, '/api/answer', {'id': 'dj-1', 'answer': 'Send',
+                               'values': {'tempo': 'slower', 'parts': ['bass', 'arp'], 'drop': True}})
+    a = [x for x in json.loads(P.phone_listen('dj', since=0, wait=0))['lines'] if x['kind'] == 'answer'][-1]
+    assert a['values'] == {'tempo': 'slower', 'parts': ['bass', 'arp'], 'drop': True} and a['for'] == 'dj'

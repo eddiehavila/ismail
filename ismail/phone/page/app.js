@@ -349,6 +349,9 @@ const NOTE_QUIET_MS = 30000, NOTE_MAX_MS = 10 * 60000;
 function micStop(sendIt) {
   const r = talk.rec; if (!r) return;
   talk.rec = null; talk.toggle = false;
+  const onPanel = talk.panel; talk.panel = null;
+  const pb = document.getElementById('panelrec');
+  if (pb) { pb.classList.remove('on'); pb.textContent = sendIt ? 'Sent. Say more' : 'Say more'; }
   $('talk').classList.remove('on'); keyState('talk', sendIt ? 'sending' : 'mic', sendIt ? 'Sending' : 'Hold to talk', sendIt ? 'sending' : null); audio.volume = 1;
   $('talkhint').textContent = 'tap once for hands-free, tap again to send';
   meterStop();
@@ -357,9 +360,10 @@ function micStop(sendIt) {
   ev('note_end', { dur: Math.round(dur * 10) / 10, by: endBy, sent: !!sendIt });
   r.onstop = () => {
     const blob = new Blob(talk.chunks, { type: r.mimeType || 'audio/webm' });
-    if (sendIt && blob.size > 1500) upload(blob, talk.sid, talk.t, dur, endBy, talk.mic, Date.now());
+    if (sendIt && blob.size > 1500) upload(blob, talk.sid, talk.t, dur, endBy, talk.mic, Date.now(), onPanel);
     else if (sendIt) { toast('too short: hold a little longer'); keyState('talk', 'mic', 'Hold to talk'); }
     if (!micKeep) closeMic();
+    if (heldPanel) { heldPanel = false; renderPanel(); }      // a panel that came in while they talked shows now
   };
   r.stop();
 }
@@ -389,9 +393,10 @@ function meterStop() {
   [...$('meter').children].forEach((b) => b.classList.remove('lit'));
 }
 const pending = [];
-async function upload(blob, s, t, dur, endBy, mic, ended) {
+async function upload(blob, s, t, dur, endBy, mic, ended, panel) {
   const u = `api/voice?sid=${encodeURIComponent(s || '')}&t=${t == null ? '' : t}` + (dur ? `&dur=${dur.toFixed(1)}&end=${endBy || 'press'}` : '') +
-    (mic ? `&mic=${encodeURIComponent(mic)}` : '') + (ended ? `&ago=${((Date.now() - ended) / 1000).toFixed(2)}` : '');
+    (mic ? `&mic=${encodeURIComponent(mic)}` : '') + (ended ? `&ago=${((Date.now() - ended) / 1000).toFixed(2)}` : '') +
+    (panel ? `&panel=${encodeURIComponent(panel)}` : '');
   try {
     const r = await fetch(u, { method: 'POST', headers: { 'Content-Type': blob.type }, body: blob });
     const j = await r.json();
@@ -400,7 +405,7 @@ async function upload(blob, s, t, dur, endBy, mic, ended) {
     toast('sent'); buzz([30, 60, 30]); setTimeout(() => cue('sent'), 350);
     if (!talk.rec) { keyState('talk', 'sent', 'Sent', 'sent'); setTimeout(() => { if (!talk.rec) keyState('talk', 'mic', 'Hold to talk'); }, 1400); }
   } catch (e) {
-    pending.push([blob, s, t, dur, endBy, mic, ended]); toast('offline: the note waits and sends when you are back'); cue('error');
+    pending.push([blob, s, t, dur, endBy, mic, ended, panel]); toast('offline: the note waits and sends when you are back'); cue('error');
     if (!talk.rec) keyState('talk', 'blocked', 'Waiting to send');
   }
 }
@@ -698,12 +703,19 @@ function playClip(url, box) {
   a.onended = () => { box.classList.remove('playing'); clip.el = null; };
   a.play().catch(() => toast('could not play that clip'));
 }
-let shown = null;
+let shown = null, heldPanel = false;
 function renderPanel() {
   const ps = state.panels || [];
   const p = ps[ps.length - 1];
   if (!p) { if (shown) { $('sheet').classList.remove('show'); stopClip(); shown = null; } return; }
   if (shown === p.id) return;
+  // a new panel never covers a voice note being recorded (Nate 10-07 08:56: "Am I still recording right now? ... it
+  // was still recording geez"): no sound, no buzz, no sheet; the record key says one is waiting, and it opens when
+  // the note ends
+  if (talk.rec) {
+    if (!heldPanel) { heldPanel = true; $('talkhint').textContent = 'recording. A question is waiting: it opens when you send'; }
+    return;
+  }
   shown = p.id; buzz([80, 60, 80]); sound('panel'); ev('panel_open', { id: p.id, title: p.title || '' });
   const box = $('panel');
   let h = `<h2>${esc(p.title)}</h2>` + (p.text ? `<p>${esc(p.text)}</p>` : '') + (p.image ? `<img src="${esc(p.image)}">` : '');
@@ -716,12 +728,45 @@ function renderPanel() {
     h += `<div class="hint">Listening on</div><div class="chips" id="listenon">${['Earbuds', 'Headphones', 'Phone speaker', 'Speaker'].map((w) => `<button data-on="${w}" class="${w === dev ? 'sel' : ''}">${w}</button>`).join('')}</div>`;
     h += `<textarea id="examnote" placeholder="a note (optional)"></textarea><div class="btns"><button id="submit" style="font-weight:700">Submit</button></div>`;
   } else {
+    h += (p.inputs || []).map((x) => {
+      const lab = x.label ? `<div class="inlab">${esc(x.label)}</div>` : '';
+      if (x.kind === 'text') return lab + `<textarea data-in="${esc(x.id)}" data-kind="text">${esc(x.value || '')}</textarea>`;
+      if (x.kind === 'toggle') return `<div class="chips"><button data-in="${esc(x.id)}" data-kind="toggle" class="${x.value ? 'sel' : ''}">${esc(x.label || x.id)}: ${x.value ? 'on' : 'off'}</button></div>`;
+      const val = [].concat(x.value || []);
+      return lab + `<div class="chips" data-in="${esc(x.id)}" data-kind="${x.kind}">${(x.options || []).map((o) => `<button data-opt="${esc(o)}" class="${val.includes(o) ? 'sel' : ''}">${esc(o)}</button>`).join('')}</div>`;
+    }).join('');
     h += `<div class="btns">${(p.buttons || ['OK']).map((b) => `<button data-answer="${esc(b)}">${esc(b)}</button>`).join('')}</div>`;
   }
+  // every panel takes a voice reply too (Nate 10-07 08:52: "I felt like I should be able to say more"): tap to
+  // record, tap again to send; it reaches the agent that sent the panel, and the panel stays open
+  h += `<div class="btns"><button id="panelrec" class="rec">Say more</button></div>`;
   box.innerHTML = h;
+  box.querySelectorAll('[data-kind="toggle"]').forEach((b) => { b.onclick = () => {
+    const on = !b.classList.contains('sel'); b.classList.toggle('sel', on);
+    const x = (p.inputs || []).find((i) => i.id === b.dataset.in); b.textContent = `${(x && x.label) || b.dataset.in}: ${on ? 'on' : 'off'}`; }; });
+  box.querySelectorAll('.chips[data-kind="choice"], .chips[data-kind="check"]').forEach((g) => {
+    g.querySelectorAll('[data-opt]').forEach((b) => { b.onclick = () => {
+      if (g.dataset.kind === 'choice') g.querySelectorAll('[data-opt]').forEach((o) => { if (o !== b) o.classList.remove('sel'); });
+      b.classList.toggle('sel'); }; }); });
+  const values = () => {
+    const v = {};
+    box.querySelectorAll('[data-kind="text"]').forEach((t) => { v[t.dataset.in] = t.value; });
+    box.querySelectorAll('[data-kind="toggle"]').forEach((b) => { v[b.dataset.in] = b.classList.contains('sel'); });
+    box.querySelectorAll('.chips[data-kind="choice"]').forEach((g) => { const s = g.querySelector('.sel'); v[g.dataset.in] = s ? s.dataset.opt : null; });
+    box.querySelectorAll('.chips[data-kind="check"]').forEach((g) => { v[g.dataset.in] = [...g.querySelectorAll('.sel')].map((s) => s.dataset.opt); });
+    return v;
+  };
+  $('panelrec').onclick = async () => {
+    if (talk.rec && talk.panel === p.id) { micStop(true); return; }
+    if (talk.rec) { toast('finish the note you are recording first'); return; }
+    talk.panel = p.id; await micStart();
+    if (talk.rec) { talk.toggle = true; $('panelrec').classList.add('on'); $('panelrec').textContent = 'Recording: tap to send'; }
+    else talk.panel = null;
+  };
   $('sheet').classList.add('show');
   box.querySelectorAll('[data-answer]').forEach((b) => { b.onclick = async () => {
-    const j = await send('/api/answer', { id: p.id, answer: b.dataset.answer });
+    if (talk.rec && talk.panel === p.id) micStop(true);        // what they were saying goes too
+    const j = await send('/api/answer', { id: p.id, answer: b.dataset.answer, ...(p.inputs ? { values: values() } : {}) });
     if (j) { toast('sent: ' + b.dataset.answer); } } });
   box.querySelectorAll('.playclip').forEach((b) => { b.onclick = () => playClip(b.dataset.url, b.closest('.clip')); });
   box.querySelectorAll('[data-chip]').forEach((b) => { b.onclick = () => b.classList.toggle('sel'); });

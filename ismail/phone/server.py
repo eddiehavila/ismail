@@ -125,6 +125,26 @@ def now_iso(at=None):
     return t.isoformat(timespec='seconds')
 
 
+INPUT_KINDS = ('choice', 'check', 'toggle', 'text')
+
+
+def panel_inputs(inputs):
+    """A panel's inputs (ledger:M167, Nate 10-07: "checkboxes or toggles so that I could give more of a detailed
+    response"): [{id, kind: choice | check | toggle | text, label, options (choice and check), value}]."""
+    out = []
+    for i, x in enumerate(inputs):
+        if not isinstance(x, dict) or x.get('kind') not in INPUT_KINDS:
+            raise ValueError(f"inputs[{i}]: {{'id', 'kind': one of {', '.join(INPUT_KINDS)}, 'label', 'options' "
+                             f"(choice and check)}}, e.g. {{'id': 'tempo', 'kind': 'choice', 'label': 'Tempo', "
+                             f"'options': ['slower', 'same', 'faster']}}")
+        opts = [str(o) for o in (x.get('options') or [])]
+        if x['kind'] in ('choice', 'check') and not opts:
+            raise ValueError(f"inputs[{i}] ({x['kind']}): give 'options', the labels to pick from")
+        out.append({'id': str(x.get('id') or f'in{i + 1}'), 'kind': x['kind'], 'label': str(x.get('label') or ''),
+                    **({'options': opts} if opts else {}), **({'value': x['value']} if 'value' in x else {})})
+    return out
+
+
 def ffmpeg():
     return os.environ.get('ISMAIL_FFMPEG') or shutil.which('ffmpeg')
 
@@ -283,6 +303,7 @@ class Phone:
         self.overlay = collections.deque()         # spoken lines waiting to be mixed in (float32 stereo)
         self.sids = {}                             # stream session -> {pcm0, kbps, t, at}
         self.voice_q = collections.deque()
+        self.voice_panel = {}                      # voice id -> {panel, for}: a reply said on a panel
         self.voice_state = {}
         self.feeder = None
         threading.Thread(target=self._poll_engine, daemon=True).start()
@@ -702,6 +723,8 @@ class Phone:
         rec = self.post({'kind': 'voice', 'id': vid, 'file': str(f), 'state': 'transcribing', 'sid': sid,
                          'heard': heard, **({'ref': meta['ref']} if meta.get('ref') else {}), **(extra or {})})
         self.voice_state[vid] = 'queued'
+        if extra.get('panel'):
+            self.voice_panel[vid] = {k: extra[k] for k in ('panel', 'for') if k in extra}
         self.voice_q.append((vid, f, rec['heard'], sid))
         return rec
 
@@ -814,7 +837,7 @@ class Phone:
                 continue
             self.voice_q.popleft()
             self.voice_state.pop(vid, None)
-            self.post({'kind': 'voice_text', 'id': vid, 'text': text})
+            self.post({'kind': 'voice_text', 'id': vid, 'text': text, **self.voice_panel.pop(vid, {})})
             self.cmd('heard', ref=vid, text=text)
             if self.voice_command(text, vid, heard, sid) is None and ffmpeg():
                 try:                                         # a hum tells itself apart: no button (ledger:M163)
@@ -1033,9 +1056,13 @@ class Agent:
         return f"shown: panel {p['id']}" + (" (no answer yet; it arrives in the inbox as kind 'answer')" if wait else
                                              "; the answer arrives in the inbox as kind 'answer'")
 
-    def op_panel_show(self, panel_id=None, title='', text='', image=None, buttons=None, wait=0, who=None):
+    def op_panel_show(self, panel_id=None, title='', text='', image=None, buttons=None, inputs=None, wait=0,
+                      who=None):
         p = {'id': panel_id or 'p' + secrets.token_hex(3), 'kind': 'panel', 'title': title, 'text': text,
-             'buttons': [b if isinstance(b, str) else str(b) for b in (buttons or ['OK'])], 'who': who}
+             'buttons': [b if isinstance(b, str) else str(b) for b in (buttons or ['Send' if inputs else 'OK'])],
+             'who': who}
+        if inputs:
+            p['inputs'] = panel_inputs(inputs)
         if image:
             p['image'] = '/files/' + self.ph.offer_file(image)
         return self._panel(p, wait)
@@ -1454,6 +1481,10 @@ class Handler(BaseHTTPRequestHandler):
                     pass
                 if g('end') in ('press', 'quiet', 'max'):
                     extra['ended_by'] = g('end')                          # their press, 30 s of quiet, or 10 min
+                pp = next((x for x in ph.view['panels'] if x['id'] == g('panel')), None) if g('panel') else None
+                if pp:                                                    # said on a panel: a reply to whoever sent it
+                    extra.update(panel=pp['id'], panel_title=pp.get('title') or '', **({'for': pp['who']}
+                                                                                        if pp.get('who') else {}))
                 if g('mic'):
                     extra['mic'] = g('mic')[:80]                          # route and processing: 'phone raw ec0 ns0 agc0'
                 try:
@@ -1513,6 +1544,10 @@ class Handler(BaseHTTPRequestHandler):
                     rec['answers'] = body.get('answers') or {}
                 else:
                     rec['answer'] = body.get('answer')
+                    if p.get('inputs'):
+                        rec['values'] = body.get('values') or {}
+                if p.get('who'):
+                    rec['for'] = p['who']                                 # the agent that sent the panel
                 if p.get('answers_path'):
                     try:
                         ap = Path(p['answers_path'])

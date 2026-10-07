@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Phone panels: choices, checkboxes, toggles, a voice reply, and never over a voice note (ledger:M167)
+
+- `phone_panel_show(inputs=[...])`: choice (one of), check (any of), toggle and text inputs beside the buttons; the
+  answer carries `values` and `for` (the sender). Nate 10-07: "checkboxes or toggles so that I could give more of a
+  detailed response".
+- Every panel has "Say more": tap to record, tap to send; the note carries `panel` and `for`, so it reaches the agent
+  that sent the panel, and the panel stays open ("I felt like I should be able to say more").
+- A panel that arrives while a voice note records waits, silent, until the note is sent; the talk hint says one is
+  waiting (Nate 10-07 08:56: "Am I still recording right now? ... it was still recording geez").
+
 ### First session: the rest of ismail waits for its moment (ledger:M168)
 
 - guide's first-session block (step 8) and user-experience.md: the phone page, live play and the VR stage are each
