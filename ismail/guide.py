@@ -136,6 +136,12 @@ Their first try decides whether they come back. Run it this way, then the normal
    bars); change only that, quickly, and play before and after. A generator cannot do this.
 7. At the end: where their files are, what it took (minutes, renders), and one line on the depth: recreate a
    reference, build an instrument from recordings, play live, the VR stage.
+8. The rest waits for its moment, one feature at a time, one sentence, offered and never explained up front (not in
+   the opening, not in the first sketch): when they keep a sketch or say they like one, that they can hear it on
+   their phone and talk back while it plays (phone_start; reaching it away from home needs Tailscale, which you set
+   up if they want it); when they want to jam, perform or hear it change while it plays, live play; when they
+   mention a VR headset or want to see the music, the stage; when they step away while it plays, the phone again.
+   If they say no, don't offer that one again this session.
 Showcase voices (measured; voices_list marks them *):
 {showcase}"""
 

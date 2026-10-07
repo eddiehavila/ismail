@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### First session: the rest of ismail waits for its moment (ledger:M168)
+
+- guide's first-session block (step 8) and user-experience.md: the phone page, live play and the VR stage are each
+  offered in one sentence at the moment they answer something the person did (kept a sketch, wants to jam, has a
+  headset, steps away), never up front; a no holds for the session.
+
 ### Hum a part into a voice note (ledger:M163, the Live DJ's handoff 52)
 
 - The phone server keeps the last 150 s of the master in memory while an engine plays (page open or not), and every
