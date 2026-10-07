@@ -504,11 +504,15 @@ def bus_add(project: str, name: str, fx: list = None, volume_db: float = 0.0) ->
 # ------------------------------------------------------------------ instruments
 
 @op()
-def guide(project: str = None) -> str:
+def guide(project: str = None, first_answer: str = None) -> str:
     """Read this first: how to use this DAW as an agent (workflow, conventions, which tool for which question). For
-    a person who has made nothing with ismail yet it opens with how to run their first session."""
-    from .guide import GUIDE, FIRST_SESSION
+    a person who has made nothing with ismail yet it opens with how to run their first session. first_answer: the
+    person's first answer, verbatim; the reply is then only which words to use with them from now on (musician,
+    when they name an instrument they play, a style they trained in or reading music; otherwise plain words)."""
+    from .guide import GUIDE, FIRST_SESSION, vocabulary_text
     from . import sketch as SK
+    if first_answer is not None:
+        return vocabulary_text(first_answer)
     if SK.is_new(project):
         return FIRST_SESSION.format(marker=SK.marker_path(), showcase=SK.showcase_text()) + '\n\n' + GUIDE
     return GUIDE
