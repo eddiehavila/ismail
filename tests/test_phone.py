@@ -501,3 +501,94 @@ def test_a_pause_tap_stops_the_set_with_no_agent_awake(phone, monkeypatch):
     send('pause')                                                       # a second press within 15 s does nothing more
     time.sleep(0.3)
     assert stopped == ['D:/songs/x']
+
+
+def test_a_hum_tells_itself_apart_from_talk():
+    from ismail.phone import hum
+    sr = hum.SR
+    t = np.arange(int(sr * 0.5)) / sr
+    held = np.concatenate([0.3 * np.sin(2 * np.pi * f * t) for f in (220.0, 246.9, 261.6, 220.0)])
+    c = hum.check(held.astype(np.float32), 'Mmm.')
+    assert c['is_hum'] and c['voiced'] > 0.8 and c['note'].startswith(('A', 'B', 'C'))
+    tt = np.arange(int(sr * 2.0)) / sr                                  # a pitch that never holds, like speech
+    glide = 0.3 * np.sin(2 * np.pi * np.cumsum(180 + 80 * np.sin(2 * np.pi * 3 * tt)) / sr)
+    c = hum.check(glide.astype(np.float32), 'okay play the piano a bit louder now please')
+    assert not c['is_hum'] and 'words a second' in c['why']
+    assert hum.words('Mmm la la, play it') == ['play', 'it']
+
+
+def test_every_voice_note_keeps_the_music_under_it(phone, monkeypatch):
+    ph, base, _ = phone
+    import soundfile as sf
+    monkeypatch.setattr(S, 'KEEP_MASTER', False)                       # this test feeds the master itself
+    for _ in range(50):
+        if not (ph.feeder and ph.feeder.is_alive()):
+            break
+        time.sleep(0.1)
+    ph.sids['s1'] = {'pcm0': 0.0, 'kbps': 64, 't': 0.0, 'at': time.time()}
+    now = time.time()
+    with ph.cond:
+        ph.master.clear()
+        ph.timeline.clear()
+        for i in range(int(60 * S.SR / S.BLOCK)):                      # 60 s of streamed master, 2 beats a second
+            p = i * S.BLOCK / S.SR
+            ph.master.append((p, (np.full((S.BLOCK, 2), i % 100, dtype='<i2')).tobytes()))
+            ph.timeline.append((p, now - 60 + p, p * 2, 120.0, 4, 0.0))
+        ph.fed = int(60 * S.SR / S.BLOCK) * S.BLOCK
+    req = urllib.request.Request(base + '/api/voice?sid=s1&t=5.0&dur=3.0&end=press', data=b'\x1a' * 2000,
+                                 headers={'Content-Type': 'audio/webm;codecs=opus'})
+    r = json.loads(urllib.request.urlopen(req, timeout=5).read())
+    meta = json.loads((S.HOME / 'voice' / f"{r['id']}_meta.json").read_text(encoding='utf8'))
+    x, sr = sf.read(meta['ref'], dtype='int16')
+    assert sr == S.SR and abs(len(x) / sr - 8.0) < 0.05 and meta['ref_lead_s'] == 3.0   # 3 s before, 3 s note, 2 after
+    bj = json.loads(open(meta['ref_beats'], encoding='utf8').read())
+    assert bj['bpm'] == 120.0 and bj['note_starts_at_s'] == 3.0 and abs(bj['beats'][0][1] - 4.0) < 0.1
+    # off the stream (heard from the room speaker): the start is a guess from when the note arrived, searched wide
+    req = urllib.request.Request(base + '/api/voice?sid=&t=&dur=3.0&ago=0.5&mic=phone%20raw%20ec0%20ns0%20agc0',
+                                 data=b'' * 2000,
+                                 headers={'Content-Type': 'audio/webm'})
+    r = json.loads(urllib.request.urlopen(req, timeout=5).read())
+    meta = json.loads((S.HOME / 'voice' / f"{r['id']}_meta.json").read_text(encoding='utf8'))
+    bj = json.loads(open(meta['ref_beats'], encoding='utf8').read())
+    assert meta['start_is_guess'] and bj['search_s'] == S.REF_GUESS_S and meta['ref_lead_s'] == S.REF_GUESS_S
+    assert abs(meta['ref_s'] - (S.REF_GUESS_S + 3.5)) < 1.0         # the master runs out at "now"
+    assert meta['mic'] == 'phone raw ec0 ns0 agc0'                     # which route and processing, per note
+
+
+@pytest.mark.skipif(not S.ffmpeg(), reason='ffmpeg is not installed')
+def test_a_hummed_note_reaches_the_inbox_as_a_hum(phone, monkeypatch):
+    ph, base, _ = phone
+    import io
+    import soundfile as sf
+    monkeypatch.setattr(S, 'stt', lambda audio, name: 'Mmm.')
+    t = np.arange(int(16000 * 0.5)) / 16000
+    y = np.concatenate([0.3 * np.sin(2 * np.pi * f * t) for f in (196.0, 220.0, 246.9, 196.0)]).astype(np.float32)
+    buf = io.BytesIO()
+    sf.write(buf, y, 16000, format='WAV')
+    req = urllib.request.Request(base + '/api/voice?sid=&t=&dur=2.0', data=buf.getvalue(),
+                                 headers={'Content-Type': 'audio/wav'})
+    vid = json.loads(urllib.request.urlopen(req, timeout=5).read())['id']
+    for _ in range(100):
+        lines = json.loads(P.phone_listen('dj', since=0, wait=0))['lines']
+        if any(x['kind'] == 'hum' for x in lines):
+            break
+        time.sleep(0.1)
+    h = [x for x in lines if x['kind'] == 'hum']
+    assert h and h[0]['id'] == vid and h[0]['note'].startswith(('G', 'A'))
+    out = P.phone_hum()
+    assert f'voice note {vid}' in out and 'a HUM' in out and ('No music was saved' in out or 'a guess' in out)
+
+
+def test_the_page_reacts_to_the_sets_own_notes(phone):
+    """ledger:M160 phase 2: phone_vibe(react=) maps tracks to reactions; the onsets ride in the state only then."""
+    ph, base, _ = phone
+    out = P.phone_vibe(react={'kick': 'glow', 'qrq*': 'sparks', 'piano': {'do': 'drops', 'color': '#ffd27a'}})
+    assert 'notes: kick glow, qrq* sparks, piano drops' in out
+    ph.onsets = [{'t': 'kick', 'b': 12.0, 'l': -6.0}]
+    s = get(base, '/api/state?since=0&wait=0')
+    assert s['vibe']['react']['piano'] == {'do': 'drops', 'amount': 0.7, 'color': '#ffd27a'} and s['onsets']
+    with pytest.raises(Exception, match="'explode'"):
+        P.phone_vibe(react={'kick': 'explode'})
+    P.phone_vibe(react={})
+    assert get(base, '/api/state?since=0&wait=0')['onsets'] == []      # off: nothing sent
+    assert 'react (a track' in P.phone_vibe(menu=True)

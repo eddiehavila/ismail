@@ -28,7 +28,7 @@ EFFECTS = {
 }
 DEFAULT = {'ground': '#0e0d0b', 'ink': '#efe9dd', 'accent': 'hsl(293 68% 66%)', 'heading': 'archivo', 'image': None,
            'blur': 14, 'dim': 0.62, 'effect': 'none', 'intensity': 0.5, 'transition_ms': 1200, 'layers': None,
-           'hue_drift': 0.0}
+           'hue_drift': 0.0, 'react': None}
 # One layer of the background (ledger:M160, Nate 10-06 14:47: "way more creative control over the background"). Up to
 # MAX_LAYERS at once, drawn in order. Each value: (default, low, high); colours default to the vibe's ink or accent.
 LAYER = {'intensity': (0.5, 0.0, 1.0),      # how present it is overall
@@ -39,6 +39,14 @@ LAYER = {'intensity': (0.5, 0.0, 1.0),      # how present it is overall
          'opacity': (1.0, 0.0, 1.0)}        # the layer's alpha on top of its intensity
 BLENDS = {'normal': 'source-over', 'add': 'lighter', 'screen': 'screen', 'multiply': 'multiply', 'overlay': 'overlay'}
 MAX_LAYERS = 3
+# what a track's notes do on the page, each on the beat the phone hears it (ledger:M160 phase 2)
+REACTIONS = {'flash': 'the whole page lights in the colour for a moment (a stab, a crash)',
+             'glow': 'a glow swells from the floor (a kick, a sub)',
+             'burst': 'a burst of motes from a point (a clap, a snare)',
+             'sparks': 'a few quick sparks (hats, qraqeb, a shaker)',
+             'drops': 'a streak falls, a note from above (piano, a lead)',
+             'ring': 'a ring opens from the middle (a bell, a pad entering)'}
+MAX_REACT = 16
 PRESETS = {
     'default': {},
     'rain': {'ground': '#0b0f14', 'ink': '#e3e9ef', 'accent': 'hsl(205 70% 64%)', 'heading': 'fraunces',
@@ -119,6 +127,26 @@ def layer(x, i=0):
     return out
 
 
+def react_map(r):
+    """{track: 'glow'} or {track: {'do': 'glow', 'color': '#ff8844', 'amount': 0.8}} -> checked, or None. A track
+    name ending in '*' matches every track it starts."""
+    if not r:
+        return None
+    if not isinstance(r, dict) or len(r) > MAX_REACT:
+        raise ValueError(f"react: a dict of up to {MAX_REACT} tracks, e.g. {{'kick': 'glow', 'qrq*': 'sparks', "
+                         f"'piano': {{'do': 'drops', 'color': '#ffd27a'}}}}")
+    out = {}
+    for track, x in r.items():
+        x = {'do': x} if isinstance(x, str) else dict(x or {})
+        if x.get('do') not in REACTIONS:
+            raise ValueError(f"react[{track!r}]: {x.get('do')!r}: one of {', '.join(REACTIONS)}")
+        y = {'do': x['do'], 'amount': round(max(0.1, min(1.0, float(x.get('amount', 0.7)))), 2)}
+        if x.get('color'):
+            y['color'] = hexc(parse_color(x['color']))
+        out[str(track)[:40]] = y
+    return out
+
+
 def resolve(v):
     """A checked vibe and the CSS values the page sets. Raises ValueError saying what to change."""
     out = dict(DEFAULT, **{k: x for k, x in v.items() if k in DEFAULT})
@@ -147,6 +175,7 @@ def resolve(v):
         out['layers'] = [layer({'effect': out['effect'], 'intensity': out['intensity']})]
     out['effect'], out['intensity'] = out['layers'][0]['effect'], out['layers'][0]['intensity']
     out['hue_drift'] = round(max(-120.0, min(120.0, float(out.get('hue_drift') or 0.0))), 2)
+    out['react'] = react_map(out.get('react'))
     out['heading'] = head
     out['blur'] = max(0, min(40, int(out['blur'])))
     out['dim'] = round(max(0.2, min(0.9, float(out['dim']))), 2)
@@ -175,6 +204,7 @@ def describe(v):
           f"layers: " + '; '.join(f"{i + 1}. {describe_layer(x)}" for i, x in enumerate(ls)))
     return (f"vibe: ground {v['ground']}, ink {v['ink']}, accent {v['accent']}, heading {v['heading']}, {fx}"
             + (f", hue drift {v['hue_drift']:g} deg/min" if v.get('hue_drift') else '')
+            + (", notes: " + ', '.join(f"{t} {x['do']}" for t, x in v['react'].items()) if v.get('react') else '')
             + (f", art {v['image_name']} (blur {v['blur']} px, dim {v['dim']})" if v.get('image') else ', no art'))
 
 
@@ -183,4 +213,5 @@ def menu():
             + '; '.join(f"{k} ({d})" for k, d in EFFECTS.items())
             + f"\nlayers (up to {MAX_LAYERS}): effect, " + ', '.join(f"{k} {lo:g}-{hi:g} (default {d:g})"
                                                               for k, (d, lo, hi) in LAYER.items())
-            + ", color, color2, blend (" + ', '.join(BLENDS) + ")\nhue_drift: degrees a minute the colours turn")
+            + ", color, color2, blend (" + ', '.join(BLENDS) + ")\nhue_drift: degrees a minute the colours turn"
+            + "\nreact (a track's notes on the beat the phone hears): " + '; '.join(f"{k} ({d})" for k, d in REACTIONS.items()))
