@@ -16,6 +16,21 @@ Read it at the start of a session that works with a person, beside SKILL.md.
 - All of it stays on the machine (`songs/_user/`, `notes/feedback.md`). A quote or a number measured from the person
   goes public only after they say yes to exactly what would be published (development.md, the inclusion review).
 
+## Their first answer decides the words
+
+In a first session the first question carries "and do you play?" (guide's FIRST SESSION block). Their answer sets
+your vocabulary for the whole session, and `guide(first_answer=<their words, verbatim>)` says which:
+- **A musician**: they name an instrument they play, a style they trained in, or that they read music. Use their
+  words from then on: keys, voicings, "the left hand", stops and registrations for an organist, the pocket for a
+  drummer, bars and chord names. Ask what they would call a thing before you name it, and don't explain what they
+  already know. (Dress rehearsal 1, 2026-10-05: a trained organist who reads music, and nothing told the agent to
+  use her background.)
+- **Plain words** for everyone else: say what a thing does ("the low notes", "the part that comes back"), times in
+  minutes and seconds, no keys, chord numbers or Hz until they use them first.
+
+If they later say they play or read music, call `guide(first_answer=<those words>)` again and switch. Their words go
+into the lexicon as they come (below).
+
 ## The lexicon: their words, our terms
 
 A music culture lives in how its people talk about sound: "the pocket", "boxy", "too clean", "30% there", "muddy". Those words carry what the ear and eye noticed. An agent that keeps them, maps them to what ismail does, and

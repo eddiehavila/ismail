@@ -501,3 +501,18 @@ def test_a_pause_tap_stops_the_set_with_no_agent_awake(phone, monkeypatch):
     send('pause')                                                       # a second press within 15 s does nothing more
     time.sleep(0.3)
     assert stopped == ['D:/songs/x']
+
+
+def test_the_page_reacts_to_the_sets_own_notes(phone):
+    """ledger:M160 phase 2: phone_vibe(react=) maps tracks to reactions; the onsets ride in the state only then."""
+    ph, base, _ = phone
+    out = P.phone_vibe(react={'kick': 'glow', 'qrq*': 'sparks', 'piano': {'do': 'drops', 'color': '#ffd27a'}})
+    assert 'notes: kick glow, qrq* sparks, piano drops' in out
+    ph.onsets = [{'t': 'kick', 'b': 12.0, 'l': -6.0}]
+    s = get(base, '/api/state?since=0&wait=0')
+    assert s['vibe']['react']['piano'] == {'do': 'drops', 'amount': 0.7, 'color': '#ffd27a'} and s['onsets']
+    with pytest.raises(Exception, match="'explode'"):
+        P.phone_vibe(react={'kick': 'explode'})
+    P.phone_vibe(react={})
+    assert get(base, '/api/state?since=0&wait=0')['onsets'] == []      # off: nothing sent
+    assert 'react (a track' in P.phone_vibe(menu=True)
