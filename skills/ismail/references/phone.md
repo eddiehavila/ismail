@@ -130,7 +130,10 @@ accent 3:1) and refuses one that is not, saying what to change. `phone_vibe(menu
 For more than one effect, give `layers`: up to three, drawn in order, each with its own `speed`, `density`, `size`,
 `angle` (rain's slant), `opacity`, `color`/`color2` and `blend` (normal, add, screen, multiply, overlay), e.g.
 `layers=[{'effect': 'aurora', 'speed': 0.5}, {'effect': 'rain', 'density': 0.9, 'angle': 25, 'blend': 'add'}]`;
-`hue_drift` turns the colours a few degrees a minute. Land a look on the music: `at='bar:65'` puts it on bar 65 as
+`hue_drift` turns the colours a few degrees a minute. Let the set's own notes drive it: `react={'kick': 'glow',
+'qrq*': 'sparks', 'stab': 'flash', 'piano': 'drops'}` fires each track's reaction (flash, glow, burst, sparks,
+drops, ring) on every note, on the beat the phone hears it, from the engine's own schedule, so the page shows the
+arrangement, not a guess at the beat. Land a look on the music: `at='bar:65'` puts it on bar 65 as
 the phone hears it (the stream's delay included), `ramp_beats=` fades into it over that many beats, and each call
 with `at=` adds a move after the last one, so a drop flashes on its downbeat. `cancel_moves=True` drops them. Keep a
 look for a chapter with `save='gnawa_drop'` and bring it back with `scene='gnawa_drop'`.

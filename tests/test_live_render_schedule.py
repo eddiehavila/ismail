@@ -128,3 +128,15 @@ def test_a_big_queue_is_placed_over_several_passes_each_event_once(tmp_path):
     assert max(sizes) <= TICK_EVENTS and len(sizes) >= 3            # spread over passes, none over the cap
     placed = sorted(on for p in passes for on in p)
     assert len(placed) == 600 and all(placed.count(on) == 3 for on in set(placed))   # each event once
+
+
+def test_the_engine_lists_the_onsets_it_has_placed_for_a_visualizer(eng):
+    """ledger:M160 phase 2 (Nate 10-06 14:48): the page shows the set's own notes, on the beat it hears them."""
+    eng.cmd_queue([{'track': 'p', 'notes': '0 C4 1; 1 E4 1; 2 G4 1', 'bars': 1, 'at': 'bar:2'}])
+    for _ in range(3):
+        eng.tick()
+    got = eng.cmd_onsets(ahead_s=12)
+    assert got['bpm'] == 120 and got['bpb'] == 4
+    beats = [o['b'] for o in got['onsets'] if o['t'] == 'p']
+    assert beats[:3] == [4.0, 5.0, 6.0], got                     # bar 2 beats 1-3, earliest first
+    assert all(o['l'] < 0 for o in got['onsets'])
