@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### The phone page stays awake while the stream is down (ledger:M142)
+
+- After a server restart a page in a pocket never reconnected: a hidden page whose audio stops is frozen by
+  Android, so its retries never run. While the stream is down (an error, a restart notice, a stalled stream), the
+  page now plays a loop far under hearing (40 Hz at -80 dBFS) until the stream plays again. Needs a check on a
+  phone with the screen off.
+
 ### Spectrogram windows for eyes (ledger:M165 step 1, moved from vox)
 
 - `spectrogram(seconds=, f_lo=, f_hi=, ruler=, words=)` and `analysis.spectrogram_png(...)`: one sound on a fixed
